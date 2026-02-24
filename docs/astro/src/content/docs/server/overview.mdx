@@ -1,0 +1,62 @@
+---
+title: Server overview
+description: Run tinfer as a gRPC or WebSocket server on top of AsyncStreamingTTS and choose the right transport for your client.
+---
+
+The server layer exposes tinfer's streaming TTS over two transports: **gRPC** and **WebSocket**. Both use the same underlying [AsyncStreamingTTS](/api/async-streaming-tts) engine; only the protocol and client ergonomics differ.
+
+## When to use which
+
+| Transport | Use when |
+| --------- | -------- |
+| **gRPC** | You want strong typing, generated client stubs, and streaming RPCs (unary, server streaming, or bidirectional). Suited for backend-to-backend or native clients. |
+| **WebSocket** | You need a browser-friendly or HTTP-oriented client, or you want ElevenLabs-compatible clients to work with tinfer as a drop-in. |
+
+## Running the servers
+
+You load a model and wrap the engine in `AsyncStreamingTTS`, then start either server (or both in the same process).
+
+**gRPC server** (default port 50051):
+
+```python
+from tinfer.core.engine import StreamingTTS
+from tinfer.core.async_engine import AsyncStreamingTTS
+from tinfer.config.engine_config import StreamingTTSConfig
+from tinfer.server.grpc.server import GRPCServer
+
+config = StreamingTTSConfig()
+tts = StreamingTTS(config)
+tts.load_model("styletts2", str(model_path), voices_folder=voices_folder)
+tts.warmup(["styletts2"], ["any"])
+
+async_tts = AsyncStreamingTTS(tts)
+server = GRPCServer(async_tts, port=50051)
+await server.start()
+await server.serve()
+```
+
+**WebSocket server** (default port 8000):
+
+```python
+from tinfer.core.engine import StreamingTTS
+from tinfer.core.async_engine import AsyncStreamingTTS
+from tinfer.config.engine_config import StreamingTTSConfig
+from tinfer.server.websocket import WebSocketServer
+
+config = StreamingTTSConfig()
+tts = StreamingTTS(config)
+tts.load_model("styletts2", str(model_path), voices_folder=voices_folder)
+tts.warmup(["styletts2"], ["any"])
+
+async_tts = AsyncStreamingTTS(tts)
+server = WebSocketServer(async_tts, host="0.0.0.0", port=8000)
+await server.start()
+await server.serve()
+```
+
+Full runnable examples are in the repo: `examples/grpc_server.py` and `examples/websocket_server.py`.
+
+## Next steps
+
+- [gRPC API](/server/grpc) — Endpoint, RPCs, messages, and client/server snippets.
+- [WebSocket API](/server/websocket) — Endpoint, query params, message protocol, and examples.

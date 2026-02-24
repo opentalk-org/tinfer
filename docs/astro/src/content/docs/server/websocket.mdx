@@ -1,0 +1,136 @@
+---
+title: WebSocket API
+description: Tinfer WebSocket endpoint, query parameters, message protocol, and how to run the server or connect from a client.
+---
+
+The WebSocket server exposes streaming TTS at a single path. Default port is **8000**.
+
+## Endpoint
+
+```
+ws://host:port/v1/text-to-speech/{voice_id}/stream-input
+```
+
+- **Path parameter:** `voice_id` — Voice to use for synthesis.
+- **Query parameters:** See below.
+
+Example: `ws://localhost:8000/v1/text-to-speech/any/stream-input?model_id=styletts2&output_format=mp3_44100_32`
+
+## Query parameters
+
+| Parameter | Type | Default | Description |
+| --------- | ---- | ------- | ------------ |
+| `model_id` | string | `styletts2` | TTS model id. |
+| `output_format` | string | `mp3_44100_32` | Audio encoding and sample rate (see supported formats below). |
+| `language_code` | string | — | Parsed but not enforced; model default is used. |
+| `sync_alignment` | boolean | `false` | If `true`, enable character-level alignment in responses. |
+| `auto_mode` | boolean | `false` | Parsed; generation uses tinfer's default streaming behavior. |
+| `inactivity_timeout` | integer | `20` | Close connection after this many seconds with no activity. |
+| `enable_logging` | boolean | `true` | Server-side logging. |
+| `enable_ssml_parsing` | boolean | `false` | Parsed; SSML is not processed, text is sent as-is. |
+
+**Supported `output_format` values:** MP3 (e.g. `mp3_44100_32`, `mp3_22050_32`), PCM (`pcm_8000`, `pcm_16000`, `pcm_22050`, `pcm_24000`, `pcm_44100`), μ-law/ A-law (`ulaw_8000`, `alaw_8000`), Opus (e.g. `opus_48000_32`).
+
+## Parameter mapping to tinfer
+
+The server builds the stream using tinfer’s [stream-level parameters](/concepts/parameters): **model_id** and **voice_id** from the path/query; **output_format** becomes **target_sample_rate** and **target_encoding**; **sync_alignment** becomes **alignment_type** (CHAR if true, NONE otherwise). The first message’s **generation_config.chunk_length_schedule** is passed as **chunk_length_schedule**. **voice_settings** and model-specific options (**tts_params**, e.g. StyleTTS2’s alpha, speed) are not currently configurable via the WebSocket API.
+
+## Message protocol
+
+All messages are JSON text frames.
+
+### Client → server
+
+**First message (config, required)**  
+The first message must contain configuration. The server creates a stream from it. You may include initial text in the same message.
+
+- `text` (optional) — Initial text to synthesize. Can be empty or a space.
+- `voice_settings` (optional) — Object; parsed but not mapped to tinfer (e.g. stability, similarity_boost, speed are ignored).
+- `generation_config` (optional) — Object. `chunk_length_schedule` (array of ints) is supported and maps to tinfer's chunk schedule.
+
+**Later messages (text)**  
+After config, send text messages:
+
+- `text` — Chunk to append. Empty string can signal completion and flush remaining audio.
+- `try_trigger_generation` (optional) — If true, trigger generation for the current buffer.
+- `flush` (optional) — If true, trigger generation.
+
+Example config message:
+
+```json
+{
+  "text": " ",
+  "voice_settings": {},
+  "generation_config": { "chunk_length_schedule": [120, 160, 250, 290] }
+}
+```
+
+Example text message:
+
+```json
+{
+  "text": "Hello, world. ",
+  "try_trigger_generation": false
+}
+```
+
+### Server → client
+
+- **Audio:** JSON with `audio` (base64-encoded audio). When `sync_alignment=true`, also `normalizedAlignment` and `alignment` (character-level timing: `chars`, `charStartTimesMs`, `charDurationsMs`).
+- **Error:** JSON with `error` (string). Inference failures during synthesis are sent as such an `error` message and the connection may then be closed. See [Error handling](/concepts/errors).
+- **End of stream:** JSON with `isFinal: true` when the server has sent all audio for the current session.
+
+## Alignments
+
+By default the server does not send alignment data. Set query parameter `sync_alignment=true` to receive character-level alignment in each audio message. Format matches the WebSocket alignment shape.
+
+## Client example
+
+```python
+import asyncio
+import json
+import websockets
+
+async def synthesize():
+    uri = "ws://localhost:8000/v1/text-to-speech/any/stream-input?model_id=styletts2&output_format=pcm_24000"
+    async with websockets.connect(uri) as ws:
+        await ws.send(json.dumps({
+            "voice_settings": {},
+            "generation_config": {"chunk_length_schedule": [120, 160, 250, 290]},
+            "text": "Hello, this is a test.",
+        }))
+        await ws.send(json.dumps({"text": ""}))
+        chunks = []
+        async for message in ws:
+            data = json.loads(message)
+            if "error" in data:
+                raise RuntimeError(data["error"])
+            if data.get("isFinal"):
+                break
+            if "audio" in data:
+                chunks.append(data["audio"])
+        return chunks
+```
+
+## Server startup
+
+```python
+from tinfer.core.engine import StreamingTTS
+from tinfer.core.async_engine import AsyncStreamingTTS
+from tinfer.config.engine_config import StreamingTTSConfig
+from tinfer.server.websocket import WebSocketServer
+
+config = StreamingTTSConfig()
+tts = StreamingTTS(config)
+tts.load_model("styletts2", str(model_path), voices_folder=voices_folder)
+tts.warmup(["styletts2"], ["any"])
+
+async_tts = AsyncStreamingTTS(tts)
+server = WebSocketServer(async_tts, host="0.0.0.0", port=8000)
+await server.start()
+await server.serve()
+```
+
+## ElevenLabs compatibility
+
+The API is protocol-compatible with the ElevenLabs streaming TTS WebSocket. Unsupported parameters are parsed and ignored.

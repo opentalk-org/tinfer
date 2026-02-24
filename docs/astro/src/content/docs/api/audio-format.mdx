@@ -1,0 +1,31 @@
+---
+title: AudioFormat
+description: Supported output encodings and sample rates for TTS. Pass target_encoding in stream params to request encoded output.
+---
+
+**AudioFormat** is an enum of supported audio output formats. You use it when you want the engine to return encoded audio (e.g. MP3 or Opus) or a specific sample rate (e.g. PCM at 8 kHz) instead of raw float32 at the model’s native rate.
+
+## Where it is used
+
+Pass **target_encoding** in the **params** dict when creating a stream or calling **generate_full**:
+
+```python
+from tinfer.utils.audio_encoder import AudioFormat
+
+params = {"target_encoding": AudioFormat.MP3_44100_64}
+audio_chunk = tts.generate_full(model_id, voice_id, text, params)
+```
+
+You can also pass a string (e.g. `"mp3_44100_64"`); the engine uses **parse_output_format** to resolve it to an **AudioFormat**. **target_sample_rate** can be passed as an integer in **params** when you need a specific sample rate without changing codec.
+
+## Values
+
+**MP3:** `MP3_22050_32`, `MP3_44100_32`, `MP3_44100_64`, `MP3_44100_96`, `MP3_44100_128`, `MP3_44100_192` (sample rate and kbps in the name).
+
+**PCM:** `PCM_8000`, `PCM_16000`, `PCM_22050`, `PCM_24000`, `PCM_44100`.
+
+**Other:** `ULAW_8000`, `ALAW_8000`.
+
+**Opus:** `OPUS_48000_32`, `OPUS_48000_64`, `OPUS_48000_96`, `OPUS_48000_128`, `OPUS_48000_192`.
+
+When **target_encoding** is set, the returned **AudioChunk** may carry encoded bytes or the engine may write encoded output elsewhere; behavior is implementation-dependent. When not set, you get float32 PCM at the model’s sample rate.

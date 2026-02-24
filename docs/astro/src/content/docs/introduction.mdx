@@ -1,0 +1,34 @@
+---
+title: Introduction
+description: Tinfer is a streaming text-to-speech engine for Python. This page gives an overview and points you to the quickstart and API reference.
+---
+
+Tinfer is a Python library that provides a **streaming text-to-speech (TTS) engine**. You load one or more TTS models, create streams for synthesis requests, feed text incrementally, and receive audio chunks as they are produced.
+
+## What you can do
+
+- **Synchronous synthesis:** Send full text and get back a single merged audio result (`generate_full`) or a batch of results (`generate_full_batch`).
+- **Streaming synthesis (server streaming):** Send full text and config once; receive a stream of audio chunks as they are generated—either wait for chunks with `get_audio()` (sync) or iterate with `async for chunk in stream.pull_audio()` (async). Generation can be triggered by text length, a timeout, or an explicit `force_generate()`.
+- **Bidirectional synthesis:** Keep one connection open: send initial setup (model, voice, output format), then send text as it becomes available and optionally signal “flush” to trigger synthesis; the server streams audio back as soon as it is ready. Ideal when text arrives over time (e.g. user typing, LLM tokens, or live captions). Exposed via the WebSocket API or gRPC **SynthesizeIncremental**.
+- **Alignments:** Request word-, character-, or phoneme-level timing so you can know what was already generated.
+- **Multiple models:** Load several models and voices; select which one to use for each request via `model_id` and `voice_id`.
+- **Multi-GPU:** Run on multiple GPUs, each with separate configuration (maximum batch size).
+
+## Main types
+
+| Type | Description |
+|------|-------------|
+| **StreamingTTS** | Sync engine. You configure it via `from_config`, load or register models with `load_model` / `register_model` / `unload_model`, then create streams with `create_stream` or get full audio with `generate_full` / `generate_full_batch`. Use `run`, `warmup`, and `stop` for lifecycle. |
+| **AsyncStreamingTTS** | Wrapper around a `StreamingTTS` instance. Same model APIs; for synthesis you use `create_stream` (sync), `generate()` for an async iterator of chunks, or `generate_full()` for a single merged result. Lifecycle: `warmup`, `stop`. |
+| **TTSStream** | Handle for one streaming request. You feed text with `add_text`, optionally call `force_generate`, then consume chunks via `get_audio()` (sync) or `pull_audio()` (async). When done, call `close`; use `cancel` to abort all provided text by `add_text`. |
+| **AudioChunk** | One piece of output: float32 audio array, sample rate, optional alignments, and metadata. |
+| **Alignment** / **AlignmentItem** | Text–audio timing: which span of characters (or words/phonemes) corresponds to which time range in ms. |
+
+Default generation configuration is done with **StreamingTTSConfig**; you can also pass per-request options (e.g. `alignment_type`, `target_encoding`) when creating a stream or calling generation.
+
+## Next steps
+
+- [Quickstart](/quickstart) — Install tinfer and run a minimal example that loads a model and synthesizes to a WAV file.
+- [Streaming and triggers](/concepts/streaming) — How streaming works and when synthesis runs.
+- [Alignments](/concepts/alignments) — Requesting and using word/character/phoneme timing.
+- [API reference](/api/streaming-tts) — Full details on `StreamingTTS`, `AsyncStreamingTTS`, `TTSStream`, `AudioChunk`, alignment types, and config.

@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tinfer TTS stream</title>
+  <style>
+    body { font: 1rem/1.5 system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; }
+    textarea { width: 100%; min-height: 8rem; resize: vertical; box-sizing: border-box; padding: 0.5rem; }
+    #highlight-container { width: 100%; min-height: 4rem; padding: 0.5rem; margin-top: 0.5rem; box-sizing: border-box; border: 1px solid #ccc; background: #fafafa; white-space: pre-wrap; word-wrap: break-word; }
+    #highlight-container .char { transition: background-color 0.05s ease; }
+    #highlight-container .char.spoken { background-color: rgba(0,120,215,0.25); color: #333; }
+    #highlight-container .char.current { background-color: rgba(0,120,215,0.55); color: #000; }
+    #status { margin-top: 0.5rem; color: #666; font-size: 0.875rem; }
+    #status.error { color: #c00; }
+  </style>
+</head>
+<body>
+  <label style="display:block; margin-bottom: 0.25rem; font-size: 0.875rem;">Server (host:port)</label>
+  <input type="text" id="server" value="localhost:8000" style="width: 100%; max-width: 14rem; padding: 0.35rem 0.5rem; margin-bottom: 0.75rem; box-sizing: border-box;">
+  <label style="display:block; margin-bottom: 0.25rem; font-size: 0.875rem;">Model ID</label>
+  <input type="text" id="model-id" value="styletts2" style="width: 100%; max-width: 14rem; padding: 0.35rem 0.5rem; margin-bottom: 0.75rem; box-sizing: border-box;">
+  <label style="display:block; margin-bottom: 0.25rem; font-size: 0.875rem;">Voice ID</label>
+  <input type="text" id="voice-id" value="any" style="width: 100%; max-width: 14rem; padding: 0.35rem 0.5rem; margin-bottom: 0.75rem; box-sizing: border-box;">
+  <textarea id="text" placeholder="Type text to speak…"></textarea>
+  <button type="button" id="say-btn" style="margin-top: 0.5rem; padding: 0.5rem 1rem;">Say</button>
+  <div id="highlight-container" aria-live="polite"></div>
+  <div id="status">Idle</div>
+  <script>
+(function () {
+  const REMOVAL_TICK_MS = 50;
+
+  const serverInput = document.getElementById("server");
+  const modelIdInput = document.getElementById("model-id");
+  const voiceIdInput = document.getElementById("voice-id");
+  const textbox = document.getElementById("text");
+  const highlightContainer = document.getElementById("highlight-container");
+  const statusEl = document.getElementById("status");
+  let charSpans = [];
+
+  function getWsBaseUrl() {
+    const raw = (serverInput && serverInput.value.trim()) || "localhost:8000";
+    const host = raw.indexOf(":") >= 0 ? raw : raw + ":8000";
+    return "ws://" + host.replace(/^\/\//, "").replace(/^ws:\/\//, "");
+  }
+
+  let sentText = "";
+  let spokenCount = 0;
+  let ws = null;
+  let audioContext = null;
+  let removalIntervalId = null;
+  let streamStartTime = 0;
+  let charTimeline = [];
+  let decodedQueue = [];
+  let totalDurationMs = 0;
+  let streamDone = false;
+  let currentSource = null;
+
+  function setStatus(msg, isError) {
+    statusEl.textContent = msg;
+    statusEl.classList.toggle("error", !!isError);
+  }
+
+  const OUTPUT_FORMAT = "pcm_44100";
+  const PCM_SAMPLE_RATE = 44100;
+
+  function base64ToArrayBuffer(base64) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
+  }
+
+  function pcmInt16ToAudioBuffer(ctx, arrayBuffer, sampleRate) {
+    const bytes = new Uint8Array(arrayBuffer);
+    const numSamples = (bytes.length / 2) | 0;
+    if (numSamples === 0) return null;
+    const buffer = ctx.createBuffer(1, numSamples, sampleRate);
+    const channel = buffer.getChannelData(0);
+    const view = new DataView(arrayBuffer);
+    for (let i = 0; i < numSamples; i++) {
+      const s = view.getInt16(i * 2, true);
+      channel[i] = s / 32768;
+    }
+    return buffer;
+  }
+
+  function cancelStream() {
+    if (ws) {
+      try { ws.close(); } catch (_) {}
+      ws = null;
+    }
+    if (currentSource) {
+      try { currentSource.stop(); } catch (_) {}
+      currentSource = null;
+    }
+    if (removalIntervalId) {
+      clearInterval(removalIntervalId);
+      removalIntervalId = null;
+    }
+    decodedQueue = [];
+    charTimeline = [];
+    totalDurationMs = 0;
+    streamDone = false;
+    charSpans = [];
+  }
+
+  function buildHighlightDisplay(text) {
+    highlightContainer.textContent = "";
+    charSpans = [];
+    for (let i = 0; i < text.length; i++) {
+      const span = document.createElement("span");
+      span.className = "char";
+      span.textContent = text[i];
+      span.setAttribute("data-i", String(i));
+      charSpans.push(span);
+      highlightContainer.appendChild(span);
+    }
+  }
+
+  function updateHighlight() {
+    if (!audioContext || charTimeline.length === 0) return;
+    const elapsedMs = (audioContext.currentTime - streamStartTime) * 1000;
+    let spoken = 0;
+    let current = -1;
+    for (let i = 0; i < charTimeline.length; i++) {
+      const t = charTimeline[i];
+      if (elapsedMs >= t.endMs) spoken = i + 1;
+      else if (elapsedMs >= t.startMs && elapsedMs < t.endMs) {
+        current = i;
+        break;
+      }
+    }
+    if (current < 0 && spoken < charTimeline.length) current = spoken;
+    for (let i = 0; i < charSpans.length; i++) {
+      const span = charSpans[i];
+      span.classList.remove("spoken", "current");
+      if (i < spoken) span.classList.add("spoken");
+      else if (i === current) span.classList.add("current");
+    }
+  }
+
+  function syncHighlightToAudio() {
+    updateHighlight();
+  }
+
+  function playNextInQueue() {
+    if (decodedQueue.length === 0) {
+      if (streamDone && removalIntervalId) {
+        clearInterval(removalIntervalId);
+        removalIntervalId = null;
+        setStatus("Idle");
+        if (ws) {
+          try { ws.close(); } catch (_) {}
+          ws = null;
+        }
+      }
+      return;
+    }
+    const { buffer, chars, charStartTimesMs, charDurationsMs } = decodedQueue.shift();
+    const chunkStartMs = totalDurationMs;
+    totalDurationMs += buffer.duration * 1000;
+    for (let i = 0; i < chars.length; i++) {
+      const startMs = chunkStartMs + (charStartTimesMs[i] || 0);
+      const endMs = startMs + (charDurationsMs[i] || 0);
+      charTimeline.push({ startMs, endMs });
+    }
+    const src = audioContext.createBufferSource();
+    src.buffer = buffer;
+    src.connect(audioContext.destination);
+    src.onended = () => {
+      currentSource = null;
+      playNextInQueue();
+    };
+    currentSource = src;
+    src.start(audioContext.currentTime);
+    if (!removalIntervalId) {
+      removalIntervalId = setInterval(syncHighlightToAudio, REMOVAL_TICK_MS);
+    }
+  }
+
+  function pushDecodedAndMaybePlay(buffer, chars, charStartTimesMs, charDurationsMs) {
+    decodedQueue.push({
+      buffer,
+      chars,
+      charStartTimesMs,
+      charDurationsMs,
+    });
+    if (decodedQueue.length === 1 && !currentSource) {
+      playNextInQueue();
+    }
+  }
+
+  function enqueueAndPlay(audioBase64, normalizedAlignment) {
+    const chars = normalizedAlignment && normalizedAlignment.chars ? normalizedAlignment.chars : [];
+    const charStartTimesMs = normalizedAlignment && normalizedAlignment.charStartTimesMs ? normalizedAlignment.charStartTimesMs : [];
+    const charDurationsMs = normalizedAlignment && normalizedAlignment.charDurationsMs ? normalizedAlignment.charDurationsMs : [];
+    const arrayBuffer = base64ToArrayBuffer(audioBase64);
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      streamStartTime = audioContext.currentTime;
+    }
+    try {
+      const buffer = pcmInt16ToAudioBuffer(audioContext, arrayBuffer, PCM_SAMPLE_RATE);
+      if (buffer) pushDecodedAndMaybePlay(buffer, chars, charStartTimesMs, charDurationsMs);
+    } catch (e) {
+      setStatus("Decode error: " + (e && e.message ? e.message : "PCM failed"), true);
+    }
+  }
+
+  function sayText() {
+    cancelStream();
+    const text = textbox.value;
+    if (!text.trim()) {
+      sentText = "";
+      spokenCount = 0;
+      charSpans = [];
+      highlightContainer.textContent = "";
+      setStatus("Idle");
+      return;
+    }
+    sentText = text.trim();
+    spokenCount = 0;
+    buildHighlightDisplay(sentText);
+    updateHighlight();
+    const modelId = (modelIdInput && modelIdInput.value.trim()) || "styletts2";
+    const voiceId = (voiceIdInput && voiceIdInput.value.trim()) || "any";
+    const params = new URLSearchParams({
+      model_id: modelId,
+      output_format: OUTPUT_FORMAT,
+      sync_alignment: "true",
+    });
+    const base = getWsBaseUrl();
+    const url = `${base}/v1/text-to-speech/${voiceId}/stream-input?${params}`;
+    setStatus("Connecting…");
+    ws = new WebSocket(url);
+    ws.onopen = function () {
+      setStatus("Sending…");
+      ws.send(JSON.stringify({
+        text: sentText,
+        voice_settings: {},
+        generation_config: { chunk_length_schedule: [120, 160, 250, 290] },
+      }));
+      ws.send(JSON.stringify({ text: "" }));
+    };
+    ws.onmessage = function (event) {
+      let data;
+      try {
+        data = JSON.parse(event.data);
+      } catch (_) {
+        return;
+      }
+      if (data.error) {
+        setStatus("Error: " + data.error, true);
+        cancelStream();
+        return;
+      }
+      if (data.isFinal) {
+        streamDone = true;
+        if (ws) {
+          try { ws.close(); } catch (_) {}
+          ws = null;
+        }
+        if (decodedQueue.length === 0 && !currentSource) {
+          if (removalIntervalId) {
+            clearInterval(removalIntervalId);
+            removalIntervalId = null;
+          }
+          setStatus("Idle");
+        }
+        return;
+      }
+      if (data.audio) {
+        setStatus("Playing");
+        const alignment = data.normalizedAlignment || data.alignment;
+        enqueueAndPlay(data.audio, alignment);
+      }
+    };
+    ws.onclose = function (ev) {
+      const wasOpen = ev.wasClean || ev.code === 1000;
+      ws = null;
+      if (!streamDone || currentSource || decodedQueue.length > 0) return;
+      if (!wasOpen && ev.code !== 1000) {
+        setStatus("Connection failed. Is the TTS server running at " + base + "?", true);
+      } else {
+        setStatus("Idle");
+      }
+    };
+    ws.onerror = function () {
+      setStatus("Connection failed. Is the TTS server running at " + base + "?", true);
+    };
+  }
+
+  document.getElementById("say-btn").addEventListener("click", sayText);
+})();
+  </script>
+</body>
+</html>

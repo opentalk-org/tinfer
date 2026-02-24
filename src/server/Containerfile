@@ -1,0 +1,27 @@
+FROM pytorch/pytorch:2.10.0-cuda13.0-cudnn9-runtime
+# TODO: check what version is most commonly used.
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    espeak-ng \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir /tinfer
+
+COPY tinfer /tinfer
+COPY server /app
+
+RUN python -m venv /venv
+RUN /venv/bin/pip install --upgrade pip
+
+RUN /venv/bin/pip install /tinfer
+
+EXPOSE ${TINFER_GRPC_PORT}
+EXPOSE ${TINFER_WEBSOCKETS_PORT}
+
+
+# replace with daphne later
+CMD ["python", "main.py"] 

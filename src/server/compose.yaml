@@ -1,0 +1,19 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: server/Containerfile
+    ports:
+      - "8080:8080"
+      - "50051:50051"
+    volumes:
+      - ./converted_models:/app/converted_models
+      - ./voices:/app/voices
+
+    environment:
+      - TINFER_MODELS_DIR=${TINFER_MODELS_DIR}
+      - TINFER_HOST=${TINFER_HOST}
+      - TINFER_WEBSOCKET_PORT=${TINFER_WEBSOCKET_PORT}
+      - TINFER_GRPC_PORT=${TINFER_GRPC_PORT}
+      - USE_WEBSOCKET=${USE_WEBSOCKET}
+      - USE_GRPC=${USE_GRPC}

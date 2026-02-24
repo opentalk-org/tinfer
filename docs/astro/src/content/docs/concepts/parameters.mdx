@@ -1,0 +1,57 @@
+---
+title: Parameters reference
+description: "Where parameters live: engine defaults, per-stream overrides, and model-specific options. Full list of stream-level and config keys."
+---
+
+Parameters that control synthesis come from three places:
+
+1. **Engine defaults** — Set once on [StreamingTTSConfig](/api/streaming-tts-config) and applied to every new stream unless overridden.
+2. **Per-stream overrides** — Passed in the `params` dict to `create_stream(model_id, voice_id, params)` or `generate_full(..., params)`. They override the config defaults for that stream only.
+3. **Model-specific** — Options that only a given model understands (e.g. StyleTTS2). Passed inside `params["tts_params"]`. See [StyleTTS2 parameters](/api/styletts2-params).
+
+## Stream-level parameters
+
+These can be set as **defaults** on StreamingTTSConfig (where applicable) and overridden **per stream** via the `params` dict.
+
+| Parameter (in `params`) | Type | Default source | Description |
+| ----------------------- | ---- | ----------------- | ----------- |
+| **chunk_length_schedule** | `list[int]` | `default_chunk_schedule` | Max character counts per chunk index. When pending text length exceeds the current value, generation is triggered. |
+| **min_chunk_length_schedule** | `list[int]` | `default_min_chunk_schedule` | Minimum chunk sizes used by the chunking algorithm. Used mostly for time generation trigger |
+| **min_chars_trigger** | `int` | `min_chars_trigger` | Generation does not run until pending text has at least this many characters. If text length is below this threshold, even `force_generate()` won't generate audio. (SETTING IT BELOW 10 can cause unexpected errors.) |
+| **timeout_trigger_ms** | `float` | `default_timeout_ms` | After this many milliseconds since the last commit (or first text), generation is triggered if there is enough pending text (above min_chunk_length_schedule). |
+| **alignment_type** | **AlignmentType** | `default_alignment_type` | Alignment granularity for this stream (e.g. `AlignmentType.WORD`, `AlignmentType.CHAR`, `AlignmentType.NONE`). See [Alignments](/concepts/alignments). |
+| **target_sample_rate** | `int` or `None` | Per-request only | Desired output sample rate. Not in config; pass in `params` when creating a stream. |
+| **target_encoding** | **AudioFormat** or `str` or `None` | Per-request only | Desired output encoding (e.g. PCM, MP3). Not in config; pass in `params`. See [AudioFormat](/api/audio-format). |
+| **tts_params** | `dict` | — | Model-specific options. For StyleTTS2, see [StyleTTS2 parameters](/api/styletts2-params). |
+
+Config field names use a `default_` prefix (e.g. `default_chunk_schedule`); the per-stream key is the name you use in `params` (e.g. `chunk_length_schedule`). **target_sample_rate** and **target_encoding** have no config default and must be set per stream when you need a specific rate or encoding.
+
+## Where to set them
+
+- **StreamingTTSConfig** — [StreamingTTSConfig](/api/streaming-tts-config) documents all config fields. Use it for engine-wide defaults.
+- **create_stream / generate_full** — Pass a dict with the keys above in `params`. Only include keys you want to override; the rest come from config.
+- **Model options** — Put model-specific keys in `params["tts_params"]` (e.g. `params = {"alignment_type": AlignmentType.CHAR, "tts_params": {"alpha": 0.3}}`).
+
+## Example
+
+```python
+from tinfer.core.engine import StreamingTTS
+from tinfer.core.request import AlignmentType
+
+# Config sets defaults for all streams
+config = StreamingTTSConfig(
+    default_chunk_schedule=[120, 160, 250, 290],
+    default_alignment_type=AlignmentType.WORD,
+)
+tts = StreamingTTS(config)
+
+# Per-stream overrides
+params = {
+    "chunk_length_schedule": [100, 140, 200],
+    "alignment_type": AlignmentType.CHAR,
+    "target_sample_rate": 44100,
+    "target_encoding": "mp3_44100_32",
+    "tts_params": {"alpha": 0.3, "speed": 1.0},
+}
+stream = tts.create_stream("styletts2", "my_voice", params)
+```

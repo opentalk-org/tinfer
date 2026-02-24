@@ -1,0 +1,148 @@
+---
+title: gRPC API
+description: "Tinfer gRPC service: RPCs, message types, and client/server examples."
+---
+
+The gRPC server exposes **StyleTTSService** (`styletts.v1`) on an insecure channel. Default port is **50051**.
+
+## Endpoint
+
+Connect to `host:50051` (e.g. `localhost:50051`). The server does not use TLS by default.
+
+## Service and RPCs
+
+| RPC | Type | Description |
+| --- | ---- | ----------- |
+| **Synthesize** | Unary | Send full text and config; receive a single audio response. Best for short phrases. |
+| **SynthesizeStream** | Server streaming | Send full text and config once; receive a stream of `SynthesizeResponse` chunks as audio is generated. |
+| **SynthesizeIncremental** | Bidirectional | Send config first, then a stream of text chunks and control messages; receive a stream of `SynthesizeResponse`. Best for live or LLM-driven input. |
+
+## Messages
+
+**SynthesizeRequest**
+
+- `text` — Full text to synthesize.
+- `config` — `SynthesisConfig` (required).
+
+**SynthesisConfig**
+
+- `model_id` — TTS model id (e.g. `styletts2`).
+- `voice_id` — Voice id.
+- `sample_rate_hz` — Output sample rate. Supported: 8000, 16000, 22050, 24000, 44100. Defaults to 24000 if unsupported.
+
+The server maps this to tinfer’s [stream-level parameters](/concepts/parameters): **model_id**, **voice_id**, **target_sample_rate**, and **target_encoding** (PCM at the given rate). Alignment type and model-specific **tts_params** (e.g. StyleTTS2) are not configurable in the current gRPC API.
+
+**IncrementalSynthesizeRequest** (oneof)
+
+- `config` — Must be sent in the first message only.
+- `text_chunk` — Append text to the stream buffer.
+- `force_synthesis` — Trigger generation of current buffer.
+- `cancel` — Cancel the request and clear the buffer.
+
+**SynthesizeResponse**
+
+- `audio_data` — Raw PCM int16 bytes at the configured sample rate.
+- `alignments` — Repeated `WordAlignment`: `word`, `start_ms`, `end_ms`.
+
+## Errors
+
+Inference errors (including **InferenceError** and chunks with **error** set) are returned as gRPC status **INVALID_ARGUMENT** with the message in status details. For streaming RPCs, the server may stop the stream after sending an error (no further chunks). See [Error handling](/concepts/errors).
+
+## Client example (unary)
+
+```python
+import grpc
+from tinfer.server.grpc import styletts_pb2, styletts_pb2_grpc
+
+async def synthesize():
+    async with grpc.aio.insecure_channel("localhost:50051") as channel:
+        stub = styletts_pb2_grpc.StyleTTSServiceStub(channel)
+        request = styletts_pb2.SynthesizeRequest(
+            text="Hello, this is a short phrase.",
+            config=styletts_pb2.SynthesisConfig(
+                model_id="styletts2",
+                voice_id="any",
+                sample_rate_hz=24000,
+            ),
+        )
+        response = await stub.Synthesize(request)
+        return response.audio_data, response.alignments
+```
+
+## Client example (server streaming)
+
+```python
+async def synthesize_stream():
+    async with grpc.aio.insecure_channel("localhost:50051") as channel:
+        stub = styletts_pb2_grpc.StyleTTSServiceStub(channel)
+        request = styletts_pb2.SynthesizeRequest(
+            text="Full text to synthesize.",
+            config=styletts_pb2.SynthesisConfig(
+                model_id="styletts2",
+                voice_id="any",
+                sample_rate_hz=24000,
+            ),
+        )
+        chunks = []
+        async for response in stub.SynthesizeStream(request):
+            chunks.append(response.audio_data)
+        return b"".join(chunks)
+```
+
+## Client example (bidirectional)
+
+Send config first, then stream text chunks and optionally `force_synthesis`; consume the response stream.
+
+```python
+async def synthesize_incremental():
+    async with grpc.aio.insecure_channel("localhost:50051") as channel:
+        stub = styletts_pb2_grpc.StyleTTSServiceStub(channel)
+
+        async def request_iterator():
+            yield styletts_pb2.IncrementalSynthesizeRequest(
+                config=styletts_pb2.SynthesisConfig(
+                    model_id="styletts2",
+                    voice_id="any",
+                    sample_rate_hz=24000,
+                )
+            )
+            for chunk in ["First phrase. ", "Second phrase. ", "Done."]:
+                yield styletts_pb2.IncrementalSynthesizeRequest(text_chunk=chunk)
+            yield styletts_pb2.IncrementalSynthesizeRequest(
+                force_synthesis=styletts_pb2.ForceSynthesis()
+            )
+
+        chunks = []
+        async for response in stub.SynthesizeIncremental(request_iterator()):
+            chunks.append(response.audio_data)
+        return b"".join(chunks)
+```
+
+## Server startup
+
+```python
+from tinfer.core.engine import StreamingTTS
+from tinfer.core.async_engine import AsyncStreamingTTS
+from tinfer.config.engine_config import StreamingTTSConfig
+from tinfer.server.grpc.server import GRPCServer
+
+config = StreamingTTSConfig()
+tts = StreamingTTS(config)
+tts.load_model("styletts2", str(model_path), voices_folder=voices_folder)
+tts.warmup(["styletts2"], ["any"])
+
+async_tts = AsyncStreamingTTS(tts)
+server = GRPCServer(async_tts, port=50051)
+await server.start()
+await server.serve()
+```
+
+## Proto and code generation
+
+The service is defined in `styletts.proto` in the tinfer package (`tinfer/server/grpc/styletts.proto`). Use it with `grpcio-tools` to generate client (and optionally server) stubs for your language:
+
+```bash
+python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. styletts.proto
+```
+
+The Python package ships generated `styletts_pb2` and `styletts_pb2_grpc`; import from `tinfer.server.grpc`.

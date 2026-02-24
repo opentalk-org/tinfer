@@ -1,0 +1,28 @@
+---
+title: AudioChunk
+description: A single piece of synthesized audio with sample rate, optional alignments, and metadata. Chunks are ordered by chunk_index and can be merged for full utterances.
+---
+
+**AudioChunk** is the unit of output from the TTS engine. Each chunk contains a segment of audio plus metadata. When you use streaming, you get a sequence of chunks; when you use **generate_full**, you get one merged chunk.
+
+## Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| **audio** | `np.ndarray` (float32) | Mono audio samples. Shape is `(num_samples,)` or similar; concatenate along the sample axis when merging. |
+| **sample_rate** | `int` | Sample rate in Hz. All chunks from the same stream have the same sample rate. |
+| **chunk_index** | `int` | Zero-based index of this chunk in the stream. Use to order chunks. |
+| **text_span** | `tuple[int, int]` | `(char_start, char_end)` in the original input text that this chunk’s audio corresponds to. |
+| **alignments** | `Alignment` or `None` | Optional text–audio timing for this chunk. See [Alignment](/api/alignment). |
+| **request_id** | `str` | Id of the request that produced this chunk. |
+| **error** | `str` or `None` | If set, indicates inference failure for this request; audio may be empty or absent. |
+
+## Behavior
+
+**Ordering:** Chunks from one stream are ordered by **chunk_index**. Consume or merge them in that order.
+
+**Merging:** To form one continuous utterance from multiple chunks: concatenate **audio** along the sample dimension (e.g. `np.concatenate([c.audio for c in chunks], axis=-1)`). When merging **alignments**, adjust each item’s **char_start**/ **char_end** by the preceding text length and **start_ms**/ **end_ms** by the preceding audio duration. **StreamingTTS.generate_full** and **generate_full_batch** do this merge for you and return a single **AudioChunk** with merged audio and alignments.
+
+**Empty result:** If no chunks were produced (e.g. cancel or error), the engine may return an **AudioChunk** with empty **audio** and **sample_rate** 0. Inference failure can also be indicated by **error** being set. Check length, sample_rate, or **error** before using. See [Error handling](/concepts/errors).
+
+**Alignments:** When present, **alignments** describe the segment of text and time range for *this* chunk. So **start_ms**/ **end_ms** are relative to the start of this chunk’s audio unless the chunk has already been merged with others.

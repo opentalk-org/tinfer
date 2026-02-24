@@ -1,0 +1,55 @@
+---
+title: AsyncStreamingTTS
+description: Async wrapper around StreamingTTS. Use generate() for an async iterator of audio chunks or generate_full() for a single merged result.
+---
+
+**AsyncStreamingTTS** wraps a **StreamingTTS** instance to expose async-friendly entry points. The underlying engine still runs in threads (timeout loop, process executor); this class gives you non-blocking iteration over chunks.
+
+## Constructor
+
+**`AsyncStreamingTTS(config)`**
+
+- **config** — Either a **StreamingTTSConfig** (or dict/path for config), or an existing **StreamingTTS** instance. If it is config, a new **StreamingTTS** is created internally. If it is an engine, that engine is used and you must manage its lifecycle (e.g. load_model, warmup, stop) yourself.
+
+So you can either pass a fresh config and use the wrapper for all model loading and synthesis, or pass an already-configured engine (e.g. after `load_model` and `warmup`) and use the wrapper only for async generation.
+
+## Async generation
+
+**`async generate(model_id, voice_id, text, params)`**
+
+Async generator that yields **AudioChunk** as they become available. It creates a stream, appends `text`, calls `force_generate()`, then iterates `stream.pull_audio()` and yields each chunk. The stream is closed in a `finally` block. Use this when you want to process or send chunks incrementally without blocking.
+
+```python
+async_tts = AsyncStreamingTTS(tts)
+async for chunk in async_tts.generate(model_id, voice_id, "Hello, world.", {}):
+    # chunk is an AudioChunk
+    process(chunk.audio, chunk.sample_rate)
+```
+
+**`generate_full(model_id, voice_id, text, params) -> AudioChunk`**
+
+Delegates to the underlying engine’s `generate_full`. Returns a single merged **AudioChunk**. This call is synchronous (blocking).
+
+## Streams
+
+**`create_stream(model_id, voice_id, params) -> TTSStream`**
+
+Returns the same **TTSStream** as the underlying engine. Use it when you want to feed text incrementally and consume chunks via `stream.pull_audio()` (async) or `stream.get_audio()` (sync) yourself, instead of using `generate()`.
+
+## Model lifecycle
+
+**`load_model(model_id, model_path, voices_folder=None)`**  
+**`register_model(model_id, model, device=None, keep_in_main=True)`**  
+**`unload_model(model_id)`**
+
+Delegate to the underlying engine. Call these on the wrapper (or on the engine if you kept a reference) to load/register/unload models before synthesis.
+
+**`warmup(model_ids, num_warmup_tasks=4)`**
+
+Delegates to the engine. The engine’s **warmup** expects **`warmup(model_ids, voice_ids, num_warmup_tasks)`** with `voice_ids` as well. If you use **AsyncStreamingTTS**, call **warmup** on the underlying **StreamingTTS** with both `model_ids` and `voice_ids` so the signature matches.
+
+## Shutdown
+
+**`stop()`**
+
+Calls the engine’s `stop()`. Use when shutting down.

@@ -1,0 +1,64 @@
+---
+title: Quickstart
+description: Install tinfer and run a minimal example that loads a model and synthesizes speech to a WAV file.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+This guide gets you from zero to a saved WAV file using the synchronous API.
+
+## Prerequisites
+
+- Python 3.10+
+- A tinfer-compatible TTS model (e.g. a converted StyleTTS2 model) and its voices directory
+
+## Install
+
+From the project root (or from a wheel):
+
+```bash
+pip install -e .
+```
+
+## Minimal example
+
+<Steps>
+
+1. **Create engine and load model**  
+   Build a `StreamingTTS` from `StreamingTTSConfig`, then load the model and voices. After loading, call `warmup` so the first real request is not slow.
+
+2. **Synthesize and save**  
+   Call `generate_full(model_id, voice_id, text, params)`. You get back a single `AudioChunk` with merged audio and optional alignments. Write `chunk.audio` and `chunk.sample_rate` to disk (e.g. with `soundfile`).
+
+</Steps>
+
+```python
+from pathlib import Path
+import numpy as np
+import soundfile as sf
+
+from tinfer.core.engine import StreamingTTS
+from tinfer.config.engine_config import StreamingTTSConfig
+
+model_id = "styletts2"
+voice_id = "magda_001"
+model_path = Path("converted_models/agnieszka/model.pth")
+voices_folder = str(Path("converted_models/agnieszka/voices"))
+
+config = StreamingTTSConfig()
+tts = StreamingTTS(config)
+tts.load_model(model_id, str(model_path), voices_folder=voices_folder)
+tts.warmup([model_id], [voice_id])
+
+text = "Hello, this is a quickstart example."
+params = {}
+audio_chunk = tts.generate_full(model_id, voice_id, text, params)
+
+output_path = Path("output.wav")
+output_path.parent.mkdir(parents=True, exist_ok=True)
+sf.write(str(output_path), audio_chunk.audio, audio_chunk.sample_rate)
+
+tts.stop()
+```
+
+`generate_full` creates an internal stream, feeds the text, forces generation, collects all chunks, merges them into one `AudioChunk`, and closes the stream. For streaming chunk-by-chunk or async usage, see [Streaming and triggers](/concepts/streaming) and [TTSStream](/api/tts-stream).

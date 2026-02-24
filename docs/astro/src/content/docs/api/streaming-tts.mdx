@@ -1,0 +1,57 @@
+---
+title: StreamingTTS
+description: Synchronous streaming TTS engine. Create streams, run one-shot or batch synthesis, and manage model lifecycle.
+---
+
+**StreamingTTS** is the main synchronous engine. You configure it with **StreamingTTSConfig**, load one or more models, then create streams or call `generate_full` / `generate_full_batch` to synthesize.
+
+## Constructor
+
+**`StreamingTTS(config, auto_run=True)`**
+
+- **config** — A **StreamingTTSConfig** instance (or a dict of config fields). Controls chunk schedules, default alignment type, timeout, executor and devices.
+- **auto_run** — If `True`, the engine starts its internal timeout loop so that streams can trigger generation by timeout. Leave `True` unless you manage the loop yourself.
+
+**`StreamingTTS.from_config(config)`** — Class method. If `config` is a dict, builds `StreamingTTSConfig(**config)`. If it is a path (str), loads YAML and builds config from it. Returns a new **StreamingTTS** instance.
+
+## Creating streams and one-shot synthesis
+
+**`create_stream(model_id, voice_id, params) -> TTSStream`**
+
+Creates a new stream for one synthesis request. The stream is bound to the given `model_id` and `voice_id`. `params` can override stream-level options (e.g. `alignment_type`, `target_sample_rate`, `target_encoding`) and is merged into the internal request; model-specific options are typically passed via `params["tts_params"]`. The engine registers the stream; call `stream.close()` when done so the engine can remove it. See [Parameters reference](/concepts/parameters) for all stream-level keys and [StyleTTS2 parameters](/api/styletts2-params) for model options. See [TTSStream](/api/tts-stream).
+
+**`generate_full(model_id, voice_id, text, params) -> AudioChunk`**
+
+Convenience for one-shot synthesis: creates a stream, appends `text`, calls `force_generate()`, collects all chunks with `get_audio()`, merges them into a single **AudioChunk**, closes the stream, and returns that chunk. Use when you have the full text and do not need incremental chunks. Merged alignments (if present) are combined with correct character and time offsets.
+
+**`generate_full_batch(model_id, voice_id, texts, params) -> list[AudioChunk]`**
+
+Creates one stream per (text, params) pair, feeds each text, forces generation, collects and merges chunks per stream, closes all streams, and returns one **AudioChunk** per input text. Use for batch processing when you want to keep the same model/voice and run multiple texts in sequence (each stream runs to completion before the next).
+
+## Model lifecycle
+
+**`load_model(model_id, model_path, voices_folder=None)`**
+
+Loads a model from `model_path` and registers it under `model_id`. Optional `voices_folder` is used by models that load voice data from disk. Call this before creating streams or calling `generate_full` for that `model_id`.
+
+**`register_model(model_id, model, device=None, keep_in_main=True)`**
+
+Registers an already-loaded model instance. The model must be loaded (e.g. `model.load(path)` called) before registration. Used when you construct the model yourself. `device` and `keep_in_main` control where the model runs.
+
+**`unload_model(model_id)`**
+
+Unloads the model registered under `model_id`.
+
+**`warmup(model_ids, voice_ids, num_warmup_tasks=4)`**
+
+Runs warmup for each (model_id, voice_id) pair so the first real request is faster. `model_ids` and `voice_ids` must be the same length. Per model/voice, it runs a few short syntheses and then a batch of parallel warmup tasks. Call after loading models and before serving traffic.
+
+## Control
+
+**`run()`**
+
+Starts the internal timeout loop (thread). Usually you do not need to call this if you used `auto_run=True` in the constructor.
+
+**`stop()`**
+
+Stops the timeout loop and the executor. Call when shutting down the engine.

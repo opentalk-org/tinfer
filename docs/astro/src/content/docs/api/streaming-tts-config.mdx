@@ -1,0 +1,47 @@
+---
+title: StreamingTTSConfig
+description: Configuration for the StreamingTTS engine. Controls chunk schedules, triggers, alignment default, executor, and devices.
+---
+
+**StreamingTTSConfig** is a dataclass passed to **StreamingTTS(config)**. It defines default chunk sizes, when to trigger generation, default alignment type, and how the executor runs (process workers, devices, batch sizes).
+
+## Trigger and chunk behavior
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| **default_chunk_schedule** | `list[int]` | `[120, 160, 250, 290]` | Max character counts per chunk index. When pending text length exceeds the current schedule value, generation is triggered. |
+| **default_min_chunk_schedule** | `list[int]` | `[50, 80, 120, 150]` | Minimum chunk sizes used by the chunker. |
+| **min_chars_trigger** | `int` | `10` | Generation does not run until pending text has at least this many characters. |
+| **default_timeout_ms** | `float` | `80.0` | After this many milliseconds since the last commit (or first text), generation is triggered if there is enough pending text. |
+
+These defaults can be overridden per stream by passing the same keys in the **params** dict to **create_stream** (e.g. **chunk_length_schedule**, **timeout_trigger_ms**). See [Parameters reference](/concepts/parameters) for the full mapping and [Streaming and triggers](/concepts/streaming).
+
+## Alignment and output
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| **default_alignment_type** | **AlignmentType** | `AlignmentType.WORD` | Default alignment granularity for new streams. Override with **params["alignment_type"]**. |
+
+Per-request options such as **target_sample_rate** and **target_encoding** are passed in **params** when creating a stream or calling **generate_full**, not in the global config.
+
+## Executor and devices
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| **executor_type** | `Literal["process"]` | `"process"` | How inference is run; currently only process executor is used. |
+| **devices** | `list[str]` or `None` | `None` | Device list for the executor (e.g. GPU device ids). |
+| **max_batch_size_per_device** | `dict[str, int]` | `{}` | Max batch size per device. |
+| **default_max_batch_size** | `int` | `5` | Default max batch size. |
+| **scheduler_type** | `Literal["simple"]` | `"simple"` | Scheduler type. |
+| **process_workers_per_gpu** | `int` | `1` | Number of process workers per GPU. |
+
+## Other
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| **enable_word_alignment** | `bool` | `False` | Enable word alignment in the pipeline. |
+| **enable_audio_buffer** | `bool` | `True` | Enable audio buffering. |
+
+## Serialization
+
+**`to_yaml(path)`** — Writes the config to a YAML file at `path`. You can later load it and pass the path to **StreamingTTS.from_config(path)**.

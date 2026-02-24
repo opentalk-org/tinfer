@@ -1,0 +1,40 @@
+---
+title: StyleTTS2 parameters
+description: Model-specific parameters for the StyleTTS2 engine. Pass these in params["tts_params"] when creating a stream or calling generate_full.
+---
+
+When using the **StyleTTS2** model, you can pass synthesis options in **params["tts_params"]** to `create_stream` or `generate_full`. Unknown keys are ignored; only the fields below are read by the model.
+
+## Parameters
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| **use_diffusion** | `bool` | `True` | Use diffusion refinement for the output. |
+| **phonemized** | `bool` | `False` | If true, input text is treated as already phonemized. |
+| **embedding_scale** | `float` | `1.0` | Scale applied to the style embedding. |
+| **diffusion_steps** | `int` | `10` | Number of diffusion steps when use_diffusion is true. |
+| **style_interpolation_factor** | `float` | `0.0` | Interpolation factor for style between chunks. |
+| **alpha** | `float` | `0.3` | Balance between reference style and predicted style (0–1). |
+| **beta** | `float` | `0.7` | Additional style blending factor. |
+| **speed** | `float` | `1.0` | Speaking rate multiplier (e.g. 1.2 for faster). |
+
+## Usage
+
+Pass a dict with any of these keys inside **tts_params**:
+
+```python
+params = {
+    "target_sample_rate": 24000,
+    "tts_params": {
+        "use_diffusion": True,
+        "alpha": 0.3,
+        "beta": 0.3,
+        "diffusion_steps": 10,
+        "embedding_scale": 1.0,
+        "speed": 1.0,
+    },
+}
+stream = tts.create_stream("styletts2", voice_id, params)
+```
+
+See [Parameters reference](/concepts/parameters) for how stream-level and model-specific parameters work together.

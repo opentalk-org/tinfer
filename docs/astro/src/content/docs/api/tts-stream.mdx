@@ -1,0 +1,50 @@
+---
+title: TTSStream
+description: Handle for one streaming synthesis request. Add text, trigger generation, and consume audio chunks synchronously or asynchronously.
+---
+
+A **TTSStream** represents a single streaming synthesis request. You get it from **StreamingTTS.create_stream** (or **AsyncStreamingTTS.create_stream**). One stream is bound to one `model_id` and one `voice_id`; you append text and then consume **AudioChunk**s in order.
+
+## Adding text and triggering
+
+**`add_text(text)`**
+
+Appends `text` to the stream’s buffer and signals the engine. Generation may run later when the engine’s trigger conditions are met (enough characters, timeout, or chunk length). Does not block.
+
+**`force_generate()`**
+
+Marks that the next engine tick should synthesize from the current pending text. Use when you have finished feeding a fragment and want output immediately instead of waiting for timeout or length. Does not block; chunks will appear in the queue as inference completes.
+
+## Consuming chunks (sync)
+
+**`get_audio() -> list[AudioChunk]`**
+
+Drains the stream’s audio queue and returns all chunks currently available, in order. Does not wait for in-flight work. Returns an empty list if there is nothing in the queue and no chunks are being produced. You can call it repeatedly (e.g. after each `add_text` / `force_generate`) or once after feeding all text. Any returned chunk may have **chunk.error** set; if set, it indicates inference failure and the caller should handle it (e.g. raise or log). See [Error handling](/concepts/errors).
+
+**`wait_for_audio() -> Awaitable[AudioChunk]`**
+
+Async only. Returns a future that resolves to the next chunk when it is available. Used internally by `pull_audio()`.
+
+## Consuming chunks (async)
+
+**`async pull_audio()`**
+
+Async generator that yields **AudioChunk** as they become available. It waits for chunks when there is pending work or when the queue is non-empty; it stops when there is nothing left to wait for. Use with `async for chunk in stream.pull_audio(): ...`. This is what **AsyncStreamingTTS.generate()** uses under the hood. Any yielded chunk may have **chunk.error** set; if set, it indicates inference failure and the caller should handle it (e.g. raise or log). See [Error handling](/concepts/errors).
+
+## State and lifecycle
+
+**`get_state() -> dict`**
+
+Returns the stream’s state dict (used by the engine for context across chunks). You can use it for custom bookkeeping.
+
+**`cancel()`**
+
+Cancels the request: clears the text buffer, resets stream state, clears the audio queue, and tells the executor to cancel in-flight work. No further chunks will be produced. You can still call `get_audio()` to drain any chunks that were already in the queue before cancel.
+
+**`close()`**
+
+Clears the stream’s audio queue and removes the stream from the engine. Call when you are done with the stream so the engine does not keep the request registered. Prefer closing after you have consumed the chunks you need.
+
+## Ordering and merging
+
+Chunks are ordered by **chunk_index**. For a single utterance, concatenate `chunk.audio` in order and merge **alignments** with per-chunk character and time offsets if you need a full timeline. **StreamingTTS.generate_full** does this merge for you when you use one-shot synthesis.

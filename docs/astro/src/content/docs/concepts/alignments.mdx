@@ -1,0 +1,65 @@
+---
+title: Alignments
+description: What alignments are, how to request word/character/phoneme timing, and how to use the Alignment and AlignmentItem structures.
+---
+
+Alignments are **text–audio timing data**: they tell you which part of the input text (word, character, or phoneme) corresponds to which time range in the synthesized audio. You use them to highlight text during playback (e.g. karaoke-style or read-along).
+
+## Alignment types
+
+Alignment granularity is represented by **AlignmentType**:
+
+| Value | Meaning |
+|-------|--------|
+| **WORD** | Each item is a word; `char_start`/`char_end` and `start_ms`/`end_ms` cover that word. Punctuation counts as words. |
+| **CHAR** | Each item is a character (including spaces). |
+| **PHONEME** | Each item is a phoneme. Models that produce phoneme-level output can be asked for this; others may only support word or char. |
+| **NONE** | No alignment data; `alignments` may be missing or empty. |
+
+## Requesting alignments
+
+- **Default:** Set **`default_alignment_type`** on **StreamingTTSConfig** (e.g. `AlignmentType.WORD`). It applies to every stream unless overridden.
+- **Per request:** Pass **`alignment_type`** in the `params` dict when calling `create_stream(model_id, voice_id, params)` or when calling `generate_full(..., params)` (which creates a stream internally). Example: `params = {"alignment_type": AlignmentType.CHAR}`.
+
+If you do not need timing, use `AlignmentType.NONE` to avoid unnecessary overhead.
+
+## Structure of alignment data
+
+Each **AudioChunk** can carry an **Alignment** (or `None`):
+
+- **`Alignment.type_`** — The granularity: `AlignmentType.WORD`, `CHAR`, or `PHONEME`.
+- **`Alignment.items`** — List of **AlignmentItem** in order.
+
+Each **AlignmentItem** has:
+
+- **`item`** — The text unit (word, character, or phoneme string).
+- **`char_start`**, **`char_end`** — Character span in the **original input text** (0-based, exclusive end). Use this to map back to the string.
+- **`start_ms`**, **`end_ms`** — Time span in milliseconds in the audio for this chunk. To get time in the full recording when using multiple chunks, add the offset of previous chunks’ duration.
+
+## Per-chunk vs merged
+
+- **Streaming:** Each **AudioChunk** may have its own `alignments`, with `char_start`/`char_end` and `start_ms`/`end_ms` relative to that chunk’s text span and audio. To build a full timeline, concatenate chunks in order and add time offsets when merging.
+- **generate_full:** The engine merges all chunks into one **AudioChunk**. Merged alignments are combined: character and time offsets are adjusted so that `items` form a single contiguous timeline for the full text. So one merged `AudioChunk` gives you one `alignments` list for the whole utterance.
+
+## Example
+
+Requesting character-level alignments and printing the first few items:
+
+```python
+from tinfer.core.engine import StreamingTTS
+from tinfer.config.engine_config import StreamingTTSConfig
+from tinfer.core.request import AlignmentType
+
+config = StreamingTTSConfig()
+tts = StreamingTTS(config)
+# ... load_model, warmup ...
+
+params = {"alignment_type": AlignmentType.CHAR}
+audio_chunk = tts.generate_full(model_id, voice_id, "Hello, world.", params)
+
+if audio_chunk.alignments and audio_chunk.alignments.items:
+    for item in audio_chunk.alignments.items[:5]:
+        print(f"'{item.item}' chars [{item.char_start}:{item.char_end}] -> [{item.start_ms}ms, {item.end_ms}ms]")
+```
+
+See [Alignment](/api/alignment) and [AudioChunk](/api/audio-chunk) for full field details.

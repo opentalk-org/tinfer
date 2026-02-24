@@ -1,0 +1,21 @@
+---
+title: Error handling
+description: "How inference errors are represented: InferenceError exception and chunk-level error field, and how gRPC and WebSocket surface them."
+---
+
+When synthesis fails (e.g. invalid input or model error), the engine can signal failure in two ways: by raising **InferenceError** or by emitting an **AudioChunk** with **error** set.
+
+## InferenceError
+
+**InferenceError** is the exception raised on inference failure. Servers (gRPC and WebSocket) catch it and turn it into a gRPC status or a WebSocket `error` payload. When using the engine directly (e.g. `generate_full`), wrap calls in try/except if you need to handle failures. Example error can be "CUDA out of memory".
+
+## Chunk-level errors
+
+During streaming, when inference fails the engine may emit an **AudioChunk** with **error** set to a string message and empty or no audio. Consumers of **get_audio()** or **pull_audio()** should check **chunk.error** and handle it (e.g. raise, log, or surface to the user).
+
+## See also
+
+- [AudioChunk](/api/audio-chunk) — **error** field
+- [TTSStream](/api/tts-stream) — consuming chunks (sync and async)
+- [gRPC](/server/grpc) — how errors are returned as status and details
+- [WebSocket](/server/websocket) — how errors are sent in JSON and connection may close

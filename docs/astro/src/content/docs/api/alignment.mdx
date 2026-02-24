@@ -1,0 +1,42 @@
+---
+title: Alignment, AlignmentItem, AlignmentType
+description: Types for text–audio timing. Request word, character, or phoneme alignments and use AlignmentItem to map text spans to time ranges.
+---
+
+Alignments link the input text to the synthesized audio so you can highlight words or characters during playback. The engine can return **Alignment** with a list of **AlignmentItem**; the granularity is given by **AlignmentType**.
+
+## AlignmentType
+
+Enum of alignment granularities:
+
+| Value | Description |
+|-------|--------------|
+| **WORD** | Each item is a word. |
+| **CHAR** | Each item is a character (including spaces). |
+| **PHONEME** | Each item is a phoneme. Not all models support this. |
+| **NONE** | No alignment data; use when you do not need timing. |
+
+Set **default_alignment_type** in **StreamingTTSConfig** or pass **alignment_type** in **params** when creating a stream or calling **generate_full**. See [Alignments](/concepts/alignments).
+
+## Alignment
+
+**Fields:**
+
+- **items** — `list[AlignmentItem]`. Ordered list of units (words, characters, or phonemes) with their text span and time span.
+- **type_** — **AlignmentType**. The granularity of **items**.
+
+**Behavior:** One **Alignment** applies to one **AudioChunk**. For a merged chunk (e.g. from **generate_full**), **items** cover the full text with character and time offsets already adjusted. For a single stream chunk, **items** and times are relative to that chunk’s text span and audio.
+
+## AlignmentItem
+
+One segment of text and its time range in the audio.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| **item** | `str` | The unit of text (word, character, or phoneme). |
+| **char_start** | `int` | Start index in the original input text (0-based, inclusive). |
+| **char_end** | `int` | End index in the original input text (0-based, exclusive). |
+| **start_ms** | `int` | Start time in milliseconds in the audio. |
+| **end_ms** | `int` | End time in milliseconds in the audio. |
+
+Use **char_start** and **char_end** to slice the input string: `text[item.char_start:item.char_end]`. Use **start_ms** and **end_ms** to know when to highlight during playback. For multiple chunks, add the previous chunks’ audio duration (in ms) to get absolute time in the full recording.
