@@ -14,8 +14,9 @@ class StreamingTTSConfig:
     # default_dtype: str = "bfloat16" # some bugs with bfloat16
     executor_type: Literal["process"] = "process"
     devices: list[str] | None = None
+    
 
-    batch_size_per_device: dict[str, int] = field(default_factory=dict) # device: max batch size
+    batch_size_per_device: dict[str, int] = field(default_factory=dict)
     default_batch_size: int = 10
     process_workers_per_gpu: int = 1 # TODO: Check if multi gpu really works
 
