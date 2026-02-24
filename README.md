@@ -9,3 +9,14 @@ tinfer: Fast production ready TTS inference server with gRPC and elevenlabs-comp
 - Websocket (elevenlabs compatible) and GRPC streaming api.
 - Modular, easy to add new models in the future.
 
+## Prerequirements
+
+## Prerequirements
+
+- [espeak-ng](https://github.com/espeak-ng/espeak-ng): Required for phonemizer functionality.
+- Python >= 3.11
+
+## Installation
+
+- **Client only**: `pip install .`
+- **Server / local inference**: `pip install .[inference]`
