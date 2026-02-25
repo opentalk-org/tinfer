@@ -3,18 +3,11 @@ import os
 
 from tinfer.core.engine import StreamingTTS
 from tinfer.config.engine_config import StreamingTTSConfig
-
-base_dir = Path(__file__).parent.parent.parent.parent
-model_id = "styletts2"
-model_name = "magda"
-voice_id = "magda_001"
-model_path = base_dir / "converted_models" / model_name / "model.pth"
-voices_folder = str(base_dir / "converted_models" / model_name / "voices")
-
+from config import model_id, model_path, voices_folder, voice_id
 
 def load_model(config=None, warmup_kwargs=None):
     if config is None:
-        config = StreamingTTSConfig()
+        config = StreamingTTSConfig(compile_models=False)
 
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model file not found: {model_path}")

@@ -6,9 +6,10 @@ from pathlib import Path
 
 from tinfer.server.grpc import styletts_pb2, styletts_pb2_grpc
 
-from utils import base_dir, model_name, voice_id
-
 import random
+
+base_dir = Path(__file__).resolve().parent.parent.parent.parent
+
 import time
 random.seed(int(time.time() * 1_000_000))
 
@@ -27,7 +28,7 @@ print(f"Using model: {model_name} with voice: {voice_id}")
 output_dir = base_dir / "output_wavs"
 output_dir.mkdir(parents=True, exist_ok=True)
 
-SERVER_ADDRESS = "localhost:50051"
+SERVER_ADDRESS = "localhost:50052"
 SAMPLE_RATE = 24000
 
 def bytes_to_audio(audio_bytes: bytes, sample_rate: int) -> np.ndarray:
@@ -67,7 +68,7 @@ async def example_synthesize_unary():
             for i, alignment in enumerate(response.alignments[:5]):
                 print(f"  {i+1}. '{alignment.word}' - {alignment.start_ms}ms to {alignment.end_ms}ms")
         
-        print(f"total text: {" ".join([al.word for al in response.alignments])}")
+        print(f'total text: {" ".join([al.word for al in response.alignments])}')
 
         output_path = output_dir / f"grpc_unary_{model_name}_{voice_id}.wav"
         save_audio(response.audio_data, output_path, SAMPLE_RATE)
@@ -264,7 +265,7 @@ async def example_synthesize_incremental_cancel():
         
         print(f"\nTotal chunks received: {chunk_count}")
 
-        print(f"total text: {" ".join([al.word for al in response.alignments])}")
+        print(f'total text: {" ".join([al.word for al in response.alignments])}')
         
         if audio_chunks:
             combined_audio = b"".join(audio_chunks)

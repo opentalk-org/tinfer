@@ -2,7 +2,8 @@ import numpy as np
 import random
 import soundfile as sf
 
-from utils import base_dir, model_id, voice_id, load_model
+from config import base_dir, model_id, voice_id
+from utils import load_model
 
 POLISH_SENTENCES = (
     "To jest pierwszy krótki test parametrów syntezy mowy. "

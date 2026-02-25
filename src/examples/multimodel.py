@@ -6,7 +6,7 @@ from tinfer.core.engine import StreamingTTS
 from tinfer.core.async_engine import AsyncStreamingTTS
 from tinfer.config.engine_config import StreamingTTSConfig
 
-from utils import base_dir
+from config import base_dir
 
 MODELS = [
     ("agnieszka", "66a4ecf82e2a7ae68b14add9_7.97_4.27"),

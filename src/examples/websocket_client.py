@@ -5,7 +5,8 @@ import numpy as np
 import soundfile as sf
 import websockets
 
-from utils import base_dir, model_id, voice_id
+from pathlib import Path
+from config import base_dir, model_id, voice_id
 
 output_dir = base_dir / "output_wavs"
 output_dir.mkdir(parents=True, exist_ok=True)

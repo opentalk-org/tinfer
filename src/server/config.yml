@@ -14,6 +14,6 @@ default_timeout_ms: 80.0
 executor_type: process
 devices: null
 batch_size_per_device: {}
-default_batch_size: 10
+default_batch_size: 3
 process_workers_per_gpu: 1
-compile_models: true
+compile_models: false

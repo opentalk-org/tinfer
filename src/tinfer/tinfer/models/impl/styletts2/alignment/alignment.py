@@ -31,7 +31,6 @@ class StyleTTS2AlignmentParser(AlignmentParser):
         num_tokens = pred_aln_trg.shape[0]
         num_frames = pred_aln_trg.shape[1]
 
-        ms_per_mel_frame = (hop_length / sample_rate) * 1000
         ms_per_mel_frame = 1000 / 40
         
         token_durations_frames = pred_aln_trg.sum(axis=1)

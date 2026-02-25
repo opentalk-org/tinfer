@@ -54,7 +54,9 @@ class WorkerScheduler:
 
     def calculate_request_priority(self, request: TTSRequestIPC) -> float:
         score = 0.0
-        if monotonic() - request.start_time > request.collected_time:
+
+        # TODO: double check which exacly can't be None
+        if request.start_time is not None and request.collected_time is not None and monotonic() - request.start_time > request.collected_time:
             score += 1e9
 
         now = monotonic()

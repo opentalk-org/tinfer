@@ -5,7 +5,8 @@ import matplotlib.pyplot as plt
 from tinfer.core.async_engine import AsyncStreamingTTS
 from tinfer.config.engine_config import StreamingTTSConfig
 
-from utils import base_dir, model_id, voice_id, load_model
+from config import base_dir, model_id, voice_id
+from utils import load_model
 
 async def measure_user_latency(async_tts, user_id):
     text = "To jest przykład tekstu do syntezy mowy, który będzie używany do pomiaru opóźnień w systemie TTS."

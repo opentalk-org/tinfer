@@ -17,7 +17,7 @@ class StreamingTTSConfig:
     
 
     batch_size_per_device: dict[str, int] = field(default_factory=dict)
-    default_batch_size: int = 10
+    default_batch_size: int = 3
     process_workers_per_gpu: int = 1 # TODO: Check if multi gpu really works
 
     compile_models: bool = True

@@ -5,7 +5,8 @@ import asyncio
 
 from tinfer.core.async_engine import AsyncStreamingTTS
 
-from utils import base_dir, model_id, voice_id, load_model
+from config import base_dir, model_id, voice_id
+from utils import load_model
 
 
 def save_audio_chunks(chunks, output_path, sample_rate):

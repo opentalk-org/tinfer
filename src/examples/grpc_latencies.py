@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 
 from tinfer.server.grpc import styletts_pb2, styletts_pb2_grpc
 
-from utils import base_dir, model_name, voice_id
+from config import base_dir, model_name, voice_id
 
-SERVER_ADDRESS = "localhost:50051"
+SERVER_ADDRESS = "localhost:50052"
 SAMPLE_RATE = 24000
 
 LATENCY_TEXT = "To jest przykład tekstu do syntezy mowy, który będzie używany do pomiaru opóźnień w systemie TTS."

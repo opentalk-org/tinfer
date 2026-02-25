@@ -128,7 +128,8 @@ class StreamingTTS:
             span_len = max(0, int(c.text_span[1]) - int(c.text_span[0]))
             char_offset += span_len
 
-            num_samples = int(c.audio.shape[-1]) if hasattr(c.audio, "shape") and len(c.audio.shape) > 0 else int(len(c.audio))
+            raw_len = int(c.audio.shape[-1]) if hasattr(c.audio, "shape") and len(c.audio.shape) > 0 else int(len(c.audio))
+            num_samples = raw_len // 2 if hasattr(c.audio, "dtype") and c.audio.dtype == np.uint8 else raw_len
             time_offset_ms += int(round((num_samples / sample_rate) * 1000.0)) if sample_rate else 0
 
         if merged_items:

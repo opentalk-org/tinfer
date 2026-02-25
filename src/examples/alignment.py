@@ -5,10 +5,11 @@ import soundfile as sf
 
 from tinfer.core.request import AlignmentType
 
-from utils import base_dir, model_id, voice_id, load_model
+from config import base_dir, model_id, voice_id
 
+from utils import load_model
 text = (
-    "Moim zdaniem to nie ma tak, że dobrze albo że nie dobrze. Gdybym miał powiedzieć, co cenię w życiu najbardziej, powiedziałbym, że ludzi. Ekhm… Ludzi, którzy podali mi pomocną dłoń, kiedy sobie nie radziłem, kiedy byłem sam."
+    "Dziś jest 2024-04-18. W kalendarzu pojawiło się nowe wydarzenie."
 )
 
 def plot_spectrogram_with_alignments(audio, sample_rate, alignments, text, title, output_path):
