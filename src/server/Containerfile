@@ -18,11 +18,12 @@ COPY server/config.yml /app/config.yml
 RUN python -m venv /venv
 RUN /venv/bin/pip install --upgrade pip
 
-RUN /venv/bin/pip install /tinfer
+WORKDIR /tinfer
+RUN /venv/bin/pip install .[inference]
 
 EXPOSE ${TINFER_GRPC_PORT}
 EXPOSE ${TINFER_WEBSOCKETS_PORT}
-
+WORKDIR /app
 
 # replace with daphne later
 CMD ["python", "main.py"] 
