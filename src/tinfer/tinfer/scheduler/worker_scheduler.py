@@ -61,8 +61,6 @@ class WorkerScheduler:
         elapsed_time = now - request.created_at
         score += elapsed_time
 
-        print(f"Request {request.request_id} score: {score}", flush=True)
-
         return score
 
     def calculate_priority(self, requests: list[TTSRequestIPC]) -> float:

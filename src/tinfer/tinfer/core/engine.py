@@ -212,7 +212,12 @@ class StreamingTTS:
             )
             request.audio_queue.put(chunk)
             request.pending_chunks -= 1
-            request.collected_time += len(result.audio) / result.sample_rate
+
+            if result.error is None:
+                request.collected_time += len(result.audio) / result.sample_rate
+            else:
+                request.collected_time = 0.0
+                request.start_time = None
 
         self.signal_input()
 

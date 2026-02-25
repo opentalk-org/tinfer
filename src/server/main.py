@@ -12,11 +12,14 @@ from tinfer.server.grpc.server import GRPCServer
 import os
 
 base_dir = Path(__file__).parent.parent
+script_dir = Path(__file__).parent
 
 def _load_tts_config() -> StreamingTTSConfig:
-    path = Path("config.yml")
+    path = script_dir / "config.yml"
     if path.exists():
-        return StreamingTTSConfig.from_yaml(path)
+        config = StreamingTTSConfig.from_yaml(path)
+        print(f"Loaded config from {path}")
+        return config
     print(f"Warning: config.yml not found at {path}")
     print("Using default config")
     return StreamingTTSConfig()
@@ -65,7 +68,7 @@ def load_models():
         
         print(f"Loading model '{model_id}' from {model_path}")
         if voices_folder_str:
-            print(f"  Loading voices from {voices_folder_str}")
+            print(f"Loading voices from {voices_folder_str}")
         
         tts.load_model(model_id, str(model_path), voices_folder=voices_folder_str)
         model_ids.append(model_id)
