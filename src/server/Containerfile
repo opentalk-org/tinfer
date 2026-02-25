@@ -13,6 +13,7 @@ RUN mkdir /tinfer
 
 COPY tinfer /tinfer
 COPY server /app
+COPY server/config.yml /app/config.yml
 
 RUN python -m venv /venv
 RUN /venv/bin/pip install --upgrade pip

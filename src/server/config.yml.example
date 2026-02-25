@@ -1,0 +1,19 @@
+default_chunk_schedule:
+  - 80
+  - 160
+  - 250
+  - 290
+default_min_chunk_schedule:
+  - 50
+  - 80
+  - 120
+  - 150
+default_alignment_type: word
+min_chars_trigger: 10
+default_timeout_ms: 80.0
+executor_type: process
+devices: null
+batch_size_per_device: {}
+default_batch_size: 10
+process_workers_per_gpu: 1
+compile_models: true

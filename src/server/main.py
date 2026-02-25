@@ -13,6 +13,14 @@ import os
 
 base_dir = Path(__file__).parent.parent
 
+def _load_tts_config() -> StreamingTTSConfig:
+    path = Path("config.yml")
+    if path.exists():
+        return StreamingTTSConfig.from_yaml(path)
+    print(f"Warning: config.yml not found at {path}")
+    print("Using default config")
+    return StreamingTTSConfig()
+
 def _random_voice_from_folder(voices_folder: Path) -> str:
     if not voices_folder.exists() or not voices_folder.is_dir():
         raise ValueError(f"Voices folder does not exist: {voices_folder}")
@@ -33,9 +41,9 @@ def load_models():
     
     if not converted_models_dir.exists():
         print(f"Warning: converted_models directory not found at {converted_models_dir}")
-        return StreamingTTS(StreamingTTSConfig()), []
+        return StreamingTTS(_load_tts_config()), []
     
-    config = StreamingTTSConfig()
+    config = _load_tts_config()
     tts = StreamingTTS(config)
     
     model_ids = []
