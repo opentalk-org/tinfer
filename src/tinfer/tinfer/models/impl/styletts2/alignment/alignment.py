@@ -35,7 +35,7 @@ class StyleTTS2AlignmentParser(AlignmentParser):
         
         token_durations_frames = pred_aln_trg.sum(axis=1)
         token_start_frames = np.array([
-            np.argmax(pred_aln_trg[i, :] > 0) - 1 if np.any(pred_aln_trg[i, :] > 0) else 0
+            np.argmax(pred_aln_trg[i, :] > 0) if np.any(pred_aln_trg[i, :] > 0) else 0
             for i in range(num_tokens)
         ])
         
