@@ -11,10 +11,10 @@ _MERGE_COST = 1
 def _is_punctuation_only(segment_text: str) -> bool:
     return not segment_text or all(c in _PUNCT_ONLY_CHARS for c in segment_text)
 
+_STRIP_PUNCT_RE = re.compile(r'[' + re.escape(";:,.!?¡¿—… \t\n\"\"«»\"\" ") + r']+$')
 
 def _strip_word_punct(word: str) -> str:
-    return re.sub(rf'[{re.escape(";:,.!?¡¿—… \t\n\"\"«»\"\" ")}]+$', '', word)
-
+    return _STRIP_PUNCT_RE.sub('', word)
 
 def _align_segments_to_words_dp(
     segment_texts: list[str],
@@ -62,7 +62,7 @@ def _align_segments_to_words_dp(
 
 
 class AlignmentConverter:
-    
+
     @staticmethod
     def phoneme_to_word(
         phoneme_alignments: list[AlignmentItem],
@@ -73,16 +73,16 @@ class AlignmentConverter:
 
         if not phoneme_alignments:
             return []
-        
+
         if not phonemized_text or word_separator not in phonemized_text:
             raise ValueError(
                 "phonemized_text with word separators is required for phoneme-to-word conversion"
             )
-        
+
         return AlignmentConverter._phoneme_to_word_with_separator(
             phoneme_alignments, original_text, phonemized_text, word_separator
         )
-    
+
     @staticmethod
     def _phoneme_to_word_with_separator(
         phoneme_alignments: list[AlignmentItem],
@@ -98,19 +98,19 @@ class AlignmentConverter:
         for segment in segments:
             if not segment:
                 continue
-            
+
             segment_phonemes = []
             segment_start = None
             segment_chars = list(segment)
             char_idx = 0
-            
+
             while char_idx < len(segment_chars) and phoneme_idx < len(phoneme_alignments):
                 phoneme_item = phoneme_alignments[phoneme_idx]
-                
+
                 if phoneme_item.item.strip() == '':
                     phoneme_idx += 1
                     continue
-                
+
                 if char_idx < len(segment_chars):
                     expected_char = segment_chars[char_idx]
                     if phoneme_item.item == expected_char:
@@ -184,7 +184,7 @@ class AlignmentConverter:
                         )
                         word_idx += 1
         return word_alignments
-    
+
     @staticmethod
     def word_to_char(
         word_alignments: list[AlignmentItem],
@@ -235,7 +235,7 @@ class AlignmentConverter:
                     char_idx += 1
 
         return char_alignments
-    
+
     @staticmethod
     def phoneme_to_char(
         phoneme_alignments: list[AlignmentItem],
@@ -248,7 +248,7 @@ class AlignmentConverter:
             phoneme_alignments, original_text, phonemized_text, word_separator
         )
         return AlignmentConverter.word_to_char(word_alignments, original_text)
-    
+
     @staticmethod
     def convert_to(
         alignments: list[AlignmentItem],
@@ -259,26 +259,26 @@ class AlignmentConverter:
     ) -> list[AlignmentItem]:
         """
         Convert alignments to target type.
-        
+
         Args:
             alignments: List of alignments (any type)
             target_type: Target alignment type
             original_text: Original input text
             phonemized_text: Phonemized text (for phoneme->word conversion)
             source_type: Source alignment type (if not provided, will be inferred)
-            
+
         Returns:
             List of alignments in target type
         """
         if not alignments:
             return []
-        
+
         if source_type is None:
             raise ValueError("source_type must be provided for conversion")
-        
+
         if source_type == target_type:
             return alignments
-        
+
         if source_type == AlignmentType.PHONEME:
             if target_type == AlignmentType.WORD:
                 return AlignmentConverter.phoneme_to_word(
@@ -288,11 +288,9 @@ class AlignmentConverter:
                 return AlignmentConverter.phoneme_to_char(
                     alignments, original_text, phonemized_text
                 )
-        
+
         elif source_type == AlignmentType.WORD:
             if target_type == AlignmentType.CHAR:
                 return AlignmentConverter.word_to_char(alignments, original_text)
-        
+
         return alignments
-
-
