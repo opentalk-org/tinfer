@@ -28,7 +28,7 @@ print(f"Using model: {model_name} with voice: {voice_id}")
 output_dir = base_dir / "output_wavs"
 output_dir.mkdir(parents=True, exist_ok=True)
 
-SERVER_ADDRESS = "localhost:50052"
+SERVER_ADDRESS = "localhost:50051"
 SAMPLE_RATE = 24000
 
 def bytes_to_audio(audio_bytes: bytes, sample_rate: int) -> np.ndarray:

@@ -22,8 +22,15 @@
             name = "tinfer";
             src = ./.;
             python = pkgs.python311;
-            extraBuildInputs = [pkgs.espeak];
-            runtimeLibs = [pkgs.espeak];
+            extraBuildInputs = [
+              pkgs.espeak
+            ];
+            runtimeLibs = [
+              pkgs.espeak
+            ];
+            uvOverride = pkgs.uv;
+            members = ["server" "tinfer"];
+            localDeps = ["server" "tinfer"];
             config = {
               Env = [
                 "LD_LIBRARY_PATH=${pkgs.espeak}/lib:$LD_LIBRARY_PATH"
@@ -69,7 +76,7 @@
           default = tinfer-server;
         };
         devShells.default = pkgs.mkShell {
-          packages = with pkgs; [espeak];
+          packages = [pkgs.espeak pkgs.uv];
           shellHook = ''
             echo "Found: ${pkgs.espeak}/lib"
             export LD_LIBRARY_PATH=${pkgs.espeak}/lib:$LD_LIBRARY_PATH
