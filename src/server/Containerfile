@@ -1,29 +1,11 @@
-FROM pytorch/pytorch:2.10.0-cuda13.0-cudnn9-runtime
-# TODO: check what version is most commonly used.
-
-WORKDIR /app
+FROM ghcr.io/astral-sh/uv:debian
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
-    espeak-ng \
-    python3-venv \
-    && rm -rf /var/lib/apt/lists/*
+    espeak-ng
 
-RUN mkdir /tinfer
-
-COPY tinfer /tinfer
-COPY server /app
-COPY server/config.yml /app/config.yml
-
-RUN python -m venv /venv
-RUN /venv/bin/pip install --upgrade pip
-
-WORKDIR /tinfer
-RUN /venv/bin/pip install .[inference]
-
-EXPOSE ${TINFER_GRPC_PORT}
-EXPOSE ${TINFER_WEBSOCKETS_PORT}
+COPY src /app
 WORKDIR /app
 
-# replace with daphne later
-CMD ["python", "main.py"] 
+RUN uv sync --all-packages
+CMD ["uv", "run", "--package", "server", "-m", "server.main"]
