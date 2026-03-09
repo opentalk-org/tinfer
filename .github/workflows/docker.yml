@@ -1,0 +1,48 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: tinfer-server:local
+
+      - name: Get image hash and push
+        run: |
+          HASH=$(docker inspect --format='{{slice .Id 7 19}}' tinfer-server:local)
+          docker tag tinfer-server:local opentalk/tinfer:$HASH
+          docker push opentalk/tinfer:$HASH
+          echo "Pushed opentalk/tinfer:$HASH"
+          echo "IMAGE_TAG=$HASH" >> $GITHUB_STEP_SUMMARY
