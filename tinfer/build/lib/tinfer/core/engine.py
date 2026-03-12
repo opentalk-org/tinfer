@@ -20,6 +20,7 @@ from tinfer.errors import InferenceError
 _STREAM_PARAM_KEYS = frozenset({
     "chunk_length_schedule",
     "min_chunk_length_schedule",
+    "max_chunk_length_chars",
     "min_chars_trigger",
     "timeout_trigger_ms",
     "alignment_type",
@@ -237,6 +238,7 @@ class StreamingTTS:
             "nonce": str(uuid.uuid4()),
             "chunk_length_schedule": self.config.default_chunk_schedule.copy(),
             "min_chunk_length_schedule": self.config.default_min_chunk_schedule.copy(),
+            "max_chunk_length_chars": self.config.max_chunk_length_chars,
             "min_chars_trigger": self.config.min_chars_trigger,
             "timeout_trigger_ms": self.config.default_timeout_ms,
             "alignment_type": self.config.default_alignment_type,

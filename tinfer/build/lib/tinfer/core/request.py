@@ -20,6 +20,7 @@ class AlignmentType(Enum):
 class StreamParams(TypedDict, total=False):
     chunk_length_schedule: list[int]
     min_chunk_length_schedule: list[int]
+    max_chunk_length_chars: int
     min_chars_trigger: int
     timeout_trigger_ms: float
     alignment_type: AlignmentType
@@ -99,6 +100,7 @@ class TTSRequest:
 
     chunk_length_schedule: list[int] = field(default_factory=lambda: [120, 160, 250, 290])
     min_chunk_length_schedule: list[int] = field(default_factory=lambda: [50, 80, 120, 150])
+    max_chunk_length_chars: int = 1024
     min_chars_trigger: int = 10
     timeout_trigger_ms: float = 80.0
     last_commit_time: float | None = None

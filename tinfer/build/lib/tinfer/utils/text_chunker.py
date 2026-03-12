@@ -56,10 +56,11 @@ class TextChunker:
         return self._split_text_recursive(text, request, chunk_index, separators, 0)
 
     def get_max_chunk_size(self, request: TTSRequest, chunk_index: int) -> int:
-        """Get max chunk size for current chunk index."""
         if chunk_index >= len(request.chunk_length_schedule):
-            return request.chunk_length_schedule[-1]
-        return request.chunk_length_schedule[chunk_index]
+            schedule_max = request.chunk_length_schedule[-1]
+        else:
+            schedule_max = request.chunk_length_schedule[chunk_index]
+        return min(schedule_max, request.max_chunk_length_chars)
 
     def get_min_chunk_size(self, request: TTSRequest, chunk_index: int) -> int:
         """Get min chunk size for current chunk index."""
@@ -77,22 +78,15 @@ class TextChunker:
     ) -> List[str]:
         if recursion_depth > 100:
             chunks = []
-            if chunk_index >= len(request.chunk_length_schedule):
-                max_size = request.chunk_length_schedule[-1]
-            else:
-                max_size = request.chunk_length_schedule[chunk_index]
+            max_size = self.get_max_chunk_size(request, chunk_index)
             for i in range(0, len(text), max_size):
                 chunk = text[i : i + max_size]
                 if chunk:
                     chunks.append(chunk)
             return chunks
-        
-        if chunk_index >= len(request.chunk_length_schedule):
-            max_size = request.chunk_length_schedule[-1]
-            min_size = request.min_chunk_length_schedule[-1]
-        else:
-            max_size = request.chunk_length_schedule[chunk_index]
-            min_size = request.min_chunk_length_schedule[chunk_index]
+
+        max_size = self.get_max_chunk_size(request, chunk_index)
+        min_size = self.get_min_chunk_size(request, chunk_index)
         
         if len(text) <= max_size:
             return [text]

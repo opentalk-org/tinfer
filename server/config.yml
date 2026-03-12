@@ -8,6 +8,7 @@ default_min_chunk_schedule:
   - 80
   - 120
   - 150
+max_chunk_length_chars: 1024
 default_alignment_type: word
 min_chars_trigger: 10
 default_timeout_ms: 80.0
