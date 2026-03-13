@@ -2,7 +2,8 @@
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    x2container.url = "git+file:///Users/patrykwojnarowski/dev/x2container.nix";
+    x2container.url = "github:dialohq/x2container.nix";
+    x2container.inputs.nixpkgs.follows = "nixpkgs";
     nix2container.follows = "x2container/nix2container";
   };
 
@@ -26,19 +27,36 @@
             extraBuildInputs = [
               pkgs.espeak
             ];
+
             runtimeLibs = [
               pkgs.espeak
               pkgs.ffmpeg
+              pkgs.gcc
               gccLib
+              pkgs.glibc
             ];
-            uvOverride = pkgs.uv;
+            extraLdLibraryPath = ":/usr/local/nvidia/lib:/usr/local/nvidia/lib64";
+            extraLibraryPath = ":/usr/local/nvidia/lib:/usr/local/nvidia/lib64";
+
+            # Dynamic linker problems
+            baseImage = {
+              imageName = "ubuntu";
+              imageDigest = "sha256:fed6ddb82c61194e1814e93b59cfcb6759e5aa33c4e41bb3782313c2386ed6df";
+              arch = "amd64";
+              sha256 = "sha256-idRF8oA0N5fuUNN2ch3iA+moDtx0KyP4EDDWHmb2PeY=";
+            };
+            runtimeExecutableDeps = [pkgs.ffmpeg pkgs.patchelf pkgs.gcc pkgs.openssl];
             members = ["server" "tinfer"];
             localDeps = ["server" "tinfer"];
             config = {
               Env = [
-                "LD_LIBRARY_PATH=${pkgs.espeak}/lib:${gccLib}/lib:$LD_LIBRARY_PATH"
+                "CC=${pkgs.gcc}/bin/gcc"
                 "USER=root"
                 "TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor"
+                "PHONEMIZER_ESPEAK_LIBRARY=${pkgs.espeak}/lib/libespeak-ng.so.1"
+                "PHONEMIZER_ESPEAK_PATH=${pkgs.espeak}/bin/espeak"
+                "PYTHONUNBUFFERED=1"
+                "TRITON_LIBCUDA_PATH=/usr/local/nvidia/lib/libcuda.so"
               ];
               Cmd = ["python" "-m" "server.main"];
             };
@@ -92,7 +110,6 @@
         devShells.default = pkgs.mkShell {
           packages = [pkgs.espeak pkgs.uv];
           shellHook = ''
-            echo "Found: ${pkgs.espeak}/lib"
             export LD_LIBRARY_PATH=${pkgs.espeak}/lib:$LD_LIBRARY_PATH
           '';
         };
