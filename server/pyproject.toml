@@ -1,0 +1,33 @@
+[project]
+name = "server"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = "==3.11.*"
+dependencies = [
+    "aiohttp>=3.13.3",
+    "einops>=0.8.2",
+    "einops-exts>=0.0.4",
+    "librosa>=0.11.0",
+    "munch>=4.0.0",
+    "nltk>=3.9.3",
+    "phonemizer>=3.3.0",
+    "pydub>=0.25.1",
+    "pyyaml>=6.0.3",
+    "setuptools>=82.0.0",
+    "tinfer",
+    "torch>=2.10.0",
+    "torchaudio>=2.10.0",
+    "tqdm>=4.67.3",
+    "transformers>=5.2.0",
+    "tinfer",
+    "python-dotenv>=0.9.9",
+]
+
+index-strategy = "unsafe-best-match"
+extra-index-url = [
+    "https://download.pytorch.org/whl/cu128",
+]
+
+[tool.uv.sources]
+tinfer = { workspace = true }
