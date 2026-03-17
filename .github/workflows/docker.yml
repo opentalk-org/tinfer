@@ -31,6 +31,7 @@ jobs:
 
           nix run \
             --inputs-from . \
+            --option sandbox false \
             'nix2container#skopeo-nix2container' -- copy \
             --dest-creds "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
             nix:result \
