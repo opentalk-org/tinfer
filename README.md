@@ -12,7 +12,7 @@ tinfer: Fast production ready TTS inference server with gRPC and elevenlabs-comp
 ## Prerequirements
 
 - [espeak-ng](https://github.com/espeak-ng/espeak-ng): Required for phonemizer functionality.
-- Python >= 3.11
+- Python >= 3.12
 
 ## Installation
 

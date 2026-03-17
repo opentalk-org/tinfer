@@ -1,0 +1,20 @@
+[project]
+name = "server"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = "==3.11.*"
+dependencies = [
+    "pyyaml>=6.0.3",
+    "setuptools>=82.0.0",
+    "tqdm>=4.67.3",
+    "tinfer[inference]",
+]
+
+index-strategy = "unsafe-best-match"
+extra-index-url = [
+    "https://download.pytorch.org/whl/cu128",
+]
+
+[tool.uv.sources]
+tinfer = { workspace = true }

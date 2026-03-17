@@ -1,0 +1,11 @@
+FROM ghcr.io/astral-sh/uv:debian
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    espeak-ng
+
+COPY src /app
+WORKDIR /app
+
+RUN uv sync --all-packages
+CMD ["uv", "run", "--package", "server", "-m", "server.main"]

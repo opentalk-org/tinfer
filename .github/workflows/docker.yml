@@ -1,0 +1,39 @@
+name: Build and Push Nix Image
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Set up Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Build image
+        run: nix build .#tinfer-server
+
+      - name: Push to ghcr.io
+        run: |
+          SHORT="${GITHUB_SHA:0:12}"
+          IMAGE="ghcr.io/${{ github.repository }}"
+
+          nix run \
+            --inputs-from . \
+            'nix2container#skopeo-nix2container' -- copy \
+            --dest-creds "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
+            nix:result \
+            "docker://$IMAGE:$SHORT"
+
+          echo "Pushed $IMAGE:$SHORT" >> $GITHUB_STEP_SUMMARY
