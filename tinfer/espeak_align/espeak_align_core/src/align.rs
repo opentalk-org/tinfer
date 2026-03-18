@@ -237,8 +237,6 @@ fn beam_search_chunk(
     let mut best_complete: Option<usize> = None;
 
     while !beams.is_empty() {
-        // Match C++ behavior: stable sort by cost, preserving insertion order for ties.
-        // We emulate stability via `order` tiebreaker.
         beams.sort_by(|a, b| {
             let c = a.cost.partial_cmp(&b.cost).unwrap_or(Ordering::Equal);
             if c != Ordering::Equal {

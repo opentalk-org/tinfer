@@ -2,6 +2,7 @@ use thiserror::Error;
 use crate::phonemizer_pool::Phonemizer;
 
 mod align;
+mod char_match;
 mod espeak;
 mod phonemizer_pool;
 mod split;

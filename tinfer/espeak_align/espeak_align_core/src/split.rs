@@ -1,19 +1,6 @@
+use crate::char_match;
 use crate::utf8::utf8_next;
 use std::collections::BTreeSet;
-
-fn is_digit_cp(cp: u32) -> bool {
-    (b'0' as u32) <= cp && cp <= (b'9' as u32)
-}
-
-fn is_sep_cp(cp: u32) -> bool {
-    cp == (b'.' as u32)
-        || cp == (b',' as u32)
-        || cp == (b':' as u32)
-        || cp == (b'/' as u32)
-        || cp == (b'-' as u32)
-        || cp == 0x2013
-        || cp == 0x2014
-}
 
 fn punct_set_from_string(punctuation: &str) -> BTreeSet<u32> {
     let mut out = BTreeSet::new();
@@ -50,16 +37,16 @@ pub fn split_by_punctuation_impl(
     let mut protected_char_pos: BTreeSet<usize> = BTreeSet::new();
     let mut ci = 0usize;
     while ci < n {
-        if !is_digit_cp(cps[ci]) {
+        if !char_match::is_digit_cp(cps[ci]) {
             ci += 1;
             continue;
         }
 
         let start = ci;
-        while ci < n && (is_digit_cp(cps[ci]) || is_sep_cp(cps[ci])) {
+        while ci < n && (char_match::is_digit_cp(cps[ci]) || char_match::is_number_sep_cp(cps[ci])) {
             ci += 1;
         }
-        while ci > start && !is_digit_cp(cps[ci - 1]) {
+        while ci > start && !char_match::is_digit_cp(cps[ci - 1]) {
             ci -= 1;
         }
 
