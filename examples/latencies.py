@@ -29,7 +29,7 @@ async def measure_user_latency(async_tts, user_id):
 async def run_latency_test(num_users_list):
     default_max_batch_size = 10
     config = StreamingTTSConfig(
-        default_max_batch_size=default_max_batch_size,
+        default_batch_size=default_max_batch_size,
         default_chunk_schedule=[80, 160, 250, 290]
     )
     tts = load_model(config=config, warmup_kwargs={"num_warmup_tasks": default_max_batch_size})

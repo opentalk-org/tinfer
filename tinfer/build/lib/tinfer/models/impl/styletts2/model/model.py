@@ -692,10 +692,8 @@ class StyleTTS2(ChunkedModel):
                 "sample_rate": sample_rate,
                 "style_vector": updated_style_vector,
                 "alignment_type": alignment_type.value,
+                "word_alignments": final_alignments,
             }
-            
-            if final_alignments:
-                metadata["word_alignments"] = final_alignments
             
             results.append(IntermediateRepresentation(
                 data=audio,
