@@ -86,21 +86,7 @@ def convert_json_to_pth(json_path: str, output_dir: str = None):
         
         output_path = output_dir / f"{base_name}.pth"
         
-        metadata = {
-            'source': str(json_file),
-            'shape': list(tensor.shape),
-            'index': i
-        }
-        if isinstance(item, dict):
-            if 'file' in item:
-                metadata['source_file'] = item['file']
-            if text:
-                metadata['text'] = text
-        
-        torch.save({
-            'voice_vector': tensor,
-            'metadata': metadata
-        }, str(output_path))
+        torch.save(tensor, str(output_path))
         
         saved_files.append(output_path)
         print(f"  [{i+1}/{len(items)}] Saved {output_path.name} (shape: {tensor.shape})")
