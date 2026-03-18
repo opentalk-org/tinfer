@@ -28,8 +28,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install espeak-ng (Linux)
-        if: runner.os == 'Linux'
+      - name: Install espeak-ng
         run: |
           sudo apt-get update
           sudo apt-get install -y libespeak-ng-dev
