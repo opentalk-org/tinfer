@@ -371,16 +371,17 @@ class StyleTTS2(ChunkedModel):
             
             if not styletts2_params.phonemized:
                 result = self._phonemizer.process_text(text, phonemize=True, word_alignment=True)
-                processed_text, phonemized_text_for_alignment = result
+                processed_text, word_phoneme_data = result
                 tokens = self._phonemizer.tokenize(processed_text)
             else:
                 tokens = self._phonemizer.tokenize(text)
-            
+                word_phoneme_data = None
+
             tokens_for_alignment = tokens.copy()
             tokens.insert(0, 0)
             all_tokens.append(tokens)
             all_tokens_for_alignment.append(tokens_for_alignment)
-            all_phonemized_texts_for_alignment.append(phonemized_text_for_alignment)
+            all_phonemized_texts_for_alignment.append(word_phoneme_data)
         
         return all_tokens, all_tokens_for_alignment, all_phonemized_texts_for_alignment, original_texts
     
@@ -663,19 +664,19 @@ class StyleTTS2(ChunkedModel):
             
             target_alignment_type = alignment_type
             if target_alignment_type == AlignmentType.WORD:
-                phonemized_text_with_sep = all_phonemized_texts_for_alignment[b]
+                word_phoneme_data = all_phonemized_texts_for_alignment[b]
                 word_alignments = self._alignment_parser.convert_to_word(
                     phoneme_alignments,
                     original_texts[b],
-                    phonemized_text_with_sep,
+                    word_phoneme_data,
                 )
                 final_alignments = word_alignments
             elif target_alignment_type == AlignmentType.CHAR:
-                phonemized_text_with_sep = all_phonemized_texts_for_alignment[b]
+                word_phoneme_data = all_phonemized_texts_for_alignment[b]
                 char_alignments = self._alignment_parser.convert_to_char(
                     phoneme_alignments,
                     original_texts[b],
-                    phonemized_text_with_sep,
+                    word_phoneme_data,
                 )
                 final_alignments = char_alignments
             else:

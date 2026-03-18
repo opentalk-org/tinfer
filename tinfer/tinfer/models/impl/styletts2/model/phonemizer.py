@@ -1,29 +1,24 @@
 from __future__ import annotations
-from typing import Optional, List, Union, Tuple
-import threading
+
 import re
-import phonemizer
+import threading
+from typing import Union
+
+import espeak_align
 from nltk.tokenize import TweetTokenizer
 
+_PUNCTUATION = ';:,.!?¡¿—…"«»""'   
+_ENGINE_CACHE: dict[tuple[str, bool, int], tuple[espeak_align.Engine, threading.Lock]] = {}
+_engine_cache_lock = threading.Lock()
 
-_espeak_backend_cache = {}
-_cache_lock = threading.Lock()
 
-
-def get_espeak_backend(language: str, preserve_punctuation: bool, with_stress: bool, tie: bool):
-    key = (language, preserve_punctuation, with_stress, tie)
-    with _cache_lock:
-        if key not in _espeak_backend_cache:
-            _espeak_backend_cache[key] = {
-                'backend': phonemizer.backend.EspeakBackend(
-                    language=language,
-                    preserve_punctuation=preserve_punctuation,
-                    with_stress=with_stress,
-                    tie=tie,
-                ),
-                'lock': threading.Lock()
-            }
-        return _espeak_backend_cache[key]
+def _get_engine(language: str, tie: bool, espeak_workers: int) -> tuple[espeak_align.Engine, threading.Lock]:
+    key = (language, tie, espeak_workers)
+    with _engine_cache_lock:
+        if key not in _ENGINE_CACHE:
+            eng = espeak_align.Engine(language, tie=tie, espeak_workers=espeak_workers)
+            _ENGINE_CACHE[key] = (eng, threading.Lock())
+        return _ENGINE_CACHE[key]
 
 
 class StyleTTS2Phonemizer:
@@ -32,89 +27,73 @@ class StyleTTS2Phonemizer:
         language: str = "pl",
         preserve_punctuation: bool = True,
         with_stress: bool = True,
-        tie: bool = True
+        tie: bool = True,
+        espeak_workers: int = 4,
     ):
         self.language = language
         self.preserve_punctuation = preserve_punctuation
         self.with_stress = with_stress
         self.tie = tie
-        self.phonemizer = None
-        self._phonemizer_lock = None
+        self.espeak_workers = espeak_workers
+        self._engine, self._engine_lock = _get_engine(language, tie, espeak_workers)
         self.t_tokenizer = TweetTokenizer()
-        self._init_phonemizer()
         self._init_tokenizer()
-    
-    def _init_phonemizer(self):
-        backend_info = get_espeak_backend(
-            language=self.language,
-            preserve_punctuation=self.preserve_punctuation,
-            with_stress=self.with_stress,
-            tie=self.tie,
-        )
-        self.phonemizer = backend_info['backend']
-        self._phonemizer_lock = backend_info['lock']
-    
-    def _init_tokenizer(self):
+
+    def _init_tokenizer(self) -> None:
         _pad = "$"
         _punctuation = ';:,.!?¡¿—…"«»"" '
-        _letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+        _letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
         _letters_ipa = "ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʂʃʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢ\u0303\u032f\u032a\u0306ˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘'̩'\u0361"
-
         symbols = [_pad] + list(_punctuation) + list(_letters) + list(_letters_ipa)
-        self.word_index_dictionary = {symbol: i for i, symbol in enumerate(symbols)}
-        self.index_to_symbol = {i: symbol for symbol, i in self.word_index_dictionary.items()}
+        self.word_index_dictionary = {s: i for i, s in enumerate(symbols)}
+        self.index_to_symbol = {i: s for s, i in self.word_index_dictionary.items()}
 
     def _preprocess_text(self, text: str) -> str:
         text = re.sub(re.compile(r'[„""""«»"]'), '"', text)
-        text = re.sub(re.compile('[-—−‒‒–]'), '—', text)
-        text = re.sub(re.compile(r'[\(\)\*\/\[\]]'), '', text)
+        text = re.sub(re.compile("[-—−‒‒–]"), "—", text)
+        text = re.sub(re.compile(r"[\(\)\*\/\[\]]"), "", text)
+        # text = re.sub(re.compile(r"[" + re.escape(';:,.!?¡¿—… \t\n""«»"" ') + r"]+$"), "", text).strip()
         return text
 
-    def phonemize(self, text: str, separator: Optional[phonemizer.separator.Separator] = None) -> str:        
-        try:
-            with self._phonemizer_lock: # TODO: espeak phonemizer is not thread safe
-                if separator is not None:
-                    phonemized = self.phonemizer.phonemize([text], separator=separator)[0]
-                    phonemized = phonemized.replace('|w|', ' |f|') # not sure why espeak-ng doesn't handle it
-                else:
-                    phonemized = self.phonemizer.phonemize([text])[0]
-                    phonemized = phonemized.replace(' w ', ' f ')
-            
-            return phonemized
-        except Exception as e:
-            return text
-    
-    def process_text(self, text: str, phonemize: bool = True, word_alignment: bool = False) -> Union[str, Tuple[str, str]]:
+    @staticmethod
+    def _normalize_phoneme_string(s: str) -> str:
+        s = s.replace("``", '"').replace("''", '"')
+        return " ".join(s.split())
+
+    def _filter_to_vocab(self, s: str) -> str:
+        return "".join(c for c in s if c in self.word_index_dictionary)
+
+    def process_text(
+        self,
+        text: str,
+        phonemize: bool = True,
+        word_alignment: bool = False,
+    ) -> Union[str, tuple[str, tuple[list[str], list[str]]]]:
         text = text.strip()
-        
         if not phonemize:
             return text
-        
+
         preprocessed = self._preprocess_text(text)
-        tokenized = " ".join(self.t_tokenizer.tokenize(preprocessed))
-        
+        with self._engine_lock:
+            words, phonemes_list = self._engine.align(preprocessed, _PUNCTUATION, threads=8)
+
+        phonemes_list = [self._normalize_phoneme_string(p) for p in phonemes_list]
+        phonemes_list = [self._filter_to_vocab(p) for p in phonemes_list]
+        phonemized_string = self._normalize_phoneme_string("".join(phonemes_list))
+
+        print(phonemized_string)
+        print(words)
+        print(phonemes_list)
+
         if word_alignment:
-            separator = phonemizer.separator.Separator(word="|")
-            ps_with_sep = self.phonemize(tokenized, separator=separator)
-            ps_with_sep = ps_with_sep.replace('``', '"')
-            ps_with_sep = ps_with_sep.replace("''", '"')
-            
-            ps_for_inference = ps_with_sep.replace('|', ' ')
-            ps_for_inference = ' '.join(ps_for_inference.split())
+            return phonemized_string, (words, phonemes_list)
+        return phonemized_string
 
-            return ps_for_inference, ps_with_sep
-        else:
-            ps = self.phonemize(tokenized)
-            ps = ps.replace('``', '"')
-            ps = ps.replace("''", '"')
-            return ps
-    
-    def tokenize(self, text: str) -> List[int]:
-        return [self.word_index_dictionary[char] for char in text if char in self.word_index_dictionary]
-    
-    def detokenize(self, tokens: List[int]) -> str:
-        return ''.join(self.index_to_symbol[token] for token in tokens if token in self.index_to_symbol)
-    
-    def __call__(self, text: str) -> List[int]:
+    def tokenize(self, text: str) -> list[int]:
+        return [self.word_index_dictionary[c] for c in text if c in self.word_index_dictionary]
+
+    def detokenize(self, tokens: list[int]) -> str:
+        return "".join(self.index_to_symbol[t] for t in tokens if t in self.index_to_symbol)
+
+    def __call__(self, text: str) -> list[int]:
         return self.tokenize(text)
-

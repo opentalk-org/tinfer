@@ -1,0 +1,9 @@
+[package]
+name = "espeak-align-core"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[dependencies]
+thiserror = "2"
+libc = "0.2"

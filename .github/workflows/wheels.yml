@@ -1,0 +1,50 @@
+name: Build wheels (espeak_align)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "tinfer/tinfer/espeak_align/**"
+      - "tinfer/tinfer/pyproject.toml"
+      - "tinfer/.github/workflows/wheels.yml"
+
+jobs:
+  build:
+    name: ${{ matrix.os }} - py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install espeak-ng (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libespeak-ng-dev
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          working-directory: tinfer/tinfer/espeak_align/alignrust
+          args: --release --out ../../../../dist
+          sccache: "true"
+          manylinux: auto
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: tinfer/dist/*
