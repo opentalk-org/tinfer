@@ -37,8 +37,8 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           command: build
-          working-directory: tinfer/tinfer/espeak_align/alignrust
-          args: --release --out ../../../../dist
+          working-directory: tinfer/tinfer/espeak_align
+          args: --release --out dist
           sccache: "true"
           manylinux: auto
 
@@ -46,4 +46,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.os }}-py${{ matrix.python-version }}
-          path: tinfer/dist/*
+          path: tinfer/tinfer/espeak_align/dist/*
