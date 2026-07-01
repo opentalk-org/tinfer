@@ -1486,6 +1486,12 @@ inference = [
     { name = "uvicorn" },
 ]
 
+[package.dev-dependencies]
+heavy = [
+    { name = "torch" },
+    { name = "torchaudio" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", marker = "extra == 'inference'", specifier = ">=3.13.3" },
@@ -1510,6 +1516,12 @@ requires-dist = [
     { name = "websockets", specifier = ">=16.0" },
 ]
 provides-extras = ["inference"]
+
+[package.metadata.requires-dev]
+heavy = [
+    { name = "torch", specifier = ">=2.10.0" },
+    { name = "torchaudio", specifier = ">=2.10.0" },
+]
 
 [[package]]
 name = "tokenizers"
