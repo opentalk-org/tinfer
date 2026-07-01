@@ -18,6 +18,9 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            extra-experimental-features = ca-derivations
 
       - name: Set up Nix cache
         uses: DeterminateSystems/magic-nix-cache-action@main
@@ -26,7 +29,7 @@ jobs:
         run: |
           sudo mkdir -p /run/containers
           sudo chmod 0755 /run/containers
-          nix build --option sandbox false --extra-experimental-features ca-derivations .#tinfer-server
+          nix build --option sandbox false .#tinfer-server
 
       - name: Push to ghcr.io
         run: |
