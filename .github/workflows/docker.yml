@@ -26,8 +26,6 @@ jobs:
         run: nix build --option sandbox false .#tinfer-server
 
       - name: Push to ghcr.io
-        env:
-          REGISTRY_AUTH_FILE: ${{ runner.temp }}/auth.json
         run: |
           SHORT="${GITHUB_SHA:0:12}"
           if [ "${{ github.event_name }}" = "pull_request" ]; then
