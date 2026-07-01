@@ -30,6 +30,8 @@
 
             runtimeLibs = [
               pkgs.espeak
+              pkgs.rustc
+              pkgs.cargo
               pkgs.ffmpeg
               pkgs.gcc
               gccLib
