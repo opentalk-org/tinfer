@@ -11,10 +11,5 @@ dependencies = [
     "tinfer[inference]",
 ]
 
-index-strategy = "unsafe-best-match"
-extra-index-url = [
-    "https://download.pytorch.org/whl/cu128",
-]
-
 [tool.uv.sources]
 tinfer = { workspace = true }
