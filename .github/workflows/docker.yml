@@ -22,9 +22,6 @@ jobs:
           extra-conf: |
             extra-experimental-features = ca-derivations
 
-      - name: Set up Nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
-
       - name: Build image
         run: |
           sudo mkdir -p /run/containers
