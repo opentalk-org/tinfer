@@ -73,7 +73,7 @@ class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
         model_id, voice_id, params = self._get_params(request)
         text = request.text
         try:
-            chunk: AudioChunk = self.tts.generate_full(
+            chunk: AudioChunk = await self.tts.generate_full(
                 model_id=model_id,
                 voice_id=voice_id,
                 text=text,

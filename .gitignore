@@ -7,3 +7,7 @@ __pycache__/
 converted_models
 result
 target/
+build/
+benchmark_outputs/
+alignment_stress_outputs/
+alignment_artifacts/
