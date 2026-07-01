@@ -46,8 +46,8 @@
               sha256 = "sha256-idRF8oA0N5fuUNN2ch3iA+moDtx0KyP4EDDWHmb2PeY=";
             };
             runtimeExecutableDeps = [pkgs.ffmpeg pkgs.patchelf pkgs.gcc pkgs.openssl];
-            members = ["server" "tinfer"];
-            localDeps = ["server" "tinfer"];
+            members = ["server" "tinfer" "tinfer/espeak_align"];
+            localDeps = ["server" "tinfer" "tinfer/espeak_align"];
             config = {
               Env = [
                 "CC=${pkgs.gcc}/bin/gcc"
