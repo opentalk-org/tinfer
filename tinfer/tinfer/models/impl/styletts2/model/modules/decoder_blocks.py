@@ -1,4 +1,5 @@
 import math
+import os
 import random
 
 import numpy as np
@@ -21,7 +22,14 @@ class AdaIN1d(nn.Module):
         h = self.fc(s)
         h = h.view(h.size(0), h.size(1), 1)
         gamma, beta = torch.chunk(h, chunks=2, dim=1)
-        return (1 + gamma) * self.norm(x) + beta
+        if os.getenv("TINFER_TRT_EXPORT") == "1":
+            mean = x.mean(dim=2, keepdim=True)
+            centered = x - mean
+            variance = (centered * centered).mean(dim=2, keepdim=True)
+            normalized = centered * torch.rsqrt(variance + getattr(self.norm, "eps", 1e-5))
+        else:
+            normalized = self.norm(x)
+        return (1 + gamma) * normalized + beta
 
 
 class AdaINResBlock1(nn.Module):
