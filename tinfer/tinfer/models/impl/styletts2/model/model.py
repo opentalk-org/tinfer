@@ -19,6 +19,13 @@ from tinfer.models.impl.styletts2.alignment.alignment import StyleTTS2AlignmentP
 from tinfer.models.impl.styletts2.model.modules.diffusion.sampler import DiffusionSampler, ADPM2Sampler, KarrasSchedule
 from tinfer.models.impl.styletts2.model.modules.load_utils import load_model, load_model_from_state, get_model_state_dict
 from tinfer.models.impl.styletts2.model.modules.config import ModelConfig
+from tinfer.models.impl.styletts2.model.modules.tensorrt_export import remove_decoder_weight_norm
+from tinfer.models.impl.styletts2.model.modules.tensorrt_runtime import (
+    DecoderShapeBucket,
+    DecoderTRTEngineSpec,
+    TensorRTDecoderRunner,
+    decoder_shape_bucket,
+)
 from .phonemizer import StyleTTS2Phonemizer
 from .inference_config import StyleTTS2Params
 from tinfer.models.impl.styletts2.voice.encoder import StyleTTS2VoiceEncoder
@@ -123,6 +130,11 @@ class StyleTTS2(ChunkedModel):
         self.max_batch_size = 10
 
         self._compile_model_flag = False
+        self._trt_decoder_enabled = False
+        self._trt_engine_dir: str | None = None
+        self._trt_max_batch = 16
+        self._trt_max_asr_frames = 1024
+        self._trt_decoder_runners: dict[tuple[int, int], TensorRTDecoderRunner] = {}
     
     def _initialize_from_config(self, config: dict[str, Any], device: str) -> None:
         self._config = config
@@ -146,8 +158,43 @@ class StyleTTS2(ChunkedModel):
             )
 
         self.to(device)
+        self._configure_tensorrt_decoder()
         
         self._loaded = True
+
+    def _configure_tensorrt_decoder(self) -> None:
+        self._trt_decoder_enabled = os.getenv("TINFER_TRT_DECODER") == "1" or os.getenv("TINFER_TRT") == "1"
+        if not self._trt_decoder_enabled:
+            return
+        if self._model is None or self._model_config is None:
+            return
+        decoder_type = getattr(self._model_config.decoder, "type", None) if hasattr(self._model_config, "decoder") else None
+        if decoder_type != "istftnet":
+            raise RuntimeError(f"TensorRT decoder mode supports istftnet decoder only, got {decoder_type!r}")
+        engine_dir = os.getenv("TINFER_TRT_ENGINE_DIR")
+        if not engine_dir:
+            raise RuntimeError("TINFER_TRT_ENGINE_DIR is required when TensorRT decoder mode is enabled")
+        self._trt_engine_dir = engine_dir
+        self._trt_max_batch = int(os.getenv("TINFER_TRT_MAX_BATCH", "16"))
+        self._trt_max_asr_frames = int(os.getenv("TINFER_TRT_MAX_ASR_FRAMES", "1024"))
+        remove_decoder_weight_norm(self._model.decoder)
+        self._preload_trt_decoder_runners()
+
+    def _preload_trt_decoder_runners(self) -> None:
+        if self._trt_engine_dir is None:
+            return
+        engine_dir = Path(self._trt_engine_dir)
+        for engine_path in sorted(engine_dir.glob("decoder_b*_t*.engine")):
+            spec = DecoderTRTEngineSpec.from_file_name(engine_path.name)
+            if spec.batch_size > self._trt_max_batch or spec.asr_frames > self._trt_max_asr_frames:
+                continue
+            key = (spec.batch_size, spec.asr_frames)
+            if key not in self._trt_decoder_runners:
+                self._trt_decoder_runners[key] = TensorRTDecoderRunner(
+                    engine_dir,
+                    batch_size=spec.batch_size,
+                    asr_frames=spec.asr_frames,
+                )
 
     def _compile_model(self) -> None:
         # pass
@@ -484,6 +531,41 @@ class StyleTTS2(ChunkedModel):
         last_slice = tensor.select(dim, seq_len - 1).unsqueeze(dim)
         padding = last_slice.expand(*pad_shape)
         return torch.cat([tensor, padding], dim=dim)
+
+    def _pad_or_clip_to_size(self, tensor: torch.Tensor, target_size: int, dim: int = -1) -> torch.Tensor:
+        if dim < 0:
+            dim = len(tensor.shape) + dim
+        current_size = tensor.shape[dim]
+        if current_size == target_size:
+            return tensor
+        if current_size > target_size:
+            slices = [slice(None)] * tensor.dim()
+            slices[dim] = slice(0, target_size)
+            return tensor[tuple(slices)]
+
+        padding_size = target_size - current_size
+        pad_shape = list(tensor.shape)
+        pad_shape[dim] = padding_size
+        last_slice = tensor.select(dim, current_size - 1).unsqueeze(dim)
+        padding = last_slice.expand(*pad_shape)
+        return torch.cat([tensor, padding], dim=dim)
+
+    def _pad_to_batch_target(self, tensor: torch.Tensor, target_batch_size: int) -> torch.Tensor:
+        return self._pad_or_clip_to_size(tensor, target_batch_size, dim=0)
+
+    def _get_trt_decoder_runner(self, bucket: DecoderShapeBucket) -> TensorRTDecoderRunner:
+        if self._trt_engine_dir is None:
+            raise RuntimeError("TensorRT decoder engine directory is not configured")
+        key = (bucket.batch_size, bucket.asr_frames)
+        runner = self._trt_decoder_runners.get(key)
+        if runner is None:
+            runner = TensorRTDecoderRunner(
+                self._trt_engine_dir,
+                batch_size=bucket.batch_size,
+                asr_frames=bucket.asr_frames,
+            )
+            self._trt_decoder_runners[key] = runner
+        return runner
     
     def _run_model_forward(
         self,
@@ -653,17 +735,47 @@ class StyleTTS2(ChunkedModel):
                     asr_new[:, :, 1:] = asr[:, :, 0:-1]
                     asr = asr_new
                 
-                asr_seq_padded = self._pad_to_multiple(asr, 128, dim=-1)
-                F0_pred_seq_padded = self._pad_to_multiple(F0_pred, 256, dim=-1)
-                N_pred_seq_padded = self._pad_to_multiple(N_pred, 256, dim=-1)
-                
-                asr_padded, _ = self._pad_to_batch_size(asr_seq_padded, batch_size)
-                F0_pred_padded, _ = self._pad_to_batch_size(F0_pred_seq_padded, batch_size)
-                N_pred_padded, _ = self._pad_to_batch_size(N_pred_seq_padded, batch_size)
-                ref_padded, _ = self._pad_to_batch_size(ref, batch_size)
+                trt_bucket = None
+                if self._trt_decoder_enabled:
+                    trt_bucket = decoder_shape_bucket(
+                        batch_size,
+                        asr.shape[-1],
+                        max_batch=self._trt_max_batch,
+                        max_frames=self._trt_max_asr_frames,
+                    )
+                    asr_seq_padded = self._pad_or_clip_to_size(asr, trt_bucket.asr_frames, dim=-1)
+                    F0_pred_seq_padded = self._pad_or_clip_to_size(F0_pred, trt_bucket.f0_frames, dim=-1)
+                    N_pred_seq_padded = self._pad_or_clip_to_size(N_pred, trt_bucket.f0_frames, dim=-1)
+
+                    asr_padded = self._pad_to_batch_target(asr_seq_padded, trt_bucket.batch_size)
+                    F0_pred_padded = self._pad_to_batch_target(F0_pred_seq_padded, trt_bucket.batch_size)
+                    N_pred_padded = self._pad_to_batch_target(N_pred_seq_padded, trt_bucket.batch_size)
+                    ref_padded = self._pad_to_batch_target(ref, trt_bucket.batch_size)
+                else:
+                    asr_seq_padded = self._pad_to_multiple(asr, 128, dim=-1)
+                    F0_pred_seq_padded = self._pad_to_multiple(F0_pred, 256, dim=-1)
+                    N_pred_seq_padded = self._pad_to_multiple(N_pred, 256, dim=-1)
+
+                    asr_padded, _ = self._pad_to_batch_size(asr_seq_padded, batch_size)
+                    F0_pred_padded, _ = self._pad_to_batch_size(F0_pred_seq_padded, batch_size)
+                    N_pred_padded, _ = self._pad_to_batch_size(N_pred_seq_padded, batch_size)
+                    ref_padded, _ = self._pad_to_batch_size(ref, batch_size)
             
             with timed_operation("decoder"):
-                out_padded = self._model.decoder(asr_padded, F0_pred_padded, N_pred_padded, ref_padded)
+                if self._trt_decoder_enabled:
+                    har = self._model.decoder.generator._preprocess_f0(F0_pred_padded)
+                    runner = self._get_trt_decoder_runner(trt_bucket)
+                    out_padded = runner.run(
+                        {
+                            "asr": asr_padded,
+                            "f0": F0_pred_padded,
+                            "noise": N_pred_padded,
+                            "style": ref_padded,
+                            "har": har,
+                        }
+                    )["audio"]
+                else:
+                    out_padded = self._model.decoder(asr_padded, F0_pred_padded, N_pred_padded, ref_padded)
             
             out = out_padded[:batch_size]
             
