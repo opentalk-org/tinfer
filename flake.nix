@@ -38,6 +38,7 @@
               pkgs.rustc
               pkgs.cargo
             ];
+            cacheGroupName = "heavy";
 
             runtimeLibs = [
               pkgs.espeak

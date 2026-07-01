@@ -37,10 +37,3 @@ inference = [
     "torch>=2.10.0",
     "torchaudio>=2.10.0",
 ]
-
-# installed first in a seperate layer so its cached
-[dependency-groups]
-heavy = [
-    "torch>=2.10.0",
-    "torchaudio>=2.10.0",
-]
