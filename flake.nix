@@ -26,12 +26,12 @@
             python = pkgs.python311;
             extraBuildInputs = [
               pkgs.espeak
+              pkgs.rustc
+              pkgs.cargo
             ];
 
             runtimeLibs = [
               pkgs.espeak
-              pkgs.rustc
-              pkgs.cargo
               pkgs.ffmpeg
               pkgs.gcc
               gccLib
