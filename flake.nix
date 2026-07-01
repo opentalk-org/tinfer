@@ -18,6 +18,14 @@
       system: let
         pkgs = import nixpkgs {inherit system;};
         gccLib = pkgs.stdenv.cc.cc.lib;
+        cargoBuildEnv = pkgs.runCommand "cargo-build-env" {} ''
+          mkdir -p "$out/nix-support"
+          cat > "$out/nix-support/setup-hook" <<'EOF'
+          export CARGO_HOME="$NIX_BUILD_TOP/cargo-home"
+          export CARGO_TARGET_DIR="$NIX_BUILD_TOP/cargo-target"
+          mkdir -p "$CARGO_HOME" "$CARGO_TARGET_DIR"
+          EOF
+        '';
       in {
         packages = rec {
           tinfer-server = x2container.lib.${system}.uv2container.buildImage {
@@ -25,6 +33,7 @@
             src = ./.;
             python = pkgs.python311;
             extraBuildInputs = [
+              cargoBuildEnv
               pkgs.espeak
               pkgs.rustc
               pkgs.cargo
