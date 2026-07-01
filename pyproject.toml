@@ -6,4 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 
 [tool.uv.workspace]
-members = ["server", "tinfer"]
+members = ["server", "tinfer", "tinfer/espeak_align"]
+
+[tool.uv.sources]
+espeak_align = { workspace = true }
