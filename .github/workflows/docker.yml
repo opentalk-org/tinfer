@@ -24,10 +24,9 @@ jobs:
 
       - name: Build image
         run: |
-          mkdir -p /etc/nix/skopeo/
-          sudo chmod -R g+rx /etc/nix/skopeo
-          sudo chgrp -R nixbld /etc/nix/skopeo
-          nix build --option sandbox false --extra-sandbox-paths '/etc/skopeo/auth.json=/etc/nix/skopeo/auth.json' --impure .#tinfer-server
+          sudo mkdir -p /run/containers
+          sudo chmod 0755 /run/containers
+          nix build --option sandbox false .#tinfer-server
 
       - name: Push to ghcr.io
         run: |
