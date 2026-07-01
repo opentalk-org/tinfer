@@ -1,2 +1,0 @@
-class InferenceError(Exception):
-    pass
