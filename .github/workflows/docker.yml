@@ -23,7 +23,10 @@ jobs:
         uses: DeterminateSystems/magic-nix-cache-action@main
 
       - name: Build image
-        run: nix build --option sandbox false .#tinfer-server
+        run: |
+          sudo mkdir -p /run/containers
+          sudo chmod 0755 /run/containers
+          nix build --option sandbox false .#tinfer-server
 
       - name: Push to ghcr.io
         run: |
