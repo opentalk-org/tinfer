@@ -39,6 +39,7 @@
               pkgs.cargo
             ];
             cacheGroupName = "heavy";
+            cacheGroupIndexes = ["https://download.pytorch.org/whl/cu128"];
 
             runtimeLibs = [
               pkgs.espeak
