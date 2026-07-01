@@ -29,6 +29,8 @@ jobs:
         run: |
           sudo mkdir -p /run/containers
           sudo chmod 0755 /run/containers
+          sudo mkdir -p /etc/containers
+          echo 'unqualified-search-registries = ["docker.io"]' | sudo tee /etc/containers/registries.conf > /dev/null
           nix build --option sandbox false .#tinfer-server
 
       - name: Push to ghcr.io

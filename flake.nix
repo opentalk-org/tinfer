@@ -53,7 +53,7 @@
 
             # Dynamic linker problems
             baseImage = {
-              imageName = "ubuntu";
+              imageName = "docker.io/library/ubuntu";
               imageDigest = "sha256:fed6ddb82c61194e1814e93b59cfcb6759e5aa33c4e41bb3782313c2386ed6df";
               arch = "amd64";
               sha256 = "sha256-idRF8oA0N5fuUNN2ch3iA+moDtx0KyP4EDDWHmb2PeY=";
