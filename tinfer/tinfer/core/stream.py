@@ -48,13 +48,13 @@ class TTSStream:
                 break
 
     def get_audio(self):
-        """Return list of audio chunks. Any chunk with .error set indicates inference failure for this request."""
+        """Return currently queued audio chunks without waiting for new chunks."""
         audio_chunks = []
         while True:
-            if self._request.pending_chunks > 0 or not self._request.audio_queue.empty():
-                chunk = self._request.audio_queue.get()
+            try:
+                chunk = self._request.audio_queue.get_nowait()
                 audio_chunks.append(chunk)
-            else:
+            except queue.Empty:
                 break
 
         return audio_chunks

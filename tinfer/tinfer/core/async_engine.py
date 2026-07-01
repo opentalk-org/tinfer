@@ -1,7 +1,7 @@
 from typing import Any
 
 from tinfer.core.engine import StreamingTTS
-from tinfer.core.request import StreamParams
+from tinfer.core.request import AudioChunk, StreamParams
 from tinfer.config.engine_config import StreamingTTSConfig
 import yaml
 
@@ -44,8 +44,8 @@ class AsyncStreamingTTS:
         finally:
             stream.close()
 
-    def generate_full(self, model_id: str, voice_id: str, text: str, params: StreamParams | dict[str, Any]):
-        return self.engine.generate_full(model_id, voice_id, text, params)
+    async def generate_full(self, model_id: str, voice_id: str, text: str, params: StreamParams | dict[str, Any]) -> AudioChunk:
+        return await self.engine.generate_full(model_id, voice_id, text, params)
 
     def warmup(self, model_ids: list[str] = None, num_warmup_tasks: int = 4):
         self.engine.warmup(model_ids, num_warmup_tasks)

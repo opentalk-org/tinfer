@@ -73,14 +73,21 @@ pub fn split_by_punctuation_impl(
 
         let byte_end = byte_start[pos + 1];
         let chunk = &text[last_byte..byte_start[pos]];
-        if !chunk.is_empty() {
+        let whitespace_prefix = !chunk.is_empty() && chunk.chars().all(|c| c.is_whitespace());
+        if !chunk.is_empty() && !whitespace_prefix {
             chunks_out.push(chunk.to_owned());
             idx += 1;
         }
 
-        let chunk_idx = if idx > 0 { idx - 1 } else { 0 };
+        let chunk_idx = if idx > 0 { idx - 1 } else { -1 };
         let mark = &text[byte_start[pos]..byte_end];
-        puncts_out.push((chunk_idx, mark.to_owned()));
+        if whitespace_prefix {
+            let mut prefixed_mark = chunk.to_owned();
+            prefixed_mark.push_str(mark);
+            puncts_out.push((chunk_idx, prefixed_mark));
+        } else {
+            puncts_out.push((chunk_idx, mark.to_owned()));
+        }
         last_byte = byte_end;
     }
 
@@ -91,4 +98,3 @@ pub fn split_by_punctuation_impl(
 
     (chunks_out, puncts_out)
 }
-

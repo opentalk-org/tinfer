@@ -1,4 +1,5 @@
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use espeak_align_core as espeak_align_core;
 
 #[pyclass]
@@ -33,6 +34,31 @@ impl Engine {
         self.inner
             .align(text, &punctuation, threads)
             .map_err(|e| pyo3::exceptions::PyNotImplementedError::new_err(e.to_string()))
+    }
+
+    #[pyo3(signature = (text, punctuation = r#";:,.!?¡¿—…\"«»\"\""#.to_owned(), threads=8))]
+    fn align_with_spans(
+        &mut self,
+        py: Python<'_>,
+        text: &str,
+        punctuation: String,
+        threads: usize,
+    ) -> PyResult<Vec<PyObject>> {
+        let spans = self
+            .inner
+            .align_with_spans(text, &punctuation, threads)
+            .map_err(|e| pyo3::exceptions::PyNotImplementedError::new_err(e.to_string()))?;
+
+        let mut out = Vec::with_capacity(spans.len());
+        for span in spans {
+            let dict = PyDict::new(py);
+            dict.set_item("token", span.token)?;
+            dict.set_item("phonemes", span.phonemes)?;
+            dict.set_item("start", span.start)?;
+            dict.set_item("end", span.end)?;
+            out.push(dict.into());
+        }
+        Ok(out)
     }
 
     #[pyo3(signature = (texts, punctuation = r#";:,.!?¡¿—…\"«»\"\""#.to_owned(), threads=8))]
