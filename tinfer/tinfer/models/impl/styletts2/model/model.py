@@ -8,11 +8,13 @@ from munch import Munch
 import warnings
 import librosa
 import time
+import os
+import json
 from contextlib import contextmanager
 
 from tinfer.models.chunked import ChunkedModel
 from tinfer.models.base.model import IntermediateRepresentation
-from tinfer.core.request import AlignmentType
+from tinfer.core.request import AlignmentItem, AlignmentType
 from tinfer.models.impl.styletts2.alignment.alignment import StyleTTS2AlignmentParser
 from tinfer.models.impl.styletts2.model.modules.diffusion.sampler import DiffusionSampler, ADPM2Sampler, KarrasSchedule
 from tinfer.models.impl.styletts2.model.modules.load_utils import load_model, load_model_from_state, get_model_state_dict
@@ -28,20 +30,81 @@ def length_to_mask(lengths):
     mask = torch.gt(mask + 1, lengths.unsqueeze(1))
     return mask
 
+
+def _find_leading_audio_samples(audio: np.ndarray, sample_rate: int) -> int:
+    if audio.size == 0 or sample_rate <= 0:
+        return 0
+
+    frame_size = max(1, int(sample_rate * 0.02))
+    frame_rms = []
+    for start in range(0, len(audio), frame_size):
+        frame = audio[start : start + frame_size]
+        if frame.size == 0:
+            continue
+        frame_rms.append(float(np.sqrt(np.mean(frame.astype(np.float64) ** 2))))
+
+    if not frame_rms:
+        return 0
+
+    rms = np.asarray(frame_rms)
+    threshold = max(0.01, float(np.percentile(rms, 80)) * 0.1)
+    above = np.where(rms > threshold)[0]
+    if len(above) == 0:
+        return 0
+
+    first_frame = int(above[0])
+    trim_samples = first_frame * frame_size
+    return trim_samples if trim_samples >= int(sample_rate * 0.05) else 0
+
+
+def _trim_leading_silence_and_shift_alignments(
+    audio: np.ndarray,
+    sample_rate: int,
+    alignments: list[AlignmentItem],
+) -> tuple[np.ndarray, list[AlignmentItem]]:
+    trim_samples = _find_leading_audio_samples(audio, sample_rate)
+    if trim_samples <= 0:
+        return audio, alignments
+
+    trim_ms = int(round(trim_samples / sample_rate * 1000.0))
+    shifted = [
+        AlignmentItem(
+            item=item.item,
+            char_start=item.char_start,
+            char_end=item.char_end,
+            start_ms=max(0, item.start_ms - trim_ms),
+            end_ms=max(0, item.end_ms - trim_ms),
+        )
+        for item in alignments
+    ]
+    return audio[trim_samples:], shifted
+
 # TODO: to be removed
 @contextmanager
 def timed_operation(name: str):
-    # if torch.cuda.is_available():
-    #     torch.cuda.synchronize()
-    # start_time = time.time()
+    profile_enabled = bool(os.getenv("TINFER_PROFILE"))
+    if profile_enabled and torch.cuda.is_available():
+        torch.cuda.synchronize()
+    start_time = time.perf_counter()
     try:
         yield
     finally:
-        pass
-        # if torch.cuda.is_available():
-        #     torch.cuda.synchronize()
-        # elapsed_ms = (time.time() - start_time) * 1000
-        # print(f"[{name}]: {elapsed_ms:.2f} ms")
+        if profile_enabled:
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            print(
+                "TINFER_PROFILE "
+                + json.dumps(
+                    {
+                        "scope": "model_stage",
+                        "stage": name,
+                        "elapsed_ms": elapsed_ms,
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
 
 class StyleTTS2(ChunkedModel):
     def __init__(self, device: str = "cuda") -> None:
@@ -370,8 +433,7 @@ class StyleTTS2(ChunkedModel):
             phonemized_text_for_alignment = None
             
             if not styletts2_params.phonemized:
-                result = self._phonemizer.process_text(text, phonemize=True, word_alignment=True)
-                processed_text, word_phoneme_data = result
+                processed_text, word_phoneme_data = self._phonemizer.process_text_with_original_spans(text)
                 tokens = self._phonemizer.tokenize(processed_text)
             else:
                 tokens = self._phonemizer.tokenize(text)
@@ -681,6 +743,12 @@ class StyleTTS2(ChunkedModel):
                 final_alignments = char_alignments
             else:
                 final_alignments = phoneme_alignments
+
+            audio, final_alignments = _trim_leading_silence_and_shift_alignments(
+                audio,
+                sample_rate,
+                final_alignments,
+            )
             
             updated_style_vector = s_pred[b].cpu().numpy() if use_diffusion and s_pred is not None else ref_s_batch[b].cpu().numpy()
             
@@ -710,18 +778,32 @@ class StyleTTS2(ChunkedModel):
         params: list[dict[str, Any]],
         request_metadata: list[dict[str, Any]],
     ) -> list[IntermediateRepresentation]:
+        profile_enabled = bool(os.getenv("TINFER_PROFILE"))
+        profile: dict[str, float] = {}
+        profile_start = time.perf_counter()
+
+        def mark(stage: str, start: float) -> None:
+            if profile_enabled:
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                profile[stage] = (time.perf_counter() - start) * 1000.0
+
         with timed_operation("generate_batch"):
             self._validate_generation_ready()
             
             batch_size = len(texts)
             
+            stage_start = time.perf_counter()
             with timed_operation("prepare_voice_contexts"):
                 self._prepare_voice_contexts(contexts, batch_size)
+            mark("prepare_voice_contexts_ms", stage_start)
 
+            stage_start = time.perf_counter()
             styletts2_params_list = []
             for i in range(batch_size):
                 valid_params = {f.name: params[i][f.name] for f in fields(StyleTTS2Params) if f.name in params[i]}
                 styletts2_params_list.append(StyleTTS2Params(**valid_params))
+            mark("parse_params_ms", stage_start)
             
             alignment_type = request_metadata[0]["alignment_type"]
             if isinstance(alignment_type, str):
@@ -729,26 +811,37 @@ class StyleTTS2(ChunkedModel):
             
             use_diffusion_any = any(p.use_diffusion for p in styletts2_params_list)
             
+            stage_start = time.perf_counter()
             if use_diffusion_any and self._sampler is None:
                 self._build_sampler()
+            mark("build_sampler_ms", stage_start)
             
             if self._phonemizer is None:
                 raise RuntimeError("Phonemizer not initialized")
             
+            stage_start = time.perf_counter()
             with timed_operation("prepare_voice_tensors"):
                 ref_s_batch = self._prepare_voice_tensors(contexts, batch_size)
+            mark("prepare_voice_tensors_ms", stage_start)
             
+            stage_start = time.perf_counter()
             with timed_operation("prepare_previous_style_vectors"):
                 prev_s_list = self._prepare_previous_style_vectors(contexts, batch_size)
+            mark("prepare_previous_style_vectors_ms", stage_start)
             
+            stage_start = time.perf_counter()
             with timed_operation("process_texts"):
                 all_tokens, all_tokens_for_alignment, all_phonemized_texts_for_alignment, original_texts = self._process_texts(texts, alignment_type, styletts2_params_list)
+            mark("process_texts_ms", stage_start)
             
+            stage_start = time.perf_counter()
             with timed_operation("prepare_token_tensors"):
                 tokens_tensor, input_lengths_tensor, text_mask = self._prepare_token_tensors(all_tokens)
+            mark("prepare_token_tensors_ms", stage_start)
             
             input_lengths = [len(tokens) for tokens in all_tokens]
             
+            stage_start = time.perf_counter()
             out, all_pred_aln_trg, all_actual_lengths, s_pred = self._run_model_forward(
                 tokens_tensor,
                 input_lengths_tensor,
@@ -759,7 +852,9 @@ class StyleTTS2(ChunkedModel):
                 batch_size,
                 input_lengths,
             )
+            mark("run_model_forward_ms", stage_start)
             
+            stage_start = time.perf_counter()
             with timed_operation("post_process_results"):
                 results = self._post_process_results(
                     out,
@@ -775,6 +870,22 @@ class StyleTTS2(ChunkedModel):
                     ref_s_batch,
                     s_pred,
                     batch_size,
+                )
+            mark("post_process_results_ms", stage_start)
+            if profile_enabled:
+                profile["generate_batch_total_ms"] = (time.perf_counter() - profile_start) * 1000.0
+                print(
+                    "TINFER_PROFILE "
+                    + json.dumps(
+                        {
+                            "scope": "model_summary",
+                            "batch_size": batch_size,
+                            "text_chars": [len(text) for text in texts],
+                            **profile,
+                        },
+                        sort_keys=True,
+                    ),
+                    flush=True,
                 )
             
             return results

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import threading
-from typing import Union
+from typing import Any, Union
 
 import espeak_align
 from nltk.tokenize import TweetTokenizer
@@ -49,11 +49,31 @@ class StyleTTS2Phonemizer:
         self.index_to_symbol = {i: s for s, i in self.word_index_dictionary.items()}
 
     def _preprocess_text(self, text: str) -> str:
-        text = re.sub(re.compile(r'[„""""«»"]'), '"', text)
+        text = re.sub(re.compile(r'[„“”«»"]'), '"', text)
         text = re.sub(re.compile("[-—−‒‒–]"), "—", text)
         text = re.sub(re.compile(r"[\(\)\*\/\[\]]"), "", text)
         # text = re.sub(re.compile(r"[" + re.escape(';:,.!?¡¿—… \t\n""«»"" ') + r"]+$"), "", text).strip()
         return text
+
+    def _preprocess_text_with_mapping(self, text: str) -> tuple[str, list[tuple[int, int]]]:
+        chars: list[str] = []
+        spans: list[tuple[int, int]] = []
+        quote_chars = set('„“”«»"')
+        dash_chars = set("-—−‒–")
+        deleted_chars = set("()*/[]")
+
+        for idx, char in enumerate(text):
+            if char in deleted_chars:
+                continue
+            if char in quote_chars:
+                chars.append('"')
+            elif char in dash_chars:
+                chars.append("—")
+            else:
+                chars.append(char)
+            spans.append((idx, idx + 1))
+
+        return "".join(chars), spans
 
     @staticmethod
     def _normalize_phoneme_string(s: str) -> str:
@@ -88,6 +108,73 @@ class StyleTTS2Phonemizer:
         if word_alignment:
             return phonemized_string, (words, phonemes_list)
         return phonemized_string
+
+    def align_text_with_original_spans(self, text: str) -> list[dict[str, Any]]:
+        preprocessed, preprocessed_to_original = self._preprocess_text_with_mapping(text)
+        with self._engine_lock:
+            aligned = self._engine.align_with_spans(preprocessed, _PUNCTUATION, threads=8)
+
+        mapped: list[dict[str, Any]] = []
+        consumed_original = 0
+
+        for item in aligned:
+            start = int(item["start"])
+            end = int(item["end"])
+            phonemes = self._filter_to_vocab(self._normalize_phoneme_string(str(item["phonemes"])))
+            if start < end:
+                original_start = preprocessed_to_original[start][0]
+                original_end = preprocessed_to_original[end - 1][1]
+            else:
+                original_start = consumed_original
+                original_end = consumed_original
+
+            if consumed_original < original_start:
+                mapped.append(
+                    {
+                        "token": "",
+                        "phonemes": "",
+                        "preprocessed_start": start,
+                        "preprocessed_end": start,
+                        "original_start": consumed_original,
+                        "original_end": original_start,
+                        "original_text": text[consumed_original:original_start],
+                    }
+                )
+
+            mapped.append(
+                {
+                    "token": item["token"],
+                    "phonemes": phonemes,
+                    "preprocessed_start": start,
+                    "preprocessed_end": end,
+                    "original_start": original_start,
+                    "original_end": original_end,
+                    "original_text": text[original_start:original_end],
+                }
+            )
+            consumed_original = max(consumed_original, original_end)
+
+        if consumed_original < len(text):
+            mapped.append(
+                {
+                    "token": "",
+                    "phonemes": "",
+                    "preprocessed_start": len(preprocessed_to_original),
+                    "preprocessed_end": len(preprocessed_to_original),
+                    "original_start": consumed_original,
+                    "original_end": len(text),
+                    "original_text": text[consumed_original:],
+                }
+            )
+
+        return mapped
+
+    def process_text_with_original_spans(self, text: str) -> tuple[str, list[dict[str, Any]]]:
+        mapped = self.align_text_with_original_spans(text)
+        phonemized_string = self._normalize_phoneme_string(
+            "".join(str(item["phonemes"]) for item in mapped)
+        )
+        return phonemized_string, mapped
 
     def tokenize(self, text: str) -> list[int]:
         return [self.word_index_dictionary[c] for c in text if c in self.word_index_dictionary]

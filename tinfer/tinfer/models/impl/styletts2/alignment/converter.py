@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from tinfer.core.request import AlignmentItem, AlignmentType
 
 _PUNCT_ONLY_CHARS = set(".,;:!?¡¿—… \t\n\"\"«»\"\" ")
@@ -44,6 +46,95 @@ class AlignmentConverter:
                 )
             )
         return word_alignments
+
+    @staticmethod
+    def phoneme_to_word_mapped(
+        phoneme_alignments: list[AlignmentItem],
+        original_text: str,
+        mapped_items: list[dict[str, Any]],
+    ) -> list[AlignmentItem]:
+        if not phoneme_alignments or not mapped_items:
+            return []
+
+        n_phonemes_per_item = [len(str(item.get("phonemes", ""))) for item in mapped_items]
+        if sum(n_phonemes_per_item) != len(phoneme_alignments):
+            return []
+
+        word_alignments: list[AlignmentItem] = []
+        idx = 0
+        last_time = 0
+        for mapped, n in zip(mapped_items, n_phonemes_per_item):
+            original_start = int(mapped.get("original_start", 0))
+            original_end = int(mapped.get("original_end", original_start))
+            original_start = max(0, min(original_start, len(original_text)))
+            original_end = max(original_start, min(original_end, len(original_text)))
+            item_text = original_text[original_start:original_end]
+            if not item_text:
+                idx += n
+                continue
+
+            if n:
+                segment = phoneme_alignments[idx : idx + n]
+                start_ms = segment[0].start_ms
+                end_ms = segment[-1].end_ms
+                last_time = end_ms
+            else:
+                start_ms = last_time
+                end_ms = last_time
+            idx += n
+
+            word_alignments.append(
+                AlignmentItem(
+                    item=item_text,
+                    start_ms=start_ms,
+                    end_ms=end_ms,
+                    char_start=original_start,
+                    char_end=original_end,
+                )
+            )
+
+        return word_alignments
+
+    @staticmethod
+    def word_to_char_exact(
+        word_alignments: list[AlignmentItem],
+        original_text: str,
+    ) -> list[AlignmentItem]:
+        char_alignments: list[AlignmentItem] = []
+
+        for word_align in word_alignments:
+            source_text = original_text[word_align.char_start : word_align.char_end]
+            if not source_text:
+                continue
+            duration = word_align.end_ms - word_align.start_ms
+            chars = list(source_text)
+            char_duration = duration / len(chars) if chars else 0
+            char_pos = word_align.char_start
+
+            for i, char in enumerate(chars):
+                char_alignments.append(
+                    AlignmentItem(
+                        item=char,
+                        start_ms=int(word_align.start_ms + i * char_duration),
+                        end_ms=int(word_align.start_ms + (i + 1) * char_duration),
+                        char_start=char_pos,
+                        char_end=char_pos + 1,
+                    )
+                )
+                char_pos += 1
+
+        return char_alignments
+
+    @staticmethod
+    def phoneme_to_char_mapped(
+        phoneme_alignments: list[AlignmentItem],
+        original_text: str,
+        mapped_items: list[dict[str, Any]],
+    ) -> list[AlignmentItem]:
+        word_alignments = AlignmentConverter.phoneme_to_word_mapped(
+            phoneme_alignments, original_text, mapped_items
+        )
+        return AlignmentConverter.word_to_char_exact(word_alignments, original_text)
 
     @staticmethod
     def word_to_char(
