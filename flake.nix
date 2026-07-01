@@ -2,7 +2,7 @@
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    x2container.url = "github:dialohq/x2container.nix";
+    x2container.url = "github:dialohq/x2container.nix/filter-sync";
     x2container.inputs.nixpkgs.follows = "nixpkgs";
     nix2container.follows = "x2container/nix2container";
   };

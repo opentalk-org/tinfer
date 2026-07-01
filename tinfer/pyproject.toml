@@ -20,10 +20,14 @@ dependencies = [
 [tool.setuptools.packages.find]
 include = ["tinfer*"]
 
-[project.optional-dependencies]
+[dependency-groups]
+heavy = [
+    "torch>=2.10.0",
+    "torchaudio>=2.10.0",
+]
 inference = [
-    "aiohttp>=3.13.3",
     "espeak_align",
+    "aiohttp>=3.13.3",
     "einops>=0.8.2",
     "einops-exts>=0.0.4",
     "librosa>=0.11.0",
@@ -32,8 +36,6 @@ inference = [
     "nltk>=3.9.2",
     "phonemizer>=3.3.0",
     "pydub>=0.25.1",
-    "torch>=2.10.0",
-    "torchaudio>=2.10.0",
     "transformers>=5.2.0",
     "uvicorn>=0.41.0",
 ]
