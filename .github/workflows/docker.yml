@@ -23,7 +23,9 @@ jobs:
         uses: DeterminateSystems/magic-nix-cache-action@main
 
       - name: Build image
-        run: nix build --option sandbox false .#tinfer-server
+        env:
+          REGISTRY_AUTH_FILE: ${{ runner.temp }}/auth.json
+        run: nix build --option sandbox false --impure .#tinfer-server
 
       - name: Push to ghcr.io
         env:
