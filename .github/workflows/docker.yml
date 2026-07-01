@@ -26,7 +26,7 @@ jobs:
         run: |
           sudo mkdir -p /run/containers
           sudo chmod 0755 /run/containers
-          nix build --option sandbox false .#tinfer-server
+          nix build --option sandbox false --extra-experimental-features ca-derivations .#tinfer-server
 
       - name: Push to ghcr.io
         run: |
