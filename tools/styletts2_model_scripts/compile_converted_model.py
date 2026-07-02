@@ -106,13 +106,13 @@ def compile_converted_model(
     opt_batch: int = 8,
     max_batch: int = 16,
     min_asr_frames: int = 128,
-    opt_asr_frames: int = 256,
-    max_asr_frames: int = 512,
-    min_tokens: int = 16,
-    opt_tokens: int = 128,
-    max_tokens: int = 256,
+    opt_asr_frames: int = 512,
+    max_asr_frames: int = 1024,
+    min_tokens: int = 8,
+    opt_tokens: int = 256,
+    max_tokens: int = 512,
     diffusion_steps: Sequence[int] = (10,),
-    workspace_gb: float = 4.0,
+    workspace_gb: float = 8.0,
     force: bool = False,
 ) -> dict:
     StyleTTS2, tensorrt_export, tensorrt_runtime = _load_compile_dependencies()
@@ -219,13 +219,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--opt-batch", type=int, default=8)
     parser.add_argument("--max-batch", type=int, default=16)
     parser.add_argument("--min-asr-frames", type=int, default=128)
-    parser.add_argument("--opt-asr-frames", type=int, default=256)
+    parser.add_argument("--opt-asr-frames", type=int, default=512)
     parser.add_argument("--max-asr-frames", type=int, default=1024)
     parser.add_argument("--min-tokens", type=int, default=8)
     parser.add_argument("--opt-tokens", type=int, default=256)
     parser.add_argument("--max-tokens", type=int, default=512)
     parser.add_argument("--diffusion-steps", type=int, nargs="+", default=[10])
-    parser.add_argument("--workspace-gb", type=float, default=4.0)
+    parser.add_argument("--workspace-gb", type=float, default=8.0)
     parser.add_argument("--force", action="store_true")
     return parser.parse_args()
 

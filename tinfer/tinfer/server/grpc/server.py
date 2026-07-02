@@ -14,13 +14,15 @@ class GRPCServer:
         self.tts = tts
         self.port = port
         self._server: grpc.aio.Server | None = None
+        self._thread_pool: futures.ThreadPoolExecutor | None = None
         self._running = False
 
     async def start(self) -> None:
         if self._running:
             return
         
-        self._server = grpc.aio.server(futures.ThreadPoolExecutor(max_workers=10))
+        self._thread_pool = futures.ThreadPoolExecutor(max_workers=10)
+        self._server = grpc.aio.server(self._thread_pool)
         
         service = StyleTTSService(self.tts)
         styletts_pb2_grpc.add_StyleTTSServiceServicer_to_server(service, self._server)
@@ -36,6 +38,9 @@ class GRPCServer:
             return
         
         await self._server.stop(grace_period)
+        if self._thread_pool is not None:
+            self._thread_pool.shutdown(wait=True, cancel_futures=True)
+            self._thread_pool = None
         self._running = False
         self._server = None
 
