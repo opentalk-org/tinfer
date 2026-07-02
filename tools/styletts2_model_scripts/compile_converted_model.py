@@ -83,6 +83,7 @@ def update_model_tensorrt_metadata(model_path: str | Path, metadata: dict) -> No
     model_path = Path(model_path)
     saved = torch.load(model_path, map_location="cpu", weights_only=True)
     runtime_config = dict(saved.get("runtime_config") or {})
+    runtime_config["engine"] = "tensorrt"
     runtime_config["tensorrt"] = metadata
     saved["runtime_config"] = runtime_config
     torch.save(saved, model_path)
