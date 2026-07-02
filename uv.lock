@@ -1138,17 +1138,25 @@ heavy = [
     { name = "torchaudio", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
     { name = "torchaudio", version = "2.10.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'linux'" },
 ]
+ml = [
+    { name = "librosa" },
+    { name = "transformers" },
+]
 
 [package.metadata]
 
 [package.metadata.requires-dev]
 heavy = [
-    { name = "onnx", specifier = "==1.22.0" },
+    { name = "onnx" },
     { name = "tensorrt-cu12" },
-    { name = "torch", marker = "sys_platform != 'linux'", specifier = "==2.10.0" },
-    { name = "torch", marker = "sys_platform == 'linux'", specifier = "==2.10.0", index = "https://download.pytorch.org/whl/cu128" },
-    { name = "torchaudio", marker = "sys_platform != 'linux'", specifier = "==2.10.0" },
-    { name = "torchaudio", marker = "sys_platform == 'linux'", specifier = "==2.10.0", index = "https://download.pytorch.org/whl/cu128" },
+    { name = "torch", marker = "sys_platform != 'linux'" },
+    { name = "torch", marker = "sys_platform == 'linux'", index = "https://download.pytorch.org/whl/cu128" },
+    { name = "torchaudio", marker = "sys_platform != 'linux'" },
+    { name = "torchaudio", marker = "sys_platform == 'linux'", index = "https://download.pytorch.org/whl/cu128" },
+]
+ml = [
+    { name = "librosa" },
+    { name = "transformers" },
 ]
 
 [[package]]
