@@ -160,7 +160,3 @@ class TTSRequest:
 
     def set_state(self, state: dict[str, Any]) -> None:
         self.stream_state = state
-
-    
-
-

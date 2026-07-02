@@ -11,6 +11,7 @@ import librosa
 import time
 import os
 import json
+import re
 from contextlib import contextmanager
 
 from tinfer.models.chunked import ChunkedModel
@@ -135,6 +136,8 @@ class StyleTTS2(ChunkedModel):
         self._trt_min_diffusion_tokens = 16
         self._trt_max_diffusion_tokens = 512
         self._trt_diffusion_dynamic_runners: dict[int, Any] = {}
+        self._max_styletts_tokens = 512
+        self._end_trim_margin_ms = 200
     
     def _initialize_from_config(self, config: dict[str, Any], device: str) -> None:
         self._config = config
@@ -921,7 +924,8 @@ class StyleTTS2(ChunkedModel):
 
             if target_alignment_type == AlignmentType.NONE:
                 if 0 < expected_audio_length < len(audio):
-                    audio = audio[:expected_audio_length]
+                    end_margin_samples = int(self._end_trim_margin_ms * self._sample_rate / 1000)
+                    audio = audio[: min(len(audio), expected_audio_length + end_margin_samples)]
                 final_alignments = []
             else:
                 phoneme_alignments = self._alignment_parser.parse_from_pred_aln_trg(
@@ -936,7 +940,7 @@ class StyleTTS2(ChunkedModel):
 
                 if phoneme_alignments:
                     last_phoneme_end_ms = phoneme_alignments[-1].end_ms
-                    trim_end_samples = int((last_phoneme_end_ms + 50) * self._sample_rate / 1000)
+                    trim_end_samples = int((last_phoneme_end_ms + self._end_trim_margin_ms) * self._sample_rate / 1000)
                     if trim_end_samples < len(audio):
                         audio = audio[:trim_end_samples]
 
@@ -986,6 +990,136 @@ class StyleTTS2(ChunkedModel):
         
         return results
 
+    def _text_token_count(self, text: str, styletts2_params: StyleTTS2Params) -> int:
+        if self._phonemizer is None:
+            raise RuntimeError("Phonemizer not initialized")
+        if styletts2_params.phonemized:
+            tokens = self._phonemizer.tokenize(text)
+        else:
+            processed_text, _ = self._phonemizer.process_text_with_original_spans(text)
+            tokens = self._phonemizer.tokenize(processed_text)
+        return len(tokens) + 1
+
+    def _split_text_to_token_windows(self, text: str, styletts2_params: StyleTTS2Params) -> list[str]:
+        return self._split_text_to_token_windows_recursive(
+            text,
+            styletts2_params,
+            [r"(?<=[.!?]) +", r"(?<=[,;:]) +", " "],
+        )
+
+    def _split_text_to_token_windows_recursive(
+        self,
+        text: str,
+        styletts2_params: StyleTTS2Params,
+        separators: list[str],
+    ) -> list[str]:
+        if self._text_token_count(text, styletts2_params) <= self._max_styletts_tokens:
+            return [text]
+        if not separators:
+            return self._split_text_to_token_windows_by_char(text, styletts2_params)
+
+        parts = self._split_keep_separator(text, separators[0])
+        if len(parts) <= 1:
+            return self._split_text_to_token_windows_recursive(text, styletts2_params, separators[1:])
+
+        chunks = []
+        current = ""
+        for part in parts:
+            candidate = current + part if current else part
+            if current and self._text_token_count(candidate, styletts2_params) > self._max_styletts_tokens:
+                chunks.extend(
+                    self._split_text_to_token_windows_recursive(
+                        current.rstrip(),
+                        styletts2_params,
+                        separators[1:],
+                    )
+                )
+                current = part
+            else:
+                current = candidate
+        if current.strip():
+            chunks.extend(
+                self._split_text_to_token_windows_recursive(
+                    current.rstrip(),
+                    styletts2_params,
+                    separators[1:],
+                )
+            )
+        return chunks
+
+    def _split_keep_separator(self, text: str, separator: str) -> list[str]:
+        if separator == " ":
+            return [part for part in re.findall(r"\S+\s*", text) if part]
+
+        parts = re.split(f"({separator})", text)
+        merged = []
+        i = 0
+        while i < len(parts):
+            part = parts[i]
+            if not part:
+                i += 1
+                continue
+            if i + 1 < len(parts):
+                part += parts[i + 1]
+                i += 2
+            else:
+                i += 1
+            merged.append(part)
+        return merged
+
+    def _split_text_to_token_windows_by_char(
+        self,
+        text: str,
+        styletts2_params: StyleTTS2Params,
+    ) -> list[str]:
+        chunks = []
+        current = ""
+        for char in text:
+            candidate = current + char
+            if current and self._text_token_count(candidate, styletts2_params) > self._max_styletts_tokens:
+                chunks.append(current)
+                current = char
+            else:
+                current = candidate
+        if current.strip():
+            chunks.append(current)
+        return chunks
+
+    def _merge_window_results(self, results: list[IntermediateRepresentation], original_text: str) -> IntermediateRepresentation:
+        if len(results) == 1:
+            return results[0]
+        sample_rate = results[0].sample_rate
+        audio = np.concatenate([np.asarray(result.data) for result in results], axis=-1)
+        metadata = dict(results[-1].metadata)
+        metadata["text"] = original_text
+        metadata["window_count"] = len(results)
+        return IntermediateRepresentation(data=audio, sample_rate=sample_rate, metadata=metadata)
+
+    def _generate_token_windows(
+        self,
+        texts: list[str],
+        contexts: list[dict[str, Any] | None],
+        params: list[dict[str, Any]],
+        request_metadata: list[dict[str, Any]],
+        styletts2_params_list: list[StyleTTS2Params],
+    ) -> list[IntermediateRepresentation] | None:
+        windows_by_text = [
+            self._split_text_to_token_windows(text, styletts2_params)
+            for text, styletts2_params in zip(texts, styletts2_params_list)
+        ]
+        if all(len(windows) == 1 for windows in windows_by_text):
+            return None
+
+        merged_results = []
+        for text, windows, context, param, metadata in zip(texts, windows_by_text, contexts, params, request_metadata):
+            window_context = context if context is not None else {}
+            window_results = [
+                self.generate_batch([window], [window_context], [param], [metadata])[0]
+                for window in windows
+            ]
+            merged_results.append(self._merge_window_results(window_results, text))
+        return merged_results
+
     def generate_batch(
         self,
         texts: list[str],
@@ -1005,6 +1139,19 @@ class StyleTTS2(ChunkedModel):
             for i in range(batch_size):
                 valid_params = {f.name: params[i][f.name] for f in fields(StyleTTS2Params) if f.name in params[i]}
                 styletts2_params_list.append(StyleTTS2Params(**valid_params))
+
+            if self._phonemizer is None:
+                raise RuntimeError("Phonemizer not initialized")
+
+            windowed_results = self._generate_token_windows(
+                texts,
+                contexts,
+                params,
+                request_metadata,
+                styletts2_params_list,
+            )
+            if windowed_results is not None:
+                return windowed_results
             
             alignment_type = request_metadata[0]["alignment_type"]
             if isinstance(alignment_type, str):
@@ -1014,9 +1161,6 @@ class StyleTTS2(ChunkedModel):
             
             if use_diffusion_any and self._sampler is None and not self._trt_diffusion_enabled:
                 self._build_sampler()
-            
-            if self._phonemizer is None:
-                raise RuntimeError("Phonemizer not initialized")
             
             with timed_operation("prepare_voice_tensors"):
                 ref_s_batch = self._prepare_voice_tensors(contexts, batch_size)
