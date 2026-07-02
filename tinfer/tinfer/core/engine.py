@@ -148,7 +148,13 @@ class StreamingTTS:
         self._requests.pop(request_id)
 
     def load_model(self, model_id: str, model_path: str, voices_folder: str | None = None):
-        self.executor.load_model(model_id, model_path, voices_folder=voices_folder, compile_models=self.config.compile_models)
+        self.executor.load_model(
+            model_id,
+            model_path,
+            voices_folder=voices_folder,
+            compile_models=self.config.compile_models,
+            runtime_engine=self.config.runtime_engine,
+        )
 
     def register_model(self, model_id: str, model, device: str | None = None, keep_in_main: bool = True):
         if not hasattr(model, '_loaded') or not model._loaded:

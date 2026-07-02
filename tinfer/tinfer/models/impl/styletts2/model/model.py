@@ -21,7 +21,9 @@ from tinfer.models.impl.styletts2.alignment.alignment import StyleTTS2AlignmentP
 from tinfer.models.impl.styletts2.model.modules.diffusion.sampler import DiffusionSampler, ADPM2Sampler, KarrasSchedule
 from tinfer.models.impl.styletts2.model.modules.load_utils import load_model, load_model_from_state, get_model_state_dict
 from tinfer.models.impl.styletts2.model.modules.config import ModelConfig
-from tinfer.models.impl.styletts2.model.tensorrt_config import get_tensorrt_model_config
+from tinfer.models.impl.styletts2.model.tensorrt_accelerator import (
+    StyleTTS2TensorRTAccelerator,
+)
 from .phonemizer import StyleTTS2Phonemizer
 from .inference_config import StyleTTS2Params
 from tinfer.models.impl.styletts2.voice.cache import VoiceCache
@@ -124,19 +126,7 @@ class StyleTTS2(ChunkedModel):
         self._model_dir: Path | None = None
 
         self._compile_model_flag = False
-        self._trt_config: dict[str, Any] | None = None
-        self._trt_runtime: Any | None = None
-        self._trt_decoder_enabled = False
-        self._trt_engine_dir: str | None = None
-        self._trt_max_batch = 16
-        self._trt_max_asr_frames = 1024
-        self._trt_decoder_dynamic_runner: Any | None = None
-        self._trt_diffusion_enabled = False
-        self._trt_diffusion_engine_dir: str | None = None
-        self._trt_max_diffusion_batch = 16
-        self._trt_min_diffusion_tokens = 16
-        self._trt_max_diffusion_tokens = 512
-        self._trt_diffusion_dynamic_runners: dict[int, Any] = {}
+        self._trt = StyleTTS2TensorRTAccelerator()
         self._max_styletts_tokens = 512
         self._end_trim_margin_ms = 500
     
@@ -163,84 +153,14 @@ class StyleTTS2(ChunkedModel):
             )
 
         self.to(device)
-        self._trt_config = get_tensorrt_model_config(config, self._model_dir or Path("."))
-        if self._trt_config is not None:
-            self._trt_runtime = importlib.import_module(
-                "tinfer.models.impl.styletts2.model.modules.tensorrt_runtime"
-            )
-        self._configure_tensorrt_decoder()
-        self._configure_tensorrt_diffusion()
+        self._trt = StyleTTS2TensorRTAccelerator.from_runtime_config(
+            config,
+            self._model_dir or Path("."),
+            self._model,
+            self._model_config,
+        )
         
         self._loaded = True
-
-    def _configure_tensorrt_decoder(self) -> None:
-        trt_config = self._trt_config
-        self._trt_decoder_enabled = bool(
-            trt_config is not None
-            and "decoder" in trt_config.get("components", [])
-            and isinstance(trt_config.get("decoder"), dict)
-        )
-        if not self._trt_decoder_enabled:
-            return
-        if self._model is None or self._model_config is None:
-            return
-        decoder_type = getattr(self._model_config.decoder, "type", None) if hasattr(self._model_config, "decoder") else None
-        if decoder_type != "istftnet":
-            raise RuntimeError(f"TensorRT decoder mode supports istftnet decoder only, got {decoder_type!r}")
-        decoder_config = trt_config["decoder"]
-        engine_dir = trt_config["engine_dir"]
-        self._trt_engine_dir = engine_dir
-        self._trt_max_batch = int(decoder_config["max_batch"])
-        self._trt_max_asr_frames = int(decoder_config["max_asr_frames"])
-        self._remove_decoder_weight_norm(self._model.decoder)
-        self._preload_trt_decoder_runners()
-
-    def _preload_trt_decoder_runners(self) -> None:
-        if self._trt_engine_dir is None:
-            return
-        engine_dir = Path(self._trt_engine_dir)
-        dynamic_path = engine_dir / self._trt_runtime.DynamicDecoderTRTEngineSpec().file_name
-        if dynamic_path.exists():
-            self._trt_decoder_dynamic_runner = self._trt_runtime.get_tensorrt_decoder_runner(engine_dir)
-
-    def _configure_tensorrt_diffusion(self) -> None:
-        trt_config = self._trt_config
-        self._trt_diffusion_enabled = bool(
-            trt_config is not None
-            and "diffusion" in trt_config.get("components", [])
-            and isinstance(trt_config.get("diffusion"), dict)
-        )
-        if not self._trt_diffusion_enabled:
-            return
-        if self._model is None:
-            return
-        diffusion_config = trt_config["diffusion"]
-        engine_dir = trt_config["engine_dir"]
-        self._trt_diffusion_engine_dir = engine_dir
-        self._trt_max_diffusion_batch = int(diffusion_config["max_batch"])
-        self._trt_min_diffusion_tokens = int(diffusion_config["min_tokens"])
-        self._trt_max_diffusion_tokens = int(diffusion_config["max_tokens"])
-        self._preload_trt_diffusion_runners()
-
-    def _preload_trt_diffusion_runners(self) -> None:
-        if self._trt_diffusion_engine_dir is None:
-            return
-        engine_dir = Path(self._trt_diffusion_engine_dir)
-        diffusion_config = self._trt_config.get("diffusion", {}) if self._trt_config else {}
-        for engine in diffusion_config.get("engines", []):
-            spec = self._trt_runtime.DynamicDiffusionTRTEngineSpec(num_steps=int(engine["steps"]))
-            if spec.num_steps not in self._trt_diffusion_dynamic_runners:
-                self._trt_diffusion_dynamic_runners[spec.num_steps] = self._trt_runtime.get_tensorrt_diffusion_runner(
-                    engine_dir,
-                    num_steps=spec.num_steps,
-                )
-
-    def _remove_decoder_weight_norm(self, decoder) -> None:
-        for module in decoder.modules():
-            try:
-                torch.nn.utils.remove_weight_norm(module)
-            except ValueError:
-                pass
 
     def _compile_model(self) -> None:
         # pass
@@ -270,6 +190,7 @@ class StyleTTS2(ChunkedModel):
         device="cuda",
         compile_model: bool = False,
         load_style_encoder: bool | None = None,
+        runtime_engine: str | None = None,
     ) -> None:
         model_path = Path(path)
         if not model_path.exists():
@@ -281,7 +202,9 @@ class StyleTTS2(ChunkedModel):
         except Exception as e:
             raise ValueError(f"Error loading model from {path}: {e}, please check if the model isn't corrupted.")
         
-        config = model_saved.get('runtime_config', {})
+        config = dict(model_saved.get('runtime_config', {}))
+        if runtime_engine is not None:
+            config["engine"] = runtime_engine
         if load_style_encoder is None:
             load_style_encoder = config.get("load_style_encoder", True)
         
@@ -586,85 +509,6 @@ class StyleTTS2(ChunkedModel):
         padding = last_slice.expand(*pad_shape)
         return torch.cat([tensor, padding], dim=dim)
 
-    def _pad_or_clip_to_size(self, tensor: torch.Tensor, target_size: int, dim: int = -1) -> torch.Tensor:
-        if dim < 0:
-            dim = len(tensor.shape) + dim
-        current_size = tensor.shape[dim]
-        if current_size == target_size:
-            return tensor
-        if current_size > target_size:
-            slices = [slice(None)] * tensor.dim()
-            slices[dim] = slice(0, target_size)
-            return tensor[tuple(slices)]
-
-        padding_size = target_size - current_size
-        pad_shape = list(tensor.shape)
-        pad_shape[dim] = padding_size
-        last_slice = tensor.select(dim, current_size - 1).unsqueeze(dim)
-        padding = last_slice.expand(*pad_shape)
-        return torch.cat([tensor, padding], dim=dim)
-
-    def _pad_to_batch_target(self, tensor: torch.Tensor, target_batch_size: int) -> torch.Tensor:
-        return self._pad_or_clip_to_size(tensor, target_batch_size, dim=0)
-
-    def _get_trt_decoder_runner(self):
-        if self._trt_decoder_dynamic_runner is not None:
-            return self._trt_decoder_dynamic_runner
-        raise RuntimeError("Dynamic TensorRT decoder engine is not configured")
-
-    def _get_trt_diffusion_runner(self, bucket):
-        dynamic_runner = self._trt_diffusion_dynamic_runners.get(bucket.num_steps)
-        if dynamic_runner is not None:
-            return dynamic_runner
-        raise RuntimeError(f"Dynamic TensorRT diffusion engine for {bucket.num_steps} steps is not configured")
-
-    def _run_trt_diffusion_sampler(
-        self,
-        noise: torch.Tensor,
-        embedding: torch.Tensor,
-        features: torch.Tensor,
-        *,
-        embedding_scale: float,
-        diffusion_steps: int,
-    ) -> torch.Tensor:
-        if embedding_scale != 1.0:
-            raise RuntimeError("TensorRT diffusion currently supports embedding_scale=1.0 only")
-
-        if noise.shape[0] > self._trt_max_diffusion_batch:
-            raise RuntimeError(
-                f"TensorRT diffusion batch {noise.shape[0]} exceeds max {self._trt_max_diffusion_batch}"
-            )
-
-        target_tokens = min(max(embedding.shape[1], self._trt_min_diffusion_tokens), self._trt_max_diffusion_tokens)
-        bucket = self._trt_runtime.DiffusionShapeBucket(
-            batch_size=noise.shape[0],
-            embedding_tokens=target_tokens,
-            num_steps=diffusion_steps,
-        )
-        noise_padded = noise
-        embedding_padded = self._pad_or_clip_to_size(embedding, target_tokens, dim=1)
-        features_padded = features
-
-        step_noise = torch.randn(
-            bucket.batch_size,
-            diffusion_steps - 1,
-            1,
-            noise.shape[-1],
-            device=noise.device,
-            dtype=noise.dtype,
-        )
-
-        runner = self._get_trt_diffusion_runner(bucket)
-        out = runner.run(
-            {
-                "noise": noise_padded,
-                "step_noise": step_noise,
-                "embedding": embedding_padded,
-                "features": features_padded,
-            }
-        )["style"]
-        return out[: noise.shape[0]].to(dtype=noise.dtype)
-    
     def _run_model_forward(
         self,
         tokens_tensor: torch.Tensor,
@@ -717,8 +561,8 @@ class StyleTTS2(ChunkedModel):
                         bert_dur_group = bert_dur[group_indices_in_batch]
                         ref_s_group = ref_s_batch[group_indices_in_batch]
 
-                        if self._trt_diffusion_enabled:
-                            s_pred_group = self._run_trt_diffusion_sampler(
+                        if self._trt.diffusion_enabled:
+                            s_pred_group = self._trt.run_diffusion_sampler(
                                 noise,
                                 bert_dur_group,
                                 ref_s_group,
@@ -853,20 +697,18 @@ class StyleTTS2(ChunkedModel):
                     asr_new[:, :, 1:] = asr[:, :, 0:-1]
                     asr = asr_new
                 
-                trt_bucket = None
-                if self._trt_decoder_enabled:
-                    if batch_size > self._trt_max_batch:
-                        raise RuntimeError(f"TensorRT decoder batch {batch_size} exceeds max {self._trt_max_batch}")
-                    target_asr_frames = min(max(asr.shape[-1], 128), self._trt_max_asr_frames)
-                    target_f0_frames = target_asr_frames * 2
-                    asr_padded = self._pad_or_clip_to_size(asr, target_asr_frames, dim=-1)
-                    F0_pred_padded = self._pad_or_clip_to_size(F0_pred, target_f0_frames, dim=-1)
-                    N_pred_padded = self._pad_or_clip_to_size(N_pred, target_f0_frames, dim=-1)
-                    if asr.shape[-1] < target_asr_frames:
-                        asr_padded[:, :, asr.shape[-1]:] = 0
-                        F0_pred_padded[:, F0_pred.shape[-1]:] = 0
-                        N_pred_padded[:, N_pred.shape[-1]:] = 0
-                    ref_padded = ref
+                if self._trt.decoder_enabled:
+                    decoder_inputs = self._trt.prepare_decoder_inputs(
+                        asr,
+                        F0_pred,
+                        N_pred,
+                        ref,
+                        batch_size=batch_size,
+                    )
+                    asr_padded = decoder_inputs["asr"]
+                    F0_pred_padded = decoder_inputs["f0"]
+                    N_pred_padded = decoder_inputs["noise"]
+                    ref_padded = decoder_inputs["style"]
                 else:
                     asr_seq_padded = self._pad_to_multiple(asr, 128, dim=-1)
                     F0_pred_seq_padded = self._pad_to_multiple(F0_pred, 256, dim=-1)
@@ -878,10 +720,9 @@ class StyleTTS2(ChunkedModel):
                     ref_padded, _ = self._pad_to_batch_size(ref, batch_size)
             
             with timed_operation("decoder"):
-                if self._trt_decoder_enabled:
+                if self._trt.decoder_enabled:
                     har = self._model.decoder.generator._preprocess_f0(F0_pred_padded)
-                    runner = self._get_trt_decoder_runner()
-                    out_padded = runner.run(
+                    out_padded = self._trt.run_decoder(
                         {
                             "asr": asr_padded,
                             "f0": F0_pred_padded,
@@ -889,7 +730,7 @@ class StyleTTS2(ChunkedModel):
                             "style": ref_padded,
                             "har": har,
                         }
-                    )["audio"]
+                    )
                 else:
                     out_padded = self._model.decoder(asr_padded, F0_pred_padded, N_pred_padded, ref_padded)
             
@@ -1171,7 +1012,7 @@ class StyleTTS2(ChunkedModel):
             
             use_diffusion_any = any(p.use_diffusion for p in styletts2_params_list)
             
-            if use_diffusion_any and self._sampler is None and not self._trt_diffusion_enabled:
+            if use_diffusion_any and self._sampler is None and not self._trt.diffusion_enabled:
                 self._build_sampler()
             
             with timed_operation("prepare_voice_tensors"):

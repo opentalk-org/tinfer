@@ -79,7 +79,13 @@ class ProcessExecutor(BaseExecutor):
                         new_worker._shm_manager = self._shm_manager
                         new_worker.run()
                         for model_id, args in self._load_args_per_worker.get(worker_id, {}).items():
-                            new_worker.load_model(model_id, args["path"], voices_folder=args.get("voices_folder"), compile_models=args.get("compile_models", False))
+                            new_worker.load_model(
+                                model_id,
+                                args["path"],
+                                voices_folder=args.get("voices_folder"),
+                                compile_models=args.get("compile_models", False),
+                                runtime_engine=args.get("runtime_engine"),
+                            )
                         self._workers[worker_id] = new_worker
                 if all_chunks:
                     self.process_results(all_chunks)
@@ -109,11 +115,30 @@ class ProcessExecutor(BaseExecutor):
 
         return self._workers[worker_id]
 
-    def load_model(self, model_id: str, path: str, device: str | None = None, voices_folder: str | None = None, compile_models: bool = False) -> None:
+    def load_model(
+        self,
+        model_id: str,
+        path: str,
+        device: str | None = None,
+        voices_folder: str | None = None,
+        compile_models: bool = False,
+        runtime_engine: str | None = None,
+    ) -> None:
         worker = self._model_load_register_util(model_id, device)
         worker_id = self._model_to_worker[model_id]
-        self._load_args_per_worker[worker_id][model_id] = {"path": path, "voices_folder": voices_folder, "compile_models": compile_models}
-        worker.load_model(model_id, path, voices_folder=voices_folder, compile_models=compile_models)
+        self._load_args_per_worker[worker_id][model_id] = {
+            "path": path,
+            "voices_folder": voices_folder,
+            "compile_models": compile_models,
+            "runtime_engine": runtime_engine,
+        }
+        worker.load_model(
+            model_id,
+            path,
+            voices_folder=voices_folder,
+            compile_models=compile_models,
+            runtime_engine=runtime_engine,
+        )
         self._start_callback_thread()
 
     def register_model(self, model_id: str, model: Any, device: str | None = None, keep_in_main: bool = True) -> None:
