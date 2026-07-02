@@ -11,22 +11,55 @@ jobs:
     permissions:
       contents: read
       packages: write
+      actions: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Single-user, daemon-less install: the runner owns /nix, which is what
+      # cache-nix-action needs to restore the store (the multi-user installer
+      # leaves /nix root-owned and the restore fails with permission errors).
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+        uses: nixbuild/nix-quick-install-action@v35
+        with:
+          nix_conf: |
+            experimental-features = nix-command flakes ca-derivations
+            sandbox = false
+            keep-env-derivations = true
+            keep-outputs = true
 
-      - name: Set up Nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
+      # Cache the nix store between runs. Keyed on the dependency metadata:
+      # a source-only change hits the primary key (restore, no re-save); a
+      # lock/pyproject change restores the closest previous store and only
+      # rebuilds the derivations it invalidated (the heavy env survives via
+      # its content-addressed requirements export).
+      - name: Cache nix store
+        uses: nix-community/cache-nix-action@v6
+        with:
+          # v4: cache must be saved/restored under the same (single-user)
+          # store layout; caches from the old multi-user install don't
+          # restore cleanly.
+          primary-key: nix-image-v4-${{ runner.os }}-${{ hashFiles('uv.lock', 'flake.lock', 'flake.nix', '**/pyproject.toml') }}
+          restore-prefixes-first-match: nix-image-v4-${{ runner.os }}-
+          gc-max-store-size-linux: 16G
+          purge: true
+          purge-prefixes: nix-image-v4-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
+
+      - name: Store diagnostics after restore
+        run: |
+          echo "valid store paths: $(nix path-info --all 2>/dev/null | wc -l)"
+          du -sh /nix/store 2>/dev/null | tail -1
 
       - name: Build image
         run: |
           sudo mkdir -p /run/containers
           sudo chmod 0755 /run/containers
-          nix build --option sandbox false .#tinfer-server
+          sudo mkdir -p /etc/containers
+          echo 'unqualified-search-registries = ["docker.io"]' | sudo tee /etc/containers/registries.conf > /dev/null
+          nix build --option sandbox false .#tinfer-server --print-build-logs
 
       - name: Push to ghcr.io
         run: |
@@ -42,6 +75,7 @@ jobs:
             --inputs-from . \
             --option sandbox false \
             'nix2container#skopeo-nix2container' -- copy \
+            --preserve-digests \
             --dest-creds "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
             nix:result \
             "docker://$IMAGE:$TAG"

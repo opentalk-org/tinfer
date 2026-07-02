@@ -2,7 +2,7 @@
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    x2container.url = "github:dialohq/x2container.nix";
+    x2container.url = "github:dialohq/x2container.nix/filter-sync";
     x2container.inputs.nixpkgs.follows = "nixpkgs";
     nix2container.follows = "x2container/nix2container";
   };
@@ -18,6 +18,14 @@
       system: let
         pkgs = import nixpkgs {inherit system;};
         gccLib = pkgs.stdenv.cc.cc.lib;
+        cargoBuildEnv = pkgs.runCommand "cargo-build-env" {} ''
+          mkdir -p "$out/nix-support"
+          cat > "$out/nix-support/setup-hook" <<'EOF'
+          export CARGO_HOME="$NIX_BUILD_TOP/cargo-home"
+          export CARGO_TARGET_DIR="$NIX_BUILD_TOP/cargo-target"
+          mkdir -p "$CARGO_HOME" "$CARGO_TARGET_DIR"
+          EOF
+        '';
       in {
         packages = rec {
           tinfer-server = x2container.lib.${system}.uv2container.buildImage {
@@ -25,10 +33,12 @@
             src = ./.;
             python = pkgs.python311;
             extraBuildInputs = [
+              cargoBuildEnv
               pkgs.espeak
               pkgs.rustc
               pkgs.cargo
             ];
+            dependencyLayers = "autosplit";
 
             runtimeLibs = [
               pkgs.espeak
@@ -42,14 +52,13 @@
 
             # Dynamic linker problems
             baseImage = {
-              imageName = "ubuntu";
+              imageName = "docker.io/library/ubuntu";
               imageDigest = "sha256:fed6ddb82c61194e1814e93b59cfcb6759e5aa33c4e41bb3782313c2386ed6df";
               arch = "amd64";
               sha256 = "sha256-idRF8oA0N5fuUNN2ch3iA+moDtx0KyP4EDDWHmb2PeY=";
             };
             runtimeExecutableDeps = [pkgs.ffmpeg pkgs.patchelf pkgs.gcc pkgs.openssl];
             members = ["server" "tinfer" "tinfer/espeak_align"];
-            localDeps = ["server" "tinfer" "tinfer/espeak_align"];
             config = {
               Env = [
                 "CC=${pkgs.gcc}/bin/gcc"
