@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: nixos
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
