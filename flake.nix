@@ -43,6 +43,13 @@
             ];
             imageCheck = ["python" "-m" "server.main" "--smoke-test"];
             imageCheckEnv.TINFER_SMOKE_TEST_CPU_OK = "1";
+            # Serving only deserializes engines (built by the trtc pipeline);
+            # the tensorrt wheel's engine-builder payload — including Windows
+            # binaries — is 5.6GB of dead weight.
+            prunePackageFiles."tensorrt-cu12-libs" = [
+              "libnvinfer_builder_resource*"
+              "*_win_*"
+            ];
 
             runtimeLibs = [
               pkgs.espeak
