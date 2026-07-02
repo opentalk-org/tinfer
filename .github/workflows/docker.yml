@@ -42,8 +42,9 @@ jobs:
           fi
           IMAGE="ghcr.io/${{ github.repository }}"
 
-          # --preserve-digests: layers upload uncompressed with the digests
-          # from layers.json, so unchanged layers skip without local state.
+          # Layers are gzip blobs built by nix with their digests recorded
+          # in the image json: the push probes the registry per digest and
+          # skips unchanged layers, no recompression, no local state.
           nix run \
             .#tinfer-server.copyTo -- \
             --preserve-digests \

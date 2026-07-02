@@ -59,15 +59,16 @@
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1775487831,
-        "narHash": "sha256-2lguQpLPQaxpQCJjXhmEEAfabwsAhkP29Z7fgLzHARA=",
-        "owner": "nlewo",
+        "lastModified": 1783012660,
+        "narHash": "sha256-7F3Z4W/EbPawrEmolu6UIlZmWl/r+6xPYKzZbopBEvA=",
+        "owner": "dialohq",
         "repo": "nix2container",
-        "rev": "76be9608a7f4d6c985d28b0e7be903ae2547df3e",
+        "rev": "c1a53d1a50ab47a7acd7856a79809b8fdaf083a1",
         "type": "github"
       },
       "original": {
-        "owner": "nlewo",
+        "owner": "dialohq",
+        "ref": "compressed-layers",
         "repo": "nix2container",
         "type": "github"
       }
@@ -190,11 +191,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1783005769,
-        "narHash": "sha256-ARigtzJA3idgT9viVCTaXB52pkaFyYQWp2iyY6jVKuQ=",
+        "lastModified": 1783012742,
+        "narHash": "sha256-EyGkxY+/vLtQJG/cE6LQnJUHZ6D2rkXeDg0l3eZY1bE=",
         "owner": "dialohq",
         "repo": "x2container.nix",
-        "rev": "dd32d04bf638b2385f01e74bdb431fc63f72a704",
+        "rev": "54f7e8371582dce3090e20fd4b46b730f8abec8e",
         "type": "github"
       },
       "original": {
