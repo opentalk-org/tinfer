@@ -229,14 +229,10 @@ async def example_synthesize_incremental_cancel():
             )
             
             yield styletts_pb2.IncrementalSynthesizeRequest(
-                text_chunk="To jest długi tekst, po nim zostanie wysłany cancel"
+                text_chunk="To jest tekst przed anulowaniem. "
             )
             
-            yield styletts_pb2.IncrementalSynthesizeRequest(
-                text_chunk="To jest więcej tekstu, który nie powinien być w pełni przetworzony. "
-            )
-            
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.05)
             
             print("Sending CancelSynthesis request...")
             yield styletts_pb2.IncrementalSynthesizeRequest(
@@ -358,6 +354,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
 
 
