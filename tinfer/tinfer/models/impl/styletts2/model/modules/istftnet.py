@@ -1,7 +1,9 @@
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
+import importlib
 import numpy as np
+import os
 from scipy.signal import get_window
 from torch.nn import Conv1d, ConvTranspose1d
 from torch.nn.utils import remove_weight_norm, weight_norm
@@ -29,6 +31,17 @@ class TorchSTFT(torch.nn.Module):
         return torch.abs(forward_transform), torch.angle(forward_transform)
 
     def inverse(self, magnitude, phase):
+        if (
+            os.getenv("TINFER_TRT_EXPORT") == "1"
+            and self.filter_length == 20
+            and self.hop_length == 5
+            and self.win_length == 20
+        ):
+            tensorrt_export = importlib.import_module(
+                "tinfer.models.impl.styletts2.model.modules.tensorrt_export"
+            )
+            return tensorrt_export.onnx_istft20_inverse(magnitude, phase, self.window)
+
         inverse_transform = torch.istft(
             magnitude * (torch.cos(phase) + 1j * torch.sin(phase)),
             self.filter_length, self.hop_length, self.win_length, window=self.window)
@@ -187,3 +200,7 @@ class Decoder(DecoderBackbone):
         x, F0_curve = super().forward(asr, F0_curve, N, s)
         x = self.generator(x, s, F0_curve)
         return x
+
+    def forward_with_har(self, asr, F0_curve, N, s, har):
+        x, _ = super().forward(asr, F0_curve, N, s)
+        return self.generator._forward_compiled(x, s, har)

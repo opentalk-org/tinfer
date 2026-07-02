@@ -5,21 +5,24 @@ from pathlib import Path
 from typing import Any
 from dataclasses import asdict, fields
 from munch import Munch
+import importlib
 import warnings
 import librosa
 import time
+import os
+import json
 from contextlib import contextmanager
 
 from tinfer.models.chunked import ChunkedModel
 from tinfer.models.base.model import IntermediateRepresentation
-from tinfer.core.request import AlignmentType
+from tinfer.core.request import AlignmentItem, AlignmentType
 from tinfer.models.impl.styletts2.alignment.alignment import StyleTTS2AlignmentParser
 from tinfer.models.impl.styletts2.model.modules.diffusion.sampler import DiffusionSampler, ADPM2Sampler, KarrasSchedule
 from tinfer.models.impl.styletts2.model.modules.load_utils import load_model, load_model_from_state, get_model_state_dict
 from tinfer.models.impl.styletts2.model.modules.config import ModelConfig
+from tinfer.models.impl.styletts2.model.tensorrt_config import get_tensorrt_model_config
 from .phonemizer import StyleTTS2Phonemizer
 from .inference_config import StyleTTS2Params
-from tinfer.models.impl.styletts2.voice.encoder import StyleTTS2VoiceEncoder
 from tinfer.models.impl.styletts2.voice.cache import VoiceCache
 
 
@@ -28,20 +31,78 @@ def length_to_mask(lengths):
     mask = torch.gt(mask + 1, lengths.unsqueeze(1))
     return mask
 
-# TODO: to be removed
+
+def _find_leading_audio_samples(audio: np.ndarray, sample_rate: int) -> int:
+    if audio.size == 0 or sample_rate <= 0:
+        return 0
+
+    frame_size = max(1, int(sample_rate * 0.02))
+    starts = np.arange(0, audio.size, frame_size)
+    if starts.size == 0:
+        return 0
+
+    audio64 = audio.astype(np.float64, copy=False)
+    squared = audio64 * audio64
+    frame_energy = np.add.reduceat(squared, starts)
+    frame_lengths = np.minimum(frame_size, audio.size - starts)
+    rms = np.sqrt(frame_energy / frame_lengths)
+    threshold = max(0.01, float(np.percentile(rms, 80)) * 0.1)
+    above = np.where(rms > threshold)[0]
+    if len(above) == 0:
+        return 0
+
+    first_frame = int(above[0])
+    trim_samples = first_frame * frame_size
+    return trim_samples if trim_samples >= int(sample_rate * 0.05) else 0
+
+
+def _trim_leading_silence_and_shift_alignments(
+    audio: np.ndarray,
+    sample_rate: int,
+    alignments: list[AlignmentItem],
+) -> tuple[np.ndarray, list[AlignmentItem]]:
+    trim_samples = _find_leading_audio_samples(audio, sample_rate)
+    if trim_samples <= 0:
+        return audio, alignments
+
+    trim_ms = int(round(trim_samples / sample_rate * 1000.0))
+    shifted = [
+        AlignmentItem(
+            item=item.item,
+            char_start=item.char_start,
+            char_end=item.char_end,
+            start_ms=max(0, item.start_ms - trim_ms),
+            end_ms=max(0, item.end_ms - trim_ms),
+        )
+        for item in alignments
+    ]
+    return audio[trim_samples:], shifted
+
 @contextmanager
 def timed_operation(name: str):
-    # if torch.cuda.is_available():
-    #     torch.cuda.synchronize()
-    # start_time = time.time()
+    profile_enabled = bool(os.getenv("TINFER_PROFILE"))
+    if profile_enabled and torch.cuda.is_available():
+        torch.cuda.synchronize()
+    start_time = time.perf_counter()
     try:
         yield
     finally:
-        pass
-        # if torch.cuda.is_available():
-        #     torch.cuda.synchronize()
-        # elapsed_ms = (time.time() - start_time) * 1000
-        # print(f"[{name}]: {elapsed_ms:.2f} ms")
+        if profile_enabled:
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            print(
+                "TINFER_PROFILE "
+                + json.dumps(
+                    {
+                        "scope": "model_stage",
+                        "stage": name,
+                        "elapsed_ms": elapsed_ms,
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
 
 class StyleTTS2(ChunkedModel):
     def __init__(self, device: str = "cuda") -> None:
@@ -54,12 +115,26 @@ class StyleTTS2(ChunkedModel):
         self._sampler = None
         self._phonemizer: StyleTTS2Phonemizer | None = None
         self._text_processing_pipeline = None
-        self._voice_encoder: StyleTTS2VoiceEncoder | None = None
+        self._voice_encoder: Any | None = None
         self._alignment_parser = StyleTTS2AlignmentParser()
         self._voice_cache = VoiceCache()
         self.max_batch_size = 10
+        self._model_dir: Path | None = None
 
         self._compile_model_flag = False
+        self._trt_config: dict[str, Any] | None = None
+        self._trt_runtime: Any | None = None
+        self._trt_decoder_enabled = False
+        self._trt_engine_dir: str | None = None
+        self._trt_max_batch = 16
+        self._trt_max_asr_frames = 1024
+        self._trt_decoder_dynamic_runner: Any | None = None
+        self._trt_diffusion_enabled = False
+        self._trt_diffusion_engine_dir: str | None = None
+        self._trt_max_diffusion_batch = 16
+        self._trt_min_diffusion_tokens = 16
+        self._trt_max_diffusion_tokens = 512
+        self._trt_diffusion_dynamic_runners: dict[int, Any] = {}
     
     def _initialize_from_config(self, config: dict[str, Any], device: str) -> None:
         self._config = config
@@ -76,15 +151,92 @@ class StyleTTS2(ChunkedModel):
         self._text_processing_pipeline = config.get("text_processing_pipeline")
         
         if load_style_encoder:
-            self._voice_encoder = StyleTTS2VoiceEncoder(
+            voice_encoder_module = importlib.import_module("tinfer.models.impl.styletts2.voice.encoder")
+            self._voice_encoder = voice_encoder_module.StyleTTS2VoiceEncoder(
                 model=self._model,
                 device="cpu",
                 sample_rate=self._sample_rate
             )
 
         self.to(device)
+        self._trt_config = get_tensorrt_model_config(config, self._model_dir or Path("."))
+        if self._trt_config is not None:
+            self._trt_runtime = importlib.import_module(
+                "tinfer.models.impl.styletts2.model.modules.tensorrt_runtime"
+            )
+        self._configure_tensorrt_decoder()
+        self._configure_tensorrt_diffusion()
         
         self._loaded = True
+
+    def _configure_tensorrt_decoder(self) -> None:
+        trt_config = self._trt_config
+        self._trt_decoder_enabled = bool(
+            trt_config is not None
+            and "decoder" in trt_config.get("components", [])
+            and isinstance(trt_config.get("decoder"), dict)
+        )
+        if not self._trt_decoder_enabled:
+            return
+        if self._model is None or self._model_config is None:
+            return
+        decoder_type = getattr(self._model_config.decoder, "type", None) if hasattr(self._model_config, "decoder") else None
+        if decoder_type != "istftnet":
+            raise RuntimeError(f"TensorRT decoder mode supports istftnet decoder only, got {decoder_type!r}")
+        decoder_config = trt_config["decoder"]
+        engine_dir = trt_config["engine_dir"]
+        self._trt_engine_dir = engine_dir
+        self._trt_max_batch = int(decoder_config["max_batch"])
+        self._trt_max_asr_frames = int(decoder_config["max_asr_frames"])
+        self._remove_decoder_weight_norm(self._model.decoder)
+        self._preload_trt_decoder_runners()
+
+    def _preload_trt_decoder_runners(self) -> None:
+        if self._trt_engine_dir is None:
+            return
+        engine_dir = Path(self._trt_engine_dir)
+        dynamic_path = engine_dir / self._trt_runtime.DynamicDecoderTRTEngineSpec().file_name
+        if dynamic_path.exists():
+            self._trt_decoder_dynamic_runner = self._trt_runtime.get_tensorrt_decoder_runner(engine_dir)
+
+    def _configure_tensorrt_diffusion(self) -> None:
+        trt_config = self._trt_config
+        self._trt_diffusion_enabled = bool(
+            trt_config is not None
+            and "diffusion" in trt_config.get("components", [])
+            and isinstance(trt_config.get("diffusion"), dict)
+        )
+        if not self._trt_diffusion_enabled:
+            return
+        if self._model is None:
+            return
+        diffusion_config = trt_config["diffusion"]
+        engine_dir = trt_config["engine_dir"]
+        self._trt_diffusion_engine_dir = engine_dir
+        self._trt_max_diffusion_batch = int(diffusion_config["max_batch"])
+        self._trt_min_diffusion_tokens = int(diffusion_config["min_tokens"])
+        self._trt_max_diffusion_tokens = int(diffusion_config["max_tokens"])
+        self._preload_trt_diffusion_runners()
+
+    def _preload_trt_diffusion_runners(self) -> None:
+        if self._trt_diffusion_engine_dir is None:
+            return
+        engine_dir = Path(self._trt_diffusion_engine_dir)
+        diffusion_config = self._trt_config.get("diffusion", {}) if self._trt_config else {}
+        for engine in diffusion_config.get("engines", []):
+            spec = self._trt_runtime.DynamicDiffusionTRTEngineSpec(num_steps=int(engine["steps"]))
+            if spec.num_steps not in self._trt_diffusion_dynamic_runners:
+                self._trt_diffusion_dynamic_runners[spec.num_steps] = self._trt_runtime.get_tensorrt_diffusion_runner(
+                    engine_dir,
+                    num_steps=spec.num_steps,
+                )
+
+    def _remove_decoder_weight_norm(self, decoder) -> None:
+        for module in decoder.modules():
+            try:
+                torch.nn.utils.remove_weight_norm(module)
+            except ValueError:
+                pass
 
     def _compile_model(self) -> None:
         # pass
@@ -107,10 +259,18 @@ class StyleTTS2(ChunkedModel):
         if self._voice_encoder is not None:
             self._voice_encoder.to(device)
 
-    def load(self, path: str, voices_folder: str | None = None, device="cuda", compile_model: bool = False) -> None:
+    def load(
+        self,
+        path: str,
+        voices_folder: str | None = None,
+        device="cuda",
+        compile_model: bool = False,
+        load_style_encoder: bool | None = None,
+    ) -> None:
         model_path = Path(path)
         if not model_path.exists():
             raise FileNotFoundError(f"Model file not found: {path}")
+        self._model_dir = model_path.parent
         
         try:
             model_saved = torch.load(str(model_path), map_location='cpu', weights_only=True)
@@ -118,7 +278,8 @@ class StyleTTS2(ChunkedModel):
             raise ValueError(f"Error loading model from {path}: {e}, please check if the model isn't corrupted.")
         
         config = model_saved.get('runtime_config', {})
-        load_style_encoder = config.get("load_style_encoder", True)
+        if load_style_encoder is None:
+            load_style_encoder = config.get("load_style_encoder", True)
         
         self._model, self._model_config = load_model(str(model_path), load_style_encoder)
         self._initialize_from_config(config, device)
@@ -366,21 +527,19 @@ class StyleTTS2(ChunkedModel):
             
             if self._text_processing_pipeline is not None:
                 text = self._text_processing_pipeline.process(text)
-            
-            phonemized_text_for_alignment = None
-            
+
             if not styletts2_params.phonemized:
-                result = self._phonemizer.process_text(text, phonemize=True, word_alignment=True)
-                processed_text, word_phoneme_data = result
-                tokens = self._phonemizer.tokenize(processed_text)
+                processed_text, word_phoneme_data = self._phonemizer.process_text_with_original_spans(text)
+                tokens_without_bos = self._phonemizer.tokenize(processed_text)
             else:
-                tokens = self._phonemizer.tokenize(text)
+                tokens_without_bos = self._phonemizer.tokenize(text)
                 word_phoneme_data = None
 
-            tokens_for_alignment = tokens.copy()
+            tokens_for_alignment = tokens_without_bos.copy()
+            tokens = tokens_without_bos.copy()
             tokens.insert(0, 0)
             all_tokens.append(tokens)
-            all_tokens_for_alignment.append(tokens_for_alignment)
+            all_tokens_for_alignment.append(tokens_for_alignment.copy())
             all_phonemized_texts_for_alignment.append(word_phoneme_data)
         
         return all_tokens, all_tokens_for_alignment, all_phonemized_texts_for_alignment, original_texts
@@ -422,6 +581,85 @@ class StyleTTS2(ChunkedModel):
         last_slice = tensor.select(dim, seq_len - 1).unsqueeze(dim)
         padding = last_slice.expand(*pad_shape)
         return torch.cat([tensor, padding], dim=dim)
+
+    def _pad_or_clip_to_size(self, tensor: torch.Tensor, target_size: int, dim: int = -1) -> torch.Tensor:
+        if dim < 0:
+            dim = len(tensor.shape) + dim
+        current_size = tensor.shape[dim]
+        if current_size == target_size:
+            return tensor
+        if current_size > target_size:
+            slices = [slice(None)] * tensor.dim()
+            slices[dim] = slice(0, target_size)
+            return tensor[tuple(slices)]
+
+        padding_size = target_size - current_size
+        pad_shape = list(tensor.shape)
+        pad_shape[dim] = padding_size
+        last_slice = tensor.select(dim, current_size - 1).unsqueeze(dim)
+        padding = last_slice.expand(*pad_shape)
+        return torch.cat([tensor, padding], dim=dim)
+
+    def _pad_to_batch_target(self, tensor: torch.Tensor, target_batch_size: int) -> torch.Tensor:
+        return self._pad_or_clip_to_size(tensor, target_batch_size, dim=0)
+
+    def _get_trt_decoder_runner(self):
+        if self._trt_decoder_dynamic_runner is not None:
+            return self._trt_decoder_dynamic_runner
+        raise RuntimeError("Dynamic TensorRT decoder engine is not configured")
+
+    def _get_trt_diffusion_runner(self, bucket):
+        dynamic_runner = self._trt_diffusion_dynamic_runners.get(bucket.num_steps)
+        if dynamic_runner is not None:
+            return dynamic_runner
+        raise RuntimeError(f"Dynamic TensorRT diffusion engine for {bucket.num_steps} steps is not configured")
+
+    def _run_trt_diffusion_sampler(
+        self,
+        noise: torch.Tensor,
+        embedding: torch.Tensor,
+        features: torch.Tensor,
+        *,
+        embedding_scale: float,
+        diffusion_steps: int,
+    ) -> torch.Tensor:
+        if embedding_scale != 1.0:
+            raise RuntimeError("TensorRT diffusion currently supports embedding_scale=1.0 only")
+
+        if noise.shape[0] > self._trt_max_diffusion_batch:
+            raise RuntimeError(
+                f"TensorRT diffusion batch {noise.shape[0]} exceeds max {self._trt_max_diffusion_batch}"
+            )
+
+        target_tokens = min(max(embedding.shape[1], self._trt_min_diffusion_tokens), self._trt_max_diffusion_tokens)
+        bucket = self._trt_runtime.DiffusionShapeBucket(
+            batch_size=noise.shape[0],
+            embedding_tokens=target_tokens,
+            num_steps=diffusion_steps,
+        )
+        noise_padded = noise
+        embedding_padded = self._pad_or_clip_to_size(embedding, target_tokens, dim=1)
+        features_padded = features
+
+        step_noise = torch.randn(
+            bucket.batch_size,
+            diffusion_steps - 1,
+            1,
+            noise.shape[-1],
+            device=noise.device,
+            dtype=noise.dtype,
+        )
+
+        runner = self._get_trt_diffusion_runner(bucket)
+        out = runner.run(
+            {
+                "noise": noise_padded,
+                "step_noise": step_noise,
+                "embedding": embedding_padded,
+                "features": features_padded,
+            }
+        )["style"]
+        return out[: noise.shape[0]].to(dtype=noise.dtype)
     
     def _run_model_forward(
         self,
@@ -472,21 +710,31 @@ class StyleTTS2(ChunkedModel):
                         group_batch_size = len(group_items)
                         
                         noise = torch.randn((group_batch_size, 256)).unsqueeze(1).to(self._device)
-                        noise_padded, _ = self._pad_to_batch_size(noise, group_batch_size)
                         bert_dur_group = bert_dur[group_indices_in_batch]
-                        bert_dur_padded, _ = self._pad_to_batch_size(bert_dur_group, group_batch_size)
                         ref_s_group = ref_s_batch[group_indices_in_batch]
-                        ref_s_batch_padded, _ = self._pad_to_batch_size(ref_s_group, group_batch_size)
-                        
-                        s_pred_group_padded = self._sampler(
-                            noise=noise_padded,
-                            embedding=bert_dur_padded,
-                            embedding_scale=embedding_scale,
-                            features=ref_s_batch_padded,
-                            num_steps=diffusion_steps
-                        ).squeeze(1).clone()
-                        
-                        s_pred_group = s_pred_group_padded[:group_batch_size]
+
+                        if self._trt_diffusion_enabled:
+                            s_pred_group = self._run_trt_diffusion_sampler(
+                                noise,
+                                bert_dur_group,
+                                ref_s_group,
+                                embedding_scale=embedding_scale,
+                                diffusion_steps=diffusion_steps,
+                            ).squeeze(1).clone()
+                        else:
+                            noise_padded, _ = self._pad_to_batch_size(noise, group_batch_size)
+                            bert_dur_padded, _ = self._pad_to_batch_size(bert_dur_group, group_batch_size)
+                            ref_s_batch_padded, _ = self._pad_to_batch_size(ref_s_group, group_batch_size)
+
+                            s_pred_group_padded = self._sampler(
+                                noise=noise_padded,
+                                embedding=bert_dur_padded,
+                                embedding_scale=embedding_scale,
+                                features=ref_s_batch_padded,
+                                num_steps=diffusion_steps
+                            ).squeeze(1).clone()
+
+                            s_pred_group = s_pred_group_padded[:group_batch_size]
                         for group_idx, batch_idx in enumerate(group_indices_in_batch):
                             s_pred[batch_idx] = s_pred_group[group_idx]
                     
@@ -591,17 +839,41 @@ class StyleTTS2(ChunkedModel):
                     asr_new[:, :, 1:] = asr[:, :, 0:-1]
                     asr = asr_new
                 
-                asr_seq_padded = self._pad_to_multiple(asr, 128, dim=-1)
-                F0_pred_seq_padded = self._pad_to_multiple(F0_pred, 256, dim=-1)
-                N_pred_seq_padded = self._pad_to_multiple(N_pred, 256, dim=-1)
-                
-                asr_padded, _ = self._pad_to_batch_size(asr_seq_padded, batch_size)
-                F0_pred_padded, _ = self._pad_to_batch_size(F0_pred_seq_padded, batch_size)
-                N_pred_padded, _ = self._pad_to_batch_size(N_pred_seq_padded, batch_size)
-                ref_padded, _ = self._pad_to_batch_size(ref, batch_size)
+                trt_bucket = None
+                if self._trt_decoder_enabled:
+                    if batch_size > self._trt_max_batch:
+                        raise RuntimeError(f"TensorRT decoder batch {batch_size} exceeds max {self._trt_max_batch}")
+                    target_asr_frames = min(max(asr.shape[-1], 128), self._trt_max_asr_frames)
+                    target_f0_frames = target_asr_frames * 2
+                    asr_padded = self._pad_or_clip_to_size(asr, target_asr_frames, dim=-1)
+                    F0_pred_padded = self._pad_or_clip_to_size(F0_pred, target_f0_frames, dim=-1)
+                    N_pred_padded = self._pad_or_clip_to_size(N_pred, target_f0_frames, dim=-1)
+                    ref_padded = ref
+                else:
+                    asr_seq_padded = self._pad_to_multiple(asr, 128, dim=-1)
+                    F0_pred_seq_padded = self._pad_to_multiple(F0_pred, 256, dim=-1)
+                    N_pred_seq_padded = self._pad_to_multiple(N_pred, 256, dim=-1)
+
+                    asr_padded, _ = self._pad_to_batch_size(asr_seq_padded, batch_size)
+                    F0_pred_padded, _ = self._pad_to_batch_size(F0_pred_seq_padded, batch_size)
+                    N_pred_padded, _ = self._pad_to_batch_size(N_pred_seq_padded, batch_size)
+                    ref_padded, _ = self._pad_to_batch_size(ref, batch_size)
             
             with timed_operation("decoder"):
-                out_padded = self._model.decoder(asr_padded, F0_pred_padded, N_pred_padded, ref_padded)
+                if self._trt_decoder_enabled:
+                    har = self._model.decoder.generator._preprocess_f0(F0_pred_padded)
+                    runner = self._get_trt_decoder_runner()
+                    out_padded = runner.run(
+                        {
+                            "asr": asr_padded,
+                            "f0": F0_pred_padded,
+                            "noise": N_pred_padded,
+                            "style": ref_padded,
+                            "har": har,
+                        }
+                    )["audio"]
+                else:
+                    out_padded = self._model.decoder(asr_padded, F0_pred_padded, N_pred_padded, ref_padded)
             
             out = out_padded[:batch_size]
             
@@ -628,11 +900,14 @@ class StyleTTS2(ChunkedModel):
         results = []
         hop_length = self._model_config.preprocess.hop_length
         max_mel_frames = max(all_actual_lengths) if all_actual_lengths else 0
+        out_cpu = out[:batch_size].detach().cpu().numpy()
+        ref_s_batch_cpu = ref_s_batch[:batch_size].detach().cpu().numpy()
+        s_pred_cpu = s_pred[:batch_size].detach().cpu().numpy() if s_pred is not None else None
         
         for b in range(batch_size):
             use_diffusion = styletts2_params_list[b].use_diffusion
             actual_mel_frames = all_actual_lengths[b]
-            audio = out[b].cpu().numpy()
+            audio = out_cpu[b]
             
             if audio.ndim > 1:
                 audio = audio.squeeze()
@@ -640,49 +915,57 @@ class StyleTTS2(ChunkedModel):
             max_audio_length = len(audio)
             scale_factor = actual_mel_frames / max_mel_frames if max_mel_frames > 0 else 1.0
             expected_audio_length = int(max_audio_length * scale_factor)
-            
-            # if len(audio) > expected_audio_length:
-            #     audio = audio[:expected_audio_length]
 
-            phoneme_alignments = self._alignment_parser.parse_from_pred_aln_trg(
-                all_pred_aln_trg[b],
-                all_tokens_for_alignment[b],
-                original_texts[b],
-                self._phonemizer.detokenize(all_tokens_for_alignment[b]),
-                sample_rate=self._sample_rate,
-                hop_length=hop_length,
-                actual_audio_length=len(audio),
-            )
-
-            if phoneme_alignments:
-                last_phoneme_end_ms = phoneme_alignments[-1].end_ms
-                trim_end_samples = int((last_phoneme_end_ms + 50) * self._sample_rate / 1000)
-                if trim_end_samples < len(audio):
-                    audio = audio[:trim_end_samples]
-            
             sample_rate = self._sample_rate
-            
             target_alignment_type = alignment_type
-            if target_alignment_type == AlignmentType.WORD:
-                word_phoneme_data = all_phonemized_texts_for_alignment[b]
-                word_alignments = self._alignment_parser.convert_to_word(
-                    phoneme_alignments,
-                    original_texts[b],
-                    word_phoneme_data,
-                )
-                final_alignments = word_alignments
-            elif target_alignment_type == AlignmentType.CHAR:
-                word_phoneme_data = all_phonemized_texts_for_alignment[b]
-                char_alignments = self._alignment_parser.convert_to_char(
-                    phoneme_alignments,
-                    original_texts[b],
-                    word_phoneme_data,
-                )
-                final_alignments = char_alignments
+
+            if target_alignment_type == AlignmentType.NONE:
+                if 0 < expected_audio_length < len(audio):
+                    audio = audio[:expected_audio_length]
+                final_alignments = []
             else:
-                final_alignments = phoneme_alignments
+                phoneme_alignments = self._alignment_parser.parse_from_pred_aln_trg(
+                    all_pred_aln_trg[b],
+                    all_tokens_for_alignment[b],
+                    original_texts[b],
+                    self._phonemizer.detokenize(all_tokens_for_alignment[b]),
+                    sample_rate=self._sample_rate,
+                    hop_length=hop_length,
+                    actual_audio_length=len(audio),
+                )
+
+                if phoneme_alignments:
+                    last_phoneme_end_ms = phoneme_alignments[-1].end_ms
+                    trim_end_samples = int((last_phoneme_end_ms + 50) * self._sample_rate / 1000)
+                    if trim_end_samples < len(audio):
+                        audio = audio[:trim_end_samples]
+
+                if target_alignment_type == AlignmentType.WORD:
+                    word_phoneme_data = all_phonemized_texts_for_alignment[b]
+                    word_alignments = self._alignment_parser.convert_to_word(
+                        phoneme_alignments,
+                        original_texts[b],
+                        word_phoneme_data,
+                    )
+                    final_alignments = word_alignments
+                elif target_alignment_type == AlignmentType.CHAR:
+                    word_phoneme_data = all_phonemized_texts_for_alignment[b]
+                    char_alignments = self._alignment_parser.convert_to_char(
+                        phoneme_alignments,
+                        original_texts[b],
+                        word_phoneme_data,
+                    )
+                    final_alignments = char_alignments
+                else:
+                    final_alignments = phoneme_alignments
+
+            audio, final_alignments = _trim_leading_silence_and_shift_alignments(
+                audio,
+                sample_rate,
+                final_alignments,
+            )
             
-            updated_style_vector = s_pred[b].cpu().numpy() if use_diffusion and s_pred is not None else ref_s_batch[b].cpu().numpy()
+            updated_style_vector = s_pred_cpu[b] if use_diffusion and s_pred_cpu is not None else ref_s_batch_cpu[b]
             
             if b < len(contexts) and contexts[b] is not None:
                 contexts[b]["updated_voice"] = updated_style_vector.copy()
@@ -729,7 +1012,7 @@ class StyleTTS2(ChunkedModel):
             
             use_diffusion_any = any(p.use_diffusion for p in styletts2_params_list)
             
-            if use_diffusion_any and self._sampler is None:
+            if use_diffusion_any and self._sampler is None and not self._trt_diffusion_enabled:
                 self._build_sampler()
             
             if self._phonemizer is None:

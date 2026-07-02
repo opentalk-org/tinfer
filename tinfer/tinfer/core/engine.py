@@ -16,6 +16,7 @@ import numpy as np
 from tinfer.core.request import Alignment, AlignmentItem
 from tinfer.utils.audio_encoder import AudioFormat, parse_output_format
 from tinfer.errors import InferenceError
+import asyncio
 
 _STREAM_PARAM_KEYS = frozenset({
     "chunk_length_schedule",
@@ -27,6 +28,7 @@ _STREAM_PARAM_KEYS = frozenset({
     "target_encoding",
     "tts_params",
 })
+
 
 class StreamingTTS:
     def __init__(self, config: StreamingTTSConfig, auto_run: bool = True):
@@ -59,35 +61,27 @@ class StreamingTTS:
             config = StreamingTTSConfig(**config_dict)
         return cls(config)
 
-    def generate_full(self, model_id: str, voice_id: str, text: str, params: StreamParams | dict[str, Any]):
+    async def generate_full(self, model_id: str, voice_id: str, text: str, params: StreamParams | dict[str, Any]):
         stream = self.create_stream(model_id, voice_id, params)
 
         stream.add_text(text)
         stream.force_generate()
 
-        audio_chunks = stream.get_audio()
-
-        stream.close()
-
-        return self._merge_audio_chunks(audio_chunks)
-
-    def generate_full_batch(self, model_id: str, voice_id: str, texts: list[str], params: list[StreamParams | dict[str, Any]]):
-        streams: list[TTSStream] = []
-        for text, params_dict in zip(texts, params):
-            stream = self.create_stream(model_id, voice_id, params_dict)
-            stream.add_text(text)
-            stream.force_generate()
-            streams.append(stream)
-
-        results: list[AudioChunk] = []
-        for stream in streams:
-            audio_chunks = stream.get_audio()
-            results.append(self._merge_audio_chunks(audio_chunks))
-
-        for stream in streams:
+        try:
+            audio_chunks = []
+            async for chunk in stream.pull_audio():
+                audio_chunks.append(chunk)
+            return self._merge_audio_chunks(audio_chunks)
+        finally:
             stream.close()
 
-        return results
+    async def generate_full_batch(self, model_id: str, voice_id: str, texts: list[str], params: list[StreamParams | dict[str, Any]]):
+        return await asyncio.gather(
+            *[
+                self.generate_full(model_id, voice_id, text, params_dict)
+                for text, params_dict in zip(texts, params)
+            ]
+        )
 
     def _merge_audio_chunks(self, chunks: list[AudioChunk]) -> AudioChunk:
         if not chunks:
@@ -369,6 +363,3 @@ class StreamingTTS:
             self.timeout_thread.join(timeout=1.0)
         if self.executor:
             self.executor.stop()
-
-
-

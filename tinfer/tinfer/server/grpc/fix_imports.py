@@ -7,6 +7,13 @@ from pathlib import Path
 
 def fix_pb2_grpc_imports(file_path: Path):
     content = file_path.read_text()
+
+    content = re.sub(
+        r'^import grpc$',
+        'import importlib\nimport importlib.util\n\nimport grpc',
+        content,
+        flags=re.MULTILINE
+    )
     
     content = re.sub(
         r'^import styletts_pb2 as styletts__pb2$',
@@ -22,26 +29,32 @@ def fix_pb2_grpc_imports(file_path: Path):
         flags=re.MULTILINE
     )
     
-    old_version_check = r'''_version_not_supported = False
-
-try:
-    from grpc._utilities import first_version_is_lower
-    _version_not_supported = first_version_is_lower\(GRPC_VERSION, GRPC_GENERATED_VERSION\)
-except ImportError:
-    _version_not_supported = True
-
-if _version_not_supported:'''
+    old_version_check = (
+        r"_version_not_supported = False"
+        "\n\n"
+        r"try:"
+        "\n"
+        r"    "
+        r"from grpc._utilities import first_version_is_lower"
+        "\n"
+        r"    _version_not_supported = first_version_is_lower\(GRPC_VERSION, GRPC_GENERATED_VERSION\)"
+        "\n"
+        r"except ImportError:"
+        "\n"
+        r"    _version_not_supported = True"
+        "\n\n"
+        r"if _version_not_supported:"
+    )
     
     new_version_check = '''_version_not_supported = False
 
-try:
-    from grpc._utilities import first_version_is_lower
+_grpc_utilities = importlib.import_module("grpc._utilities") if importlib.util.find_spec("grpc._utilities") else None
+
+if _grpc_utilities is not None:
     if GRPC_VERSION != 'unknown':
-        _version_not_supported = first_version_is_lower(GRPC_VERSION, GRPC_GENERATED_VERSION)
+        _version_not_supported = _grpc_utilities.first_version_is_lower(GRPC_VERSION, GRPC_GENERATED_VERSION)
     else:
         _version_not_supported = False
-except ImportError:
-    _version_not_supported = False
 
 if _version_not_supported:'''
     
@@ -59,5 +72,3 @@ if __name__ == '__main__':
     else:
         print(f"File not found: {pb2_grpc_file}", file=sys.stderr)
         sys.exit(1)
-
-

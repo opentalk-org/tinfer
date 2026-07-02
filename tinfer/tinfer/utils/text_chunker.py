@@ -138,19 +138,19 @@ class TextChunker:
 
             if len(merged) > max_size:
                 if current_chunk and len(current_chunk.strip()) >= min_size:
-                    chunks.append(current_chunk.rstrip())
+                    chunks.append(current_chunk)
                     current_chunk = ""
                 elif current_chunk:
-                    chunks.append(current_chunk.rstrip())
+                    chunks.append(current_chunk)
                     current_chunk = ""
                 sub_chunks = self._split_text_recursive(merged, request, chunk_index, remaining_seps, recursion_depth + 1)
                 chunks.extend(sub_chunks)
             elif potential_len > max_size:
                 if current_chunk and len(current_chunk.strip()) >= min_size:
-                    chunks.append(current_chunk.rstrip())
+                    chunks.append(current_chunk)
                     current_chunk = merged
                 elif current_chunk:
-                    chunks.append(current_chunk.rstrip())
+                    chunks.append(current_chunk)
                     current_chunk = merged
                 else:
                     current_chunk = merged
@@ -164,7 +164,7 @@ class TextChunker:
         if current_chunk:
             chunks.append(current_chunk.rstrip())
 
-        result = [c.strip() for c in chunks if c.strip()]
+        result = [c for c in chunks if c.strip()]
         
         final_chunks = []
         next_chunk_index = chunk_index + 1
@@ -205,4 +205,3 @@ class TextChunker:
         if match:
             return start_pos + match.start()
         return len(text)
-

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+from typing import Any
 
 from tinfer.core.request import AlignmentItem, AlignmentType
 from tinfer.models.base.alignment import AlignmentParser
@@ -62,10 +63,14 @@ class StyleTTS2AlignmentParser(AlignmentParser):
         self,
         phoneme_alignments: list[AlignmentItem],
         original_text: str,
-        word_phoneme_data: tuple[list[str], list[str]] | None = None,
+        word_phoneme_data: tuple[list[str], list[str]] | list[dict[str, Any]] | None = None,
     ) -> list[AlignmentItem]:
         if word_phoneme_data is None:
             return []
+        if isinstance(word_phoneme_data, list):
+            return self._converter.phoneme_to_word_mapped(
+                phoneme_alignments, original_text, word_phoneme_data
+            )
         words, phonemes_list = word_phoneme_data
         return self._converter.phoneme_to_word(
             phoneme_alignments, original_text, words, phonemes_list
@@ -75,10 +80,14 @@ class StyleTTS2AlignmentParser(AlignmentParser):
         self,
         phoneme_alignments: list[AlignmentItem],
         original_text: str,
-        word_phoneme_data: tuple[list[str], list[str]] | None = None,
+        word_phoneme_data: tuple[list[str], list[str]] | list[dict[str, Any]] | None = None,
     ) -> list[AlignmentItem]:
         if word_phoneme_data is None:
             return []
+        if isinstance(word_phoneme_data, list):
+            return self._converter.phoneme_to_char_mapped(
+                phoneme_alignments, original_text, word_phoneme_data
+            )
         words, phonemes_list = word_phoneme_data
         return self._converter.phoneme_to_char(
             phoneme_alignments, original_text, words, phonemes_list

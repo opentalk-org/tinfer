@@ -4,11 +4,19 @@ from torch import nn
 from typing import Optional, Any
 from torch import Tensor
 import torch.nn.functional as F
-import torchaudio
-import torchaudio.functional as audio_F
 
 import random
 random.seed(0)
+
+
+def create_dct(n_mfcc: int, n_mels: int, norm: str | None = None) -> Tensor:
+    n = torch.arange(float(n_mels))
+    k = torch.arange(float(n_mfcc)).unsqueeze(1)
+    dct = torch.cos(math.pi / float(n_mels) * (n + 0.5) * k).t()
+    if norm == "ortho":
+        dct[:, 0] *= 1.0 / math.sqrt(2.0)
+        dct *= math.sqrt(2.0 / float(n_mels))
+    return dct
 
 
 def _get_activation_fn(activ):
@@ -335,7 +343,7 @@ class MFCC(nn.Module):
         self.n_mfcc = n_mfcc
         self.n_mels = n_mels
         self.norm = 'ortho'
-        dct_mat = audio_F.create_dct(self.n_mfcc, self.n_mels, self.norm)
+        dct_mat = create_dct(self.n_mfcc, self.n_mels, self.norm)
         self.register_buffer('dct_mat', dct_mat)
 
     def forward(self, mel_specgram):

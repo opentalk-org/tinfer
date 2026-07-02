@@ -35,7 +35,7 @@ pub struct espeak_VOICE {
     pub spare: *mut c_void,
 }
 
-unsafe extern "C" {
+extern "C" {
     fn espeak_Initialize(
         output: espeak_AUDIO_OUTPUT,
         buflength: c_int,
@@ -166,4 +166,3 @@ impl EspeakPhonemizer {
         Ok(out)
     }
 }
-

@@ -7,3 +7,11 @@ __pycache__/
 converted_models
 result
 target/
+build/
+benchmark_outputs/
+alignment_stress_outputs/
+alignment_artifacts/
+tmp_tests/trt_probe/
+tmp_tests/trt_engines/
+*.onnx
+*.engine

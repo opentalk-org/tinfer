@@ -2,6 +2,7 @@ from tinfer.process.shared_memory import SharedMemoryManager
 from tinfer.process.protocol import IPCProtocol, MessageType
 from tinfer.core.request import TTSRequestIPC, AudioChunkIPC, AudioChunk, Alignment, AlignmentItem, AlignmentType
 from tinfer.models.base.model import IntermediateRepresentation
+from tinfer.models.impl.styletts2.model.modules.tensorrt_runtime import clear_tensorrt_runner_cache
 from tinfer.scheduler.worker_scheduler import WorkerScheduler
 from multiprocessing import get_context
 from typing import Any
@@ -104,6 +105,10 @@ class WorkerProcess(Process):
     def _handle_unload_model(self, data: dict) -> None:
         model_id = data["model_id"]
         del self.models[model_id]
+        if not self.models:
+            clear_tensorrt_runner_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
     
     def _handle_cancel_request(self, data: dict) -> None:
         request_id = data["request_id"]
@@ -129,12 +134,8 @@ class WorkerProcess(Process):
                 self._mark_batch_complete(batch)
                 return
             
-            start = time.monotonic()
             with torch.no_grad():
                 results = self._execute_batch(model, texts, contexts, params_list, request_metadata)
-            torch.cuda.synchronize()
-            end = time.monotonic()
-            # print(f"MODEL_GENERATE_TIME: {end - start}")
             self._send_batch_results(results, request_metadata)
         except Exception as e:
             for req in batch:

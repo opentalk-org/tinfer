@@ -76,6 +76,16 @@ impl Engine {
         Ok((t, p))
     }
 
+    pub fn align_with_spans(
+        &mut self,
+        text: &str,
+        punctuation: &str,
+        threads: usize,
+    ) -> Result<Vec<align::AlignmentSpan>, AlignrustError> {
+        let (tokens, phonemes) = self.align(text, punctuation, threads)?;
+        Ok(align::add_spans(text, &tokens, &phonemes))
+    }
+
     pub fn align_batch(
         &mut self,
         texts: &[String],

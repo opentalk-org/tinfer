@@ -10,8 +10,62 @@ use std::thread;
 const SPACE_CP: u32 = 0x20;
 const BEAM_WIDTH: usize = 32;
 
+#[derive(Clone, Debug)]
+pub struct AlignmentSpan {
+    pub token: String,
+    pub phonemes: String,
+    pub start: usize,
+    pub end: usize,
+}
+
 fn is_space_byte(c: u8) -> bool {
     c == b' ' || c == b'\t' || c == b'\n' || c == b'\r' || c == b'\x0c' || c == b'\x0b'
+}
+
+fn byte_to_char_index(text: &str, byte_index: usize) -> usize {
+    text[..byte_index.min(text.len())].chars().count()
+}
+
+pub fn add_spans(text: &str, tokens: &[String], phonemes: &[String]) -> Vec<AlignmentSpan> {
+    let mut spans = Vec::with_capacity(tokens.len());
+    let mut cursor = 0usize;
+
+    for (idx, token) in tokens.iter().enumerate() {
+        if token.is_empty() {
+            let char_cursor = byte_to_char_index(text, cursor);
+            spans.push(AlignmentSpan {
+                token: token.clone(),
+                phonemes: phonemes.get(idx).cloned().unwrap_or_default(),
+                start: char_cursor,
+                end: char_cursor,
+            });
+            continue;
+        }
+
+        let search_start = cursor.min(text.len());
+        let Some(rel_start) = text[search_start..].find(token) else {
+            let char_cursor = byte_to_char_index(text, search_start);
+            spans.push(AlignmentSpan {
+                token: token.clone(),
+                phonemes: phonemes.get(idx).cloned().unwrap_or_default(),
+                start: char_cursor,
+                end: char_cursor,
+            });
+            continue;
+        };
+        let start_byte = search_start + rel_start;
+        let end_byte = (start_byte + token.len()).min(text.len());
+        cursor = end_byte;
+
+        spans.push(AlignmentSpan {
+            token: token.clone(),
+            phonemes: phonemes.get(idx).cloned().unwrap_or_default(),
+            start: byte_to_char_index(text, start_byte),
+            end: byte_to_char_index(text, end_byte),
+        });
+    }
+
+    spans
 }
 
 fn join_words(words: &[String], start: usize, count: usize) -> String {
@@ -554,6 +608,12 @@ fn assemble_tokens_and_phonemes(
 
     let mut tokens_out: Vec<String> = Vec::new();
     let mut phonemes_out: Vec<String> = Vec::new();
+    if let Some(marks) = marks_by_chunk.get(&-1) {
+        for mark in marks {
+            tokens_out.push(mark.clone());
+            phonemes_out.push(mark.clone());
+        }
+    }
     for chunk_index in 0..chunk_token_ranges.len() {
         let (start, end) = chunk_token_ranges[chunk_index];
         for i in start..end {
@@ -730,4 +790,3 @@ fn align_chunks_parallel(
         return results.into_inner().unwrap_or_else(|e| e.into_inner());
     }
 }
-
