@@ -38,8 +38,7 @@
               pkgs.rustc
               pkgs.cargo
             ];
-            cacheGroupName = "heavy";
-            cacheGroupIndexes = ["https://download.pytorch.org/whl/cu128"];
+            dependencyLayers = "autosplit";
 
             runtimeLibs = [
               pkgs.espeak
@@ -60,7 +59,6 @@
             };
             runtimeExecutableDeps = [pkgs.ffmpeg pkgs.patchelf pkgs.gcc pkgs.openssl];
             members = ["server" "tinfer" "tinfer/espeak_align"];
-            localDeps = ["server" "tinfer" "tinfer/espeak_align"];
             config = {
               Env = [
                 "CC=${pkgs.gcc}/bin/gcc"
