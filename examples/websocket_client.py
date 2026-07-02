@@ -1,4 +1,5 @@
 import asyncio
+import traceback
 import json
 import base64
 import numpy as np
@@ -299,7 +300,6 @@ async def main():
         print("Make sure the WebSocket server is running on port 8000")
     except Exception as e:
         print(f"\nUnexpected error: {e}")
-        import traceback
         traceback.print_exc()
 
 if __name__ == "__main__":

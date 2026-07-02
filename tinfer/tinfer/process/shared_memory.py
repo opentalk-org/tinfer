@@ -1,7 +1,10 @@
+from dataclasses import fields
+import importlib
 from multiprocessing import shared_memory
+from typing import Any
+
 import numpy as np
 import torch
-from typing import Any
 
 class SharedMemoryManager:
     def __init__(self) -> None:
@@ -160,9 +163,6 @@ class SharedMemoryManager:
                 return self.deserialize_array(obj)
             
             if obj.get("__dataclass__"):
-                from dataclasses import dataclass, fields
-                import importlib
-                
                 module_name = obj["__module__"]
                 class_name = obj["__class__"]
                 obj_dict = obj["__dict__"]
