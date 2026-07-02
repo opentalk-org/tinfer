@@ -79,6 +79,7 @@ def _trim_leading_silence_and_shift_alignments(
     ]
     return audio[trim_samples:], shifted
 
+
 @contextmanager
 def timed_operation(name: str):
     profile_enabled = bool(os.getenv("TINFER_PROFILE"))
@@ -781,6 +782,13 @@ class StyleTTS2(ChunkedModel):
                 speed_tensor = torch.tensor([styletts2_params_list[i].speed for i in range(batch_size)], device=self._device).unsqueeze(1)
                 pred_dur = pred_dur * speed_tensor
                 pred_dur = pred_dur.clamp(min=1)
+
+                for b in range(batch_size):
+                    for token_idx in range(input_lengths[b] - 1, 0, -1):
+                        symbol = self._phonemizer.index_to_symbol.get(int(tokens_tensor[b, token_idx].item()), "")
+                        if symbol.isalpha():
+                            break
+                        pred_dur[b, token_idx] = 1
                 
             decoder_type = getattr(self._model_config.decoder, 'type', None) if hasattr(self._model_config, 'decoder') else None
             
@@ -854,6 +862,10 @@ class StyleTTS2(ChunkedModel):
                     asr_padded = self._pad_or_clip_to_size(asr, target_asr_frames, dim=-1)
                     F0_pred_padded = self._pad_or_clip_to_size(F0_pred, target_f0_frames, dim=-1)
                     N_pred_padded = self._pad_or_clip_to_size(N_pred, target_f0_frames, dim=-1)
+                    if asr.shape[-1] < target_asr_frames:
+                        asr_padded[:, :, asr.shape[-1]:] = 0
+                        F0_pred_padded[:, F0_pred.shape[-1]:] = 0
+                        N_pred_padded[:, N_pred.shape[-1]:] = 0
                     ref_padded = ref
                 else:
                     asr_seq_padded = self._pad_to_multiple(asr, 128, dim=-1)
@@ -905,6 +917,9 @@ class StyleTTS2(ChunkedModel):
     ) -> list[IntermediateRepresentation]:
         results = []
         hop_length = self._model_config.preprocess.hop_length
+        decoder_hop_length = hop_length
+        if getattr(self._model_config.decoder, "type", None) == "istftnet":
+            decoder_hop_length = int(np.prod(self._model_config.decoder.upsample_rates) * self._model_config.decoder.gen_istft_hop_size * 2)
         max_mel_frames = max(all_actual_lengths) if all_actual_lengths else 0
         out_cpu = out[:batch_size].detach().cpu().numpy()
         ref_s_batch_cpu = ref_s_batch[:batch_size].detach().cpu().numpy()
@@ -919,15 +934,15 @@ class StyleTTS2(ChunkedModel):
                 audio = audio.squeeze()
             
             max_audio_length = len(audio)
-            expected_audio_length = int(actual_mel_frames * hop_length)
+            expected_audio_length = int(actual_mel_frames * decoder_hop_length)
+            if 0 < expected_audio_length < len(audio):
+                end_margin_samples = int(self._end_trim_margin_ms * self._sample_rate / 1000)
+                audio = audio[: min(len(audio), expected_audio_length + end_margin_samples)]
 
             sample_rate = self._sample_rate
             target_alignment_type = alignment_type
 
             if target_alignment_type == AlignmentType.NONE:
-                if 0 < expected_audio_length < len(audio):
-                    end_margin_samples = int(self._end_trim_margin_ms * self._sample_rate / 1000)
-                    audio = audio[: min(len(audio), expected_audio_length + end_margin_samples)]
                 final_alignments = []
             else:
                 phoneme_alignments = self._alignment_parser.parse_from_pred_aln_trg(
@@ -939,12 +954,6 @@ class StyleTTS2(ChunkedModel):
                     hop_length=hop_length,
                     actual_audio_length=len(audio),
                 )
-
-                if phoneme_alignments:
-                    last_phoneme_end_ms = phoneme_alignments[-1].end_ms
-                    trim_end_samples = int((last_phoneme_end_ms + self._end_trim_margin_ms) * self._sample_rate / 1000)
-                    if trim_end_samples < len(audio):
-                        audio = audio[:trim_end_samples]
 
                 if target_alignment_type == AlignmentType.WORD:
                     word_phoneme_data = all_phonemized_texts_for_alignment[b]
@@ -970,6 +979,7 @@ class StyleTTS2(ChunkedModel):
                 sample_rate,
                 final_alignments,
             )
+            audio = np.concatenate([audio, np.zeros(int(0.15 * sample_rate), dtype=audio.dtype)])
             
             updated_style_vector = s_pred_cpu[b] if use_diffusion and s_pred_cpu is not None else ref_s_batch_cpu[b]
             
