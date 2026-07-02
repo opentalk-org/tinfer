@@ -19,7 +19,6 @@ include = ["tinfer*"]
 
 [project.optional-dependencies]
 inference = [
-    "espeak_align",
     "aiohttp>=3.13.3",
     "einops>=0.8.2",
     "einops-exts>=0.0.4",

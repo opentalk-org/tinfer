@@ -21,26 +21,40 @@
       system: let
         pkgs = import nixpkgs {inherit system;};
         gccLib = pkgs.stdenv.cc.cc.lib;
-        cargoBuildEnv = pkgs.runCommand "cargo-build-env" {} ''
-          mkdir -p "$out/nix-support"
-          cat > "$out/nix-support/setup-hook" <<'EOF'
-          export CARGO_HOME="$NIX_BUILD_TOP/cargo-home"
-          export CARGO_TARGET_DIR="$NIX_BUILD_TOP/cargo-target"
-          mkdir -p "$CARGO_HOME" "$CARGO_TARGET_DIR"
-          EOF
-        '';
+        python = pkgs.python311;
+
+        # The espeak_align extension module as a plain nix-built cdylib — no
+        # wheel, no maturin, no rust toolchain inside the uv/image machinery.
+        # CPython imports a properly named .so straight off PYTHONPATH, and
+        # the nix cc wrapper records an rpath to nix's espeak-ng, so linkage
+        # needs no environment variables anywhere.
+        espeak-align = pkgs.rustPlatform.buildRustPackage {
+          pname = "espeak-align";
+          version = "0.1.0";
+          src = ./tinfer/espeak_align;
+          cargoLock.lockFile = ./tinfer/espeak_align/Cargo.lock;
+          buildInputs = [pkgs.espeak-ng];
+          nativeBuildInputs = [python];
+          env.PYO3_PYTHON = "${python}/bin/python${python.pythonVersion}";
+          buildAndTestSubdir = "espeak_align";
+          # buildRustPackage installs binaries; we want the cdylib as an
+          # importable extension module in site-packages layout.
+          postInstall = ''
+            site="$out/lib/python${python.pythonVersion}/site-packages"
+            mkdir -p "$site"
+            cp target/*/release/libespeak_align.so "$site/espeak_align.so" 2>/dev/null \
+              || cp target/release/libespeak_align.so "$site/espeak_align.so"
+          '';
+          doCheck = false;
+        };
       in {
         packages = rec {
+          inherit espeak-align;
+
           tinfer-server = x2container.lib.${system}.uv2container.buildImage {
             name = "tinfer";
             src = ./.;
-            python = pkgs.python311;
-            extraBuildInputs = [
-              cargoBuildEnv
-              pkgs.espeak
-              pkgs.rustc
-              pkgs.cargo
-            ];
+            inherit python;
             imageCheck = ["python" "-m" "server.main" "--smoke-test"];
             imageCheckEnv.TINFER_SMOKE_TEST_CPU_OK = "1";
             # Serving only deserializes engines (built by the trtc pipeline);
@@ -63,7 +77,8 @@
             extraLdLibraryPath = ":/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/lib/x86_64-linux-gnu";
             extraLibraryPath = ":/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/lib/x86_64-linux-gnu";
             runtimeExecutableDeps = [pkgs.ffmpeg pkgs.patchelf pkgs.gcc pkgs.openssl];
-            members = ["server" "tinfer" "tinfer/espeak_align"];
+            members = ["server" "tinfer"];
+            pythonLibs = [espeak-align];
             config = {
               Env = [
                 "CC=${pkgs.gcc}/bin/gcc"
@@ -138,6 +153,10 @@
           packages = [pkgs.espeak pkgs.uv];
           shellHook = ''
             export LD_LIBRARY_PATH=${pkgs.espeak}/lib:$LD_LIBRARY_PATH
+            # espeak_align is nix-built (packages.espeak-align), not a wheel:
+            # expose it to the uv venv via PYTHONPATH. After editing the rust
+            # code, `direnv reload` (or re-entering the shell) rebuilds it.
+            export PYTHONPATH=${espeak-align}/lib/python${python.pythonVersion}/site-packages''${PYTHONPATH:+:$PYTHONPATH}
           '';
         };
       }
