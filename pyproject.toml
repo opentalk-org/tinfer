@@ -22,5 +22,6 @@ explicit = true
 heavy = [
     "torch==2.10.0",
     "torchaudio==2.10.0",
-    "tensorrt-cu12"
+    "tensorrt-cu12",
+    "onnx==1.22.0",
 ]
