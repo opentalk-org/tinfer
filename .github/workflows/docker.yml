@@ -18,18 +18,21 @@ jobs:
         sandbox = false
         keep-env-derivations = true
         keep-outputs = true
-      CONTAINERS_REGISTRIES_CONF: ${{ runner.temp }}/registries.conf
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Build image
+        env:
+          CONTAINERS_REGISTRIES_CONF: ${{ runner.temp }}/registries.conf
         run: |
           echo 'unqualified-search-registries = ["docker.io"]' > "$CONTAINERS_REGISTRIES_CONF"
           nix build .#tinfer-server --print-build-logs
 
       - name: Push to ghcr.io
+        env:
+          CONTAINERS_REGISTRIES_CONF: ${{ runner.temp }}/registries.conf
         run: |
           SHORT="${GITHUB_SHA:0:12}"
           if [ "${{ github.event_name }}" = "pull_request" ]; then
