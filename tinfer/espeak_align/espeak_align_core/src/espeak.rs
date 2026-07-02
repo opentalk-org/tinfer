@@ -35,7 +35,7 @@ pub struct espeak_VOICE {
     pub spare: *mut c_void,
 }
 
-extern "C" {
+unsafe extern "C" {
     fn espeak_Initialize(
         output: espeak_AUDIO_OUTPUT,
         buflength: c_int,
