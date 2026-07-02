@@ -59,6 +59,14 @@ class TTSStream:
 
         return audio_chunks
 
+    def collect_audio(self):
+        """Wait for queued generation work to finish, then return its audio chunks."""
+        audio_chunks = []
+        while self._request.pending_chunks > 0:
+            audio_chunks.append(self._request.audio_queue.get())
+        audio_chunks.extend(self.get_audio())
+        return audio_chunks
+
     def get_state(self):
         return self._request.get_state()
 

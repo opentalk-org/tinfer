@@ -342,7 +342,7 @@ class StreamingTTS:
             for i in range(5):
                 stream.add_text("".join(["Hello, world!"] * (i + 1)))
                 stream.force_generate()
-                audio_chunks = stream.get_audio()
+                audio_chunks = stream.collect_audio()
                 del audio_chunks
             stream.close()
 
@@ -358,7 +358,7 @@ class StreamingTTS:
                 streams[i].add_text("Hello, world! Hello, world! Hello, world! Hello, world! Hello, world!")
                 streams[i].force_generate()
             for stream in streams[:batch_size]:
-                audio_chunks = stream.get_audio()
+                audio_chunks = stream.collect_audio()
                 del audio_chunks
             for stream in streams:
                 stream.close()
