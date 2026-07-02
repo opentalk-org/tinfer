@@ -94,6 +94,20 @@ class PlanTests(unittest.TestCase):
         self.assertFalse(trt_versions_compatible("10.13.3.9", "10.9.0.34"))
         self.assertFalse(trt_versions_compatible("10.13.3.9", "11.1.0.106"))
 
+    def test_nvidia_kernel_module_version_parses_proc(self):
+        from trtc.plan import nvidia_kernel_module_version, query_gpu
+
+        proc = (
+            "NVRM version: NVIDIA UNIX Open Kernel Module for x86_64  590.48.01  Release Build"
+            "  (dvs-builder@U16-I3-D08-2-2)  Mon Nov 24 04:14:44 UTC 2025\n"
+            "GCC version:  gcc version 13.3.0\n"
+        )
+        self.assertEqual(nvidia_kernel_module_version(proc), "590.48.01")
+        self.assertIsNone(nvidia_kernel_module_version("no driver here"))
+        # Off-GPU boxes degrade to None without raising.
+        facts = query_gpu()
+        self.assertEqual(set(facts), {"gpu_name", "compute_capability", "driver_version"})
+
     def test_trt_pin_satisfied_ignores_post_suffix_but_not_minor(self):
         from trtc.plan import trt_pin_satisfied
 

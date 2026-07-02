@@ -9,10 +9,10 @@
 
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import json
-import shutil
-import subprocess
+import re
 from pathlib import Path
 from typing import Any
 
@@ -222,26 +222,58 @@ def resolve_tensorrt_version(explicit: str | None = None, *, project_dir: str | 
     )
 
 
+# CUdevice_attribute enums; part of the stable driver ABI.
+_CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR = 75
+_CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR = 76
+
+
+def nvidia_kernel_module_version(proc_version_text: str) -> str | None:
+    """Driver build (e.g. '590.48.01') from /proc/driver/nvidia/version.
+
+    The NVRM line's wording varies (proprietary vs open kernel module), so
+    match the version number itself."""
+    for line in proc_version_text.splitlines():
+        if line.startswith("NVRM"):
+            match = re.search(r"\b(\d+\.\d+(?:\.\d+)*)\b", line)
+            return match.group(1) if match else None
+    return None
+
+
 def query_gpu() -> dict[str, str | None]:
-    """Hardware facts via nvidia-smi (present wherever a driver is)."""
-    nvidia_smi = shutil.which("nvidia-smi")
+    """Hardware facts straight from the CUDA driver API.
+
+    ctypes on libcuda.so.1 — the same host-injected library the engine build
+    itself binds, found via the same search path, so these facts and the
+    build share one provider. No subprocess: host-injected FHS binaries like
+    nvidia-smi cannot exec in a base-less image. Degrades to None off-GPU."""
     info: dict[str, str | None] = {"gpu_name": None, "compute_capability": None, "driver_version": None}
-    if nvidia_smi is None:
-        return info
+
     try:
-        output = subprocess.run(
-            [nvidia_smi, "--query-gpu=name,compute_cap,driver_version", "--format=csv,noheader"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=True,
-        ).stdout.strip()
-    except (subprocess.SubprocessError, OSError):
-        return info
-    first_line = output.splitlines()[0] if output else ""
-    parts = [part.strip() for part in first_line.split(",")]
-    if len(parts) == 3:
-        info["gpu_name"], info["compute_capability"], info["driver_version"] = parts
+        cuda = ctypes.CDLL("libcuda.so.1")
+    except OSError:
+        cuda = None
+    if cuda is not None and cuda.cuInit(0) == 0:
+        device = ctypes.c_int()
+        if cuda.cuDeviceGet(ctypes.byref(device), 0) == 0:
+            name = ctypes.create_string_buffer(96)
+            if cuda.cuDeviceGetName(name, len(name), device) == 0:
+                info["gpu_name"] = name.value.decode(errors="replace")
+            major, minor = ctypes.c_int(), ctypes.c_int()
+            got_major = cuda.cuDeviceGetAttribute(
+                ctypes.byref(major), _CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device
+            )
+            got_minor = cuda.cuDeviceGetAttribute(
+                ctypes.byref(minor), _CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device
+            )
+            if got_major == 0 and got_minor == 0:
+                info["compute_capability"] = f"{major.value}.{minor.value}"
+
+    try:
+        info["driver_version"] = nvidia_kernel_module_version(
+            Path("/proc/driver/nvidia/version").read_text()
+        )
+    except OSError:
+        pass
     return info
 
 
