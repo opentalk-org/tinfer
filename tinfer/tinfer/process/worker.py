@@ -86,9 +86,15 @@ class WorkerProcess(Process):
         path = data["path"]
         compile_models = data["compile_models"]
         voices_folder = data.get("voices_folder")
+        runtime_engine = data.get("runtime_engine")
         model_class = get_model_class("styletts2") # TODO: handle other models in future
         model = model_class()
-        model.load(path, voices_folder=voices_folder, compile_model=compile_models)
+        model.load(
+            path,
+            voices_folder=voices_folder,
+            compile_model=compile_models,
+            runtime_engine=runtime_engine,
+        )
         model.max_batch_size = self.max_batch_size
         self.models[model_id] = model
     
@@ -320,9 +326,22 @@ class WorkerManager:
     def run(self):
         self._start_process()
 
-    def load_model(self, model_id: str, path: str, voices_folder: str | None = None, compile_models: bool = False):
+    def load_model(
+        self,
+        model_id: str,
+        path: str,
+        voices_folder: str | None = None,
+        compile_models: bool = False,
+        runtime_engine: str | None = None,
+    ):
         self._start_process()
-        message_data = {"model_id": model_id, "path": path, "voices_folder": voices_folder, "compile_models": compile_models}
+        message_data = {
+            "model_id": model_id,
+            "path": path,
+            "voices_folder": voices_folder,
+            "compile_models": compile_models,
+            "runtime_engine": runtime_engine,
+        }
         self._ipc_protocol.send_message(
             self._input_queue,
             MessageType.LOAD_MODEL,
