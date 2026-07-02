@@ -17,7 +17,6 @@ from tinfer.core.request import Alignment, AlignmentItem
 from tinfer.utils.audio_encoder import AudioFormat, parse_output_format
 from tinfer.errors import InferenceError
 import asyncio
-import os
 
 _STREAM_PARAM_KEYS = frozenset({
     "chunk_length_schedule",
@@ -302,14 +301,7 @@ class StreamingTTS:
                     voice_id=request.voice_id,
                     text=text_chunk,
                     context=context,
-                    params=(
-                        {
-                            **request.tts_params,
-                            "_profile_sent_at": monotonic(),
-                        }
-                        if os.getenv("TINFER_PROFILE")
-                        else request.tts_params.copy()
-                    ),
+                    params=request.tts_params.copy(),
                     alignment_type=request.alignment_type,
                     method="generate_request",
                     chunk_index=current_chunk_index,

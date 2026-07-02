@@ -1,7 +1,9 @@
-from dataclasses import dataclass, field
-from typing import List, Tuple
-import yaml
+from dataclasses import asdict, dataclass, field
+import os
 from enum import Enum
+from typing import List, Tuple
+
+import yaml
 
 @dataclass
 class PreprocessConfig:
@@ -173,14 +175,11 @@ class TrainingArgs:
         return cls(**config_data)
 
     def to_yaml(self, yaml_path: str):
-        from dataclasses import asdict
         config_data = asdict(self)
         with open(yaml_path, 'w') as f:
             yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
 
 def convert_style_tts2_config(style_tts2_config: dict) -> TrainingArgs:
-    import os
-    
     def require_key(d: dict, key: str, path: str = ""):
         if key not in d:
             full_path = f"{path}.{key}" if path else key

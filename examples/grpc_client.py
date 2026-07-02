@@ -1,4 +1,5 @@
 import asyncio
+import traceback
 import grpc
 import numpy as np
 import soundfile as sf
@@ -353,12 +354,10 @@ async def main():
         print("Make sure the gRPC server is running on port 50051")
     except Exception as e:
         print(f"\nUnexpected error: {e}")
-        import traceback
         traceback.print_exc()
 
 if __name__ == "__main__":
     asyncio.run(main())
-
 
 
 

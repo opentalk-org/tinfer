@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
+import importlib
 import numpy as np
 import os
 from scipy.signal import get_window
@@ -36,9 +37,10 @@ class TorchSTFT(torch.nn.Module):
             and self.hop_length == 5
             and self.win_length == 20
         ):
-            from .tensorrt_export import onnx_istft20_inverse
-
-            return onnx_istft20_inverse(magnitude, phase, self.window)
+            tensorrt_export = importlib.import_module(
+                "tinfer.models.impl.styletts2.model.modules.tensorrt_export"
+            )
+            return tensorrt_export.onnx_istft20_inverse(magnitude, phase, self.window)
 
         inverse_transform = torch.istft(
             magnitude * (torch.cos(phase) + 1j * torch.sin(phase)),
