@@ -5,6 +5,8 @@
     x2container.url = "github:dialohq/x2container.nix/filter-sync";
     x2container.inputs.nixpkgs.follows = "nixpkgs";
     nix2container.follows = "x2container/nix2container";
+    vast-cli.url = "github:dialohq/vast-cli.nix";
+    vast-cli.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = {
@@ -12,6 +14,7 @@
     flake-utils,
     x2container,
     nix2container,
+    vast-cli,
     ...
   }:
     flake-utils.lib.eachDefaultSystem (
@@ -65,6 +68,17 @@
               ];
               Cmd = ["python" "-m" "server.main"];
             };
+          };
+
+          vast-smoke-test = pkgs.writeShellApplication {
+            name = "vast-smoke-test";
+            runtimeInputs = [
+              vast-cli.packages.${system}.default
+              pkgs.jq
+              pkgs.coreutils
+              pkgs.gnugrep
+            ];
+            text = builtins.readFile ./tools/vast-smoke-test.sh;
           };
 
           copy-platform-image = pkgs.writeShellScriptBin "copy-platform-image" ''

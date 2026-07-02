@@ -1,0 +1,109 @@
+name: smoke-test
+
+# Comment "/smoke-test" on a PR to run the image built for that PR on real
+# vast.ai GPUs. Requires the VAST_API_KEY repo secret.
+# Note: issue_comment workflows run from the default branch's workflow file.
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  smoke-test:
+    if: github.event.issue.pull_request && startsWith(github.event.comment.body, '/smoke-test')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+      pull-requests: write
+
+    steps:
+      - name: Resolve PR image tag
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          MERGE_SHA=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.issue.number }}" --jq .merge_commit_sha)
+          echo "merge_sha=$MERGE_SHA" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${{ github.repository }}:pr-${MERGE_SHA:0:12}" >> "$GITHUB_OUTPUT"
+
+      - name: Ack comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment ${{ github.event.issue.number }} --repo ${{ github.repository }} \
+            --body "Smoke test started on \`${{ steps.pr.outputs.image }}\` — [run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+
+      # The PR's docker build may still be pushing the image.
+      - name: Wait for PR image
+        run: |
+          REPO_PATH="${{ github.repository }}"
+          MERGE_SHA="${{ steps.pr.outputs.merge_sha }}"
+          TAG="pr-${MERGE_SHA:0:12}"
+          TOKEN=$(curl -sf "https://ghcr.io/token?scope=repository:${REPO_PATH,,}:pull" | jq -r .token)
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null \
+                 -H "Authorization: Bearer $TOKEN" \
+                 -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+                 "https://ghcr.io/v2/${REPO_PATH,,}/manifests/$TAG"; then
+              echo "image available: ${{ steps.pr.outputs.image }}"
+              exit 0
+            fi
+            echo "waiting for ${{ steps.pr.outputs.image }} ($i/60)"
+            sleep 30
+          done
+          echo "image never appeared" >&2
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/merge
+
+      - name: Install Nix
+        uses: nixbuild/nix-quick-install-action@v35
+        with:
+          nix_conf: |
+            experimental-features = nix-command flakes ca-derivations
+
+      - name: RTX 5090 / CUDA 13
+        id: gpu5090
+        continue-on-error: true
+        env:
+          VAST_API_KEY: ${{ secrets.VAST_API_KEY }}
+        run: |
+          nix run .#vast-smoke-test -- \
+            --image "${{ steps.pr.outputs.image }}" \
+            --query 'gpu_name=RTX_5090 cuda_max_good>=13.0 rentable=true verified=true num_gpus=1 reliability>0.98 inet_down>500' \
+            2>&1 | tee result-5090.txt
+
+      - name: RTX 4090 / CUDA 12.8
+        id: gpu4090
+        continue-on-error: true
+        env:
+          VAST_API_KEY: ${{ secrets.VAST_API_KEY }}
+        run: |
+          nix run .#vast-smoke-test -- \
+            --image "${{ steps.pr.outputs.image }}" \
+            --query 'gpu_name=RTX_4090 cuda_max_good=12.8 rentable=true verified=true num_gpus=1 reliability>0.98 inet_down>500' \
+            2>&1 | tee result-4090.txt
+
+      - name: Report results
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          status() { [ "$1" = "success" ] && echo "✅" || echo "❌"; }
+          {
+            echo "## Smoke test: \`${{ steps.pr.outputs.image }}\`"
+            echo
+            echo "$(status '${{ steps.gpu5090.outcome }}') **RTX 5090 / CUDA 13**"
+            echo '```'
+            grep -E '^\[smoke-test\]|^\[vast-smoke-test\] (SUCCESS|FAILURE|TIMEOUT)' result-5090.txt | tail -20 || echo "(no output)"
+            echo '```'
+            echo "$(status '${{ steps.gpu4090.outcome }}') **RTX 4090 / CUDA 12.8**"
+            echo '```'
+            grep -E '^\[smoke-test\]|^\[vast-smoke-test\] (SUCCESS|FAILURE|TIMEOUT)' result-4090.txt | tail -20 || echo "(no output)"
+            echo '```'
+          } > comment.md
+          gh pr comment ${{ github.event.issue.number }} --repo ${{ github.repository }} --body-file comment.md
+          [ "${{ steps.gpu5090.outcome }}" = "success" ] && [ "${{ steps.gpu4090.outcome }}" = "success" ]
