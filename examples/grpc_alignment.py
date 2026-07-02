@@ -1,4 +1,5 @@
 import asyncio
+import traceback
 import grpc
 import numpy as np
 import matplotlib.pyplot as plt
@@ -123,7 +124,6 @@ async def main():
         print(f"\nError connecting to server: {e.code()} - {e.details()}")
     except Exception as e:
         print(f"\nUnexpected error: {e}")
-        import traceback
         traceback.print_exc()
 
 

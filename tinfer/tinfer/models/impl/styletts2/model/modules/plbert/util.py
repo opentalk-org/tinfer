@@ -1,4 +1,6 @@
+from collections import OrderedDict
 import os
+
 import yaml
 import torch
 from transformers import AlbertConfig, AlbertModel
@@ -26,7 +28,6 @@ def load_plbert(bert, plbert_path: str):
 
     checkpoint = torch.load(plbert_path + "/step_" + str(iters) + ".t7", map_location='cpu')
     state_dict = checkpoint['net']
-    from collections import OrderedDict
     new_state_dict = OrderedDict()
     for k, v in state_dict.items():
         name = k[7:] # remove `module.`

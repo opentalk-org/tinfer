@@ -2,6 +2,7 @@ from tinfer.process.shared_memory import SharedMemoryManager
 from tinfer.process.protocol import IPCProtocol, MessageType
 from tinfer.core.request import TTSRequestIPC, AudioChunkIPC, AudioChunk, Alignment, AlignmentItem, AlignmentType
 from tinfer.models.base.model import IntermediateRepresentation
+from tinfer.models.impl.styletts2.model.modules.tensorrt_runtime import clear_tensorrt_runner_cache
 from tinfer.scheduler.worker_scheduler import WorkerScheduler
 from multiprocessing import get_context
 from typing import Any
@@ -13,8 +14,6 @@ import time
 import multiprocessing
 import signal
 import torch
-import os
-import json
 from tinfer.utils.audio_encoder import AudioFormat, DefaultAudioEncoder
 
 _mp_context = get_context('spawn')
@@ -106,6 +105,10 @@ class WorkerProcess(Process):
     def _handle_unload_model(self, data: dict) -> None:
         model_id = data["model_id"]
         del self.models[model_id]
+        if not self.models:
+            clear_tensorrt_runner_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
     
     def _handle_cancel_request(self, data: dict) -> None:
         request_id = data["request_id"]
@@ -123,53 +126,17 @@ class WorkerProcess(Process):
         
         model_id = batch[0].model_id
         model = self.models.get(model_id)
-        profile_enabled = bool(os.getenv("TINFER_PROFILE"))
-        batch_start = time.monotonic()
         
         try:
-            prepare_start = time.monotonic()
             texts, contexts, params_list, request_metadata = self._prepare_batch_data(batch)
-            prepare_end = time.monotonic()
             
             if not texts:
                 self._mark_batch_complete(batch)
                 return
             
-            start = time.monotonic()
             with torch.no_grad():
                 results = self._execute_batch(model, texts, contexts, params_list, request_metadata)
-            torch.cuda.synchronize()
-            end = time.monotonic()
-            # print(f"MODEL_GENERATE_TIME: {end - start}")
-            send_start = time.monotonic()
             self._send_batch_results(results, request_metadata)
-            send_end = time.monotonic()
-            if profile_enabled:
-                sent_times = [
-                    float(req.params["_profile_sent_at"])
-                    for req in batch
-                    if isinstance(req.params, dict) and "_profile_sent_at" in req.params
-                ]
-                queue_waits_ms = [(batch_start - t) * 1000.0 for t in sent_times]
-                print(
-                    "TINFER_PROFILE "
-                    + json.dumps(
-                        {
-                            "scope": "worker_batch",
-                            "worker_id": self.worker_id,
-                            "batch_size": len(batch),
-                            "queue_wait_mean_ms": float(np.mean(queue_waits_ms)) if queue_waits_ms else None,
-                            "queue_wait_max_ms": float(np.max(queue_waits_ms)) if queue_waits_ms else None,
-                            "prepare_batch_ms": (prepare_end - prepare_start) * 1000.0,
-                            "model_execute_ms": (end - start) * 1000.0,
-                            "send_results_ms": (send_end - send_start) * 1000.0,
-                            "worker_total_ms": (send_end - batch_start) * 1000.0,
-                            "text_chars": [len(req.text) for req in batch],
-                        },
-                        sort_keys=True,
-                    ),
-                    flush=True,
-                )
         except Exception as e:
             for req in batch:
                 metadata = {
