@@ -18,3 +18,4 @@ batch_size_per_device: {}
 default_batch_size: 10
 process_workers_per_gpu: 1
 compile_models: true
+runtime_engine: tensorrt
