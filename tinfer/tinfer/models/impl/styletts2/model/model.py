@@ -137,7 +137,7 @@ class StyleTTS2(ChunkedModel):
         self._trt_max_diffusion_tokens = 512
         self._trt_diffusion_dynamic_runners: dict[int, Any] = {}
         self._max_styletts_tokens = 512
-        self._end_trim_margin_ms = 200
+        self._end_trim_margin_ms = 500
     
     def _initialize_from_config(self, config: dict[str, Any], device: str) -> None:
         self._config = config
@@ -738,6 +738,9 @@ class StyleTTS2(ChunkedModel):
                             ).squeeze(1).clone()
 
                             s_pred_group = s_pred_group_padded[:group_batch_size]
+                        style_norm = torch.linalg.vector_norm(s_pred_group.float(), dim=1)
+                        use_style = torch.isfinite(s_pred_group).all(dim=1) & (style_norm <= 10.0)
+                        s_pred_group = torch.where(use_style[:, None], s_pred_group, ref_s_group.to(s_pred_group.dtype))
                         for group_idx, batch_idx in enumerate(group_indices_in_batch):
                             s_pred[batch_idx] = s_pred_group[group_idx]
                     
@@ -916,8 +919,7 @@ class StyleTTS2(ChunkedModel):
                 audio = audio.squeeze()
             
             max_audio_length = len(audio)
-            scale_factor = actual_mel_frames / max_mel_frames if max_mel_frames > 0 else 1.0
-            expected_audio_length = int(max_audio_length * scale_factor)
+            expected_audio_length = int(actual_mel_frames * hop_length)
 
             sample_rate = self._sample_rate
             target_alignment_type = alignment_type
