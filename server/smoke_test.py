@@ -99,10 +99,16 @@ def _cuda():
     half = (a.cuda().half() @ a.cuda().half()).float().cpu()
     if not torch.allclose(expected, half, atol=2.0, rtol=0.1):
         raise RuntimeError("fp16 GPU matmul result diverges")
+    import tensorrt as trt
+
+    runtime = trt.Runtime(trt.Logger(trt.Logger.ERROR))
+    if runtime is None:
+        raise RuntimeError("could not create TensorRT runtime")
     return (
         f"{props.name}, capability {props.major}.{props.minor}, "
         f"{props.total_memory // 2**20} MiB, driver-visible devices {torch.cuda.device_count()}, "
-        f"torch {torch.__version__} (CUDA {torch.version.cuda}, cuDNN {torch.backends.cudnn.version()})"
+        f"torch {torch.__version__} (CUDA {torch.version.cuda}, cuDNN {torch.backends.cudnn.version()}), "
+        f"TensorRT {trt.__version__}"
     )
 
 
