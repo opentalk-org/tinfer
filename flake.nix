@@ -41,7 +41,6 @@
               pkgs.rustc
               pkgs.cargo
             ];
-            dependencyLayers = "autosplit";
             imageCheck = ["python" "-m" "server.main" "--smoke-test"];
             imageCheckEnv.TINFER_SMOKE_TEST_CPU_OK = "1";
 

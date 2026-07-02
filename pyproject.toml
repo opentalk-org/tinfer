@@ -18,17 +18,3 @@ name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
-# Placement masks for image layering (x2container dependencyLayers):
-# groups never add packages to the image, they only pick the layer.
-# Versions come from the real dependency declarations in the members.
-[dependency-groups]
-heavy = [
-    "torch",
-    "torchaudio",
-    "tensorrt-cu12",
-    "onnx",
-]
-ml = [
-    "librosa",
-    "transformers",
-]
