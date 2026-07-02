@@ -74,7 +74,7 @@ jobs:
         run: |
           nix run .#vast-smoke-test -- \
             --image "${{ steps.pr.outputs.image }}" \
-            --query 'gpu_name=RTX_5090 cuda_max_good>=13.0 rentable=true verified=true num_gpus=1 reliability>0.98 inet_down>500' \
+            --query 'gpu_name=RTX_5090 cuda_max_good>=13.0 rentable=true verified=true num_gpus=1 reliability>0.98 inet_down>1500' \
             2>&1 | tee result-5090.txt
 
       - name: RTX 4090 / CUDA 12.8
@@ -85,7 +85,7 @@ jobs:
         run: |
           nix run .#vast-smoke-test -- \
             --image "${{ steps.pr.outputs.image }}" \
-            --query 'gpu_name=RTX_4090 cuda_max_good=12.8 rentable=true verified=true num_gpus=1 reliability>0.98 inet_down>500' \
+            --query 'gpu_name=RTX_4090 cuda_max_good=12.8 rentable=true verified=true num_gpus=1 reliability>0.98 inet_down>1500' \
             2>&1 | tee result-4090.txt
 
       - name: Report results

@@ -11,10 +11,10 @@ Usage: vast-smoke-test --image IMAGE [options] [-- CMD...]
 Options:
   --image IMAGE       container image reference (required)
   --query QUERY       vastai offer query
-                      (default: "gpu_name=RTX_4090 rentable=true verified=true num_gpus=1 reliability>0.98 inet_down>500")
+                      (default: "gpu_name=RTX_4090 rentable=true verified=true num_gpus=1 reliability>0.98 inet_down>1500")
   --login LOGIN       docker login args for private registries, e.g. "-u user -p token ghcr.io"
   --disk GB           disk size in GB (default: 50)
-  --timeout SECONDS   overall timeout (default: 1800; image pull alone can
+  --timeout SECONDS   overall timeout (default: 2400; image pull alone can
                       take >10 minutes on slow hosts)
   --success-re RE     success marker regex (default: "RESULT: OK")
   --failure-re RE     failure marker regex (default: "RESULT: FAIL")
@@ -24,10 +24,10 @@ Options:
 EOF
 }
 
-QUERY="gpu_name=RTX_4090 rentable=true verified=true num_gpus=1 reliability>0.98 inet_down>500"
+QUERY="gpu_name=RTX_4090 rentable=true verified=true num_gpus=1 reliability>0.98 inet_down>1500"
 LOGIN=""
 DISK=50
-TIMEOUT=1800
+TIMEOUT=2400
 SUCCESS_RE="RESULT: OK"
 FAILURE_RE="RESULT: FAIL"
 OFFERS=3
@@ -61,9 +61,9 @@ vast() {
 }
 
 echo "[vast-smoke-test] query: $QUERY"
-mapfile -t OFFER_IDS < <(vast search offers "$QUERY" -o 'dph' --raw \
-  | jq -r '.[].id' | head -n "$OFFERS")
-[ "${#OFFER_IDS[@]}" -gt 0 ] || { echo "[vast-smoke-test] no offers match" >&2; exit 1; }
+SEARCH_OUT=$(vast search offers "$QUERY" -o 'dph' --raw 2>&1)
+mapfile -t OFFER_IDS < <(jq -r '.[].id' <<<"$SEARCH_OUT" 2>/dev/null | head -n "$OFFERS")
+[ "${#OFFER_IDS[@]}" -gt 0 ] || { echo "[vast-smoke-test] no offers: $SEARCH_OUT" >&2; exit 1; }
 
 INSTANCE=""
 # shellcheck disable=SC2329  # invoked via trap
