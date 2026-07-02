@@ -10,5 +10,8 @@ dependencies = [
     "tinfer[inference]",
 ]
 
+[tool.setuptools]
+py-modules = ["main", "smoke_test"]
+
 [tool.uv.sources]
 tinfer = { workspace = true }

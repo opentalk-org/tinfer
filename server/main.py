@@ -141,4 +141,10 @@ async def main():
         print("Servers stopped")
 
 if __name__ == "__main__":
+    import sys
+
+    if "--smoke-test" in sys.argv[1:]:
+        from server.smoke_test import main as smoke_test
+
+        sys.exit(smoke_test())
     asyncio.run(main())
