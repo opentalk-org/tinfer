@@ -18,20 +18,42 @@
     pkgs.cargo
   ];
 
-  # Runtime shared libraries. zlib: libtriton.so links libz; without it
-  # torch.compile silently falls back to eager.
-  runtimeLibs = [
-    pkgs.espeak
-    pkgs.ffmpeg
-    pkgs.gcc
-    pkgs.stdenv.cc.cc.lib
-    pkgs.glibc
-    pkgs.zlib
+  # Native libs the manylinux wheels resolve at runtime, with the sonames
+  # they ask for. The devshell preloads exactly these files; the image
+  # exposes the packages on LD_LIBRARY_PATH. zlib: libtriton.so links
+  # libz; without it torch.compile silently falls back to eager.
+  wheelLibs = [
+    {
+      pkg = pkgs.stdenv.cc.cc.lib;
+      sonames = ["libstdc++.so.6"];
+    }
+    {
+      pkg = pkgs.zlib;
+      sonames = ["libz.so.1"];
+    }
+    {
+      pkg = pkgs.espeak;
+      sonames = ["libespeak-ng.so.1"];
+    }
   ];
 
+  # Image-only: glibc for prebuilt binaries shipped in wheels (in the
+  # devshell the host loader owns libc), ffmpeg/gcc libs for torchaudio
+  # and torch.compile.
+  runtimeLibs =
+    map (l: l.pkg) wheelLibs
+    ++ [
+      pkgs.ffmpeg-headless
+      pkgs.gcc
+      pkgs.glibc
+    ];
+
   # Executables needed at runtime (torch.compile, triton, audio).
+  # ffmpeg-headless has every codec the server encodes with (lame, opus,
+  # mulaw, pcm); the default variant drags in ~750MB of display/capture
+  # dependencies.
   runtimeExecutableDeps = [
-    pkgs.ffmpeg
+    pkgs.ffmpeg-headless
     pkgs.patchelf
     pkgs.gcc
     pkgs.openssl
@@ -104,13 +126,9 @@ in
         runtime = {
           inherit python memberBuildInputs runtimeLibs runtimeExecutableDeps nvidiaDriverDirs nvidiaDriverPath;
           env = commonEnv;
-          # Sonames the manylinux wheels need that nothing on a bare host
-          # provides, by absolute path (the devshell preloads these).
-          preloadLibs = [
-            "${pkgs.stdenv.cc.cc.lib}/lib/libstdc++.so.6"
-            "${pkgs.zlib}/lib/libz.so.1"
-            "${pkgs.espeak}/lib/libespeak-ng.so.1"
-          ];
+          # The wheelLibs sonames as absolute paths (the devshell preloads
+          # these).
+          preloadLibs = lib.concatMap (l: map (s: "${l.pkg}/lib/${s}") l.sonames) wheelLibs;
         };
       };
   })
