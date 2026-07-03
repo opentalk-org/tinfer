@@ -21,7 +21,7 @@ class StreamingTTSConfig:
     process_workers_per_gpu: int = 1 # TODO: Check if multi gpu really works
 
     compile_models: bool = True
-    runtime_engine: Literal["torch", "tensorrt"] | None = None
+    runtime_engine: Literal["torch", "tensorrt"] | None = "tensorrt"
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "StreamingTTSConfig":
