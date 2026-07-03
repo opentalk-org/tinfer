@@ -6,10 +6,9 @@
   lib = pkgs.lib;
   rt = tinfer-server.runtime;
 
-  # Native deps of the manylinux wheels are preloaded by absolute path at
-  # interpreter startup (same pattern as torch's _load_global_deps) —
-  # scoped to this project's python processes instead of a shell-wide
-  # LD_LIBRARY_PATH.
+  # Preload the wheels' native deps by absolute path at interpreter startup
+  # (torch's _load_global_deps pattern): scoped to this project's python
+  # processes, no shell-wide LD_LIBRARY_PATH.
   sitecustomize = pkgs.writeTextDir "sitecustomize.py" ''
     import ctypes, os, sys
     if sys.platform == "linux":
