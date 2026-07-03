@@ -25,31 +25,22 @@
         };
         lib = pkgs.lib;
 
-        # -----------------------------------------------------------------
-        # Shared source of truth for the serving image and the devshell.
-        #
-        # Everything the workspace needs at build or run time is declared
-        # once in this block; the tinfer-server image and `nix develop`
-        # consume the exact same lists. Python dependencies come from the
-        # same uv.lock in both (the image installs it with uv against the
-        # same nix interpreter the devshell exports as UV_PYTHON), so the
-        # devshell cannot drift from what ships.
-        # -----------------------------------------------------------------
+        # Shared between the serving image and the devshell so the two can't
+        # drift; Python deps come from the same uv.lock in both.
         python = pkgs.python311;
         cudaNvcc = pkgs.cudaPackages.cuda_nvcc;
         gccLib = pkgs.stdenv.cc.cc.lib;
 
-        # Native toolchain for building workspace members (espeak_align is a
-        # maturin/Rust extension that links libespeak-ng).
+        # Toolchain for building workspace members (espeak_align links
+        # libespeak-ng).
         memberBuildInputs = [
           pkgs.espeak
           pkgs.rustc
           pkgs.cargo
         ];
 
-        # Shared libraries the Python runtime needs on LD_LIBRARY_PATH.
-        # zlib: triton's libtriton.so links libz; without it torch.compile
-        # can't even import triton and silently falls back to eager.
+        # Runtime LD_LIBRARY_PATH. zlib: libtriton.so links libz; without it
+        # torch.compile silently falls back to eager.
         runtimeLibs = [
           pkgs.espeak
           pkgs.ffmpeg
@@ -59,8 +50,7 @@
           pkgs.zlib
         ];
 
-        # Executables the server (torch.compile, triton, audio handling)
-        # shells out to at runtime.
+        # Executables needed at runtime (torch.compile, triton, audio).
         runtimeExecutableDeps = [
           pkgs.ffmpeg
           pkgs.patchelf
@@ -69,10 +59,8 @@
           cudaNvcc
         ];
 
-        # Directories where NVIDIA driver libraries appear: the /usr/local
-        # ones are where the modern nvidia container toolkit injects them,
-        # /usr/lib/x86_64-linux-gnu is the stock distro location (what bare
-        # hosts and this devshell rely on).
+        # Driver locations: nvidia container toolkit mounts, then the stock
+        # distro path bare hosts have.
         nvidiaDriverDirs = [
           "/usr/local/nvidia/lib"
           "/usr/local/nvidia/lib64"
@@ -80,7 +68,6 @@
         ];
         nvidiaDriverPath = lib.concatStringsSep ":" nvidiaDriverDirs;
 
-        # Environment shared between the image and the devshell.
         commonEnv = {
           CC = "${pkgs.gcc}/bin/gcc";
           SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
@@ -89,8 +76,6 @@
           TRITON_PTXAS_BLACKWELL_PATH = "${cudaNvcc}/bin/ptxas";
         };
 
-        # Image-only environment: container filesystem layout and the fixed
-        # path the nvidia container toolkit mounts the driver at.
         imageEnv =
           commonEnv
           // {
@@ -192,29 +177,25 @@
         };
 
         devShells.default = pkgs.mkShell {
-          # Same toolchain the image build uses, plus uv for day-to-day work.
           packages = [pkgs.uv python] ++ memberBuildInputs ++ runtimeExecutableDeps;
 
           env =
             commonEnv
             // {
-              # Pin uv to the interpreter the image ships so .venv is built
-              # against the exact same python.
+              # Build .venv against the exact interpreter the image ships.
               UV_PYTHON = "${python}/bin/python${python.pythonVersion}";
               UV_PYTHON_PREFERENCE = "only-system";
               UV_PYTHON_DOWNLOADS = "never";
             };
 
           shellHook = ''
-            # Same library path the image gets, minus nix glibc: outside the
-            # container the host dynamic loader must keep resolving its own
-            # libc, and the driver libs come from the host instead of the
-            # nvidia container toolkit mount.
+            # Image's library path minus nix glibc (the host loader keeps its
+            # own libc), plus the host driver dirs.
             export LD_LIBRARY_PATH=${lib.makeLibraryPath (lib.remove pkgs.glibc runtimeLibs)}:${nvidiaDriverPath}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
             export LIBRARY_PATH=${lib.makeLibraryPath [gccLib]}:${nvidiaDriverPath}''${LIBRARY_PATH:+:$LIBRARY_PATH}
 
-            # triton dlopens the driver's libcuda.so; point it at wherever
-            # this host actually has it (the image pins the container path).
+            # triton dlopens the driver's libcuda.so; the image pins the
+            # container path instead.
             if [ -z "''${TRITON_LIBCUDA_PATH:-}" ]; then
               for d in ${lib.escapeShellArgs nvidiaDriverDirs}; do
                 if [ -e "$d/libcuda.so" ]; then
@@ -227,7 +208,7 @@
             if [ -e .venv/bin/activate ]; then
               . .venv/bin/activate
             else
-              echo "tinfer devshell: no .venv yet — run 'uv sync --all-packages' to install the workspace (then re-enter or 'source .venv/bin/activate')."
+              echo "no .venv yet — run: uv sync --all-packages"
             fi
           '';
         };
