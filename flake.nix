@@ -203,25 +203,13 @@
                 UV_PYTHON = "${rt.python}/bin/python${rt.python.pythonVersion}";
                 UV_PYTHON_PREFERENCE = "only-system";
                 UV_PYTHON_DOWNLOADS = "never";
+                # Image's library path minus nix glibc (the host loader keeps
+                # its own libc), plus the host driver dirs.
+                LD_LIBRARY_PATH = "${lib.makeLibraryPath (lib.remove pkgs.glibc rt.runtimeLibs)}:${rt.nvidiaDriverPath}";
+                LIBRARY_PATH = "${lib.makeLibraryPath [gccLib]}:${rt.nvidiaDriverPath}";
               };
 
             shellHook = ''
-              # Image's library path minus nix glibc (the host loader keeps
-              # its own libc), plus the host driver dirs.
-              export LD_LIBRARY_PATH=${lib.makeLibraryPath (lib.remove pkgs.glibc rt.runtimeLibs)}:${rt.nvidiaDriverPath}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
-              export LIBRARY_PATH=${lib.makeLibraryPath [gccLib]}:${rt.nvidiaDriverPath}''${LIBRARY_PATH:+:$LIBRARY_PATH}
-
-              # triton dlopens the driver's libcuda.so; the image pins the
-              # container path instead.
-              if [ -z "''${TRITON_LIBCUDA_PATH:-}" ]; then
-                for d in ${lib.escapeShellArgs rt.nvidiaDriverDirs}; do
-                  if [ -e "$d/libcuda.so" ]; then
-                    export TRITON_LIBCUDA_PATH="$d/libcuda.so"
-                    break
-                  fi
-                done
-              fi
-
               if [ -e .venv/bin/activate ]; then
                 . .venv/bin/activate
               else
