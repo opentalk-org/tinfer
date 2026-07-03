@@ -4,19 +4,31 @@
 {
   pkgs,
   uv2container,
+  naersk,
 }: let
   lib = pkgs.lib;
 
   python = pkgs.python311;
   cudaNvcc = pkgs.cudaPackages.cuda_nvcc;
 
-  # Toolchain for building workspace members (espeak_align links
-  # libespeak-ng).
-  memberBuildInputs = [
-    pkgs.espeak
-    pkgs.rustc
-    pkgs.cargo
-  ];
+  # The extension module as a nix-built cdylib; python imports the .so
+  # off PYTHONPATH, no wheel. espeak-ng resolves via rpath. naersk
+  # caches the compiled dependency graph keyed by Cargo.lock, so source
+  # edits only rebuild the crate itself.
+  espeak-align = (pkgs.callPackage naersk {}).buildPackage {
+    src = ../tinfer/espeak_align;
+    copyLibs = true;
+    copyBins = false;
+    buildInputs = [pkgs.espeak];
+    nativeBuildInputs = [python];
+    PYO3_PYTHON = "${python}/bin/python${python.pythonVersion}";
+    postInstall = ''
+      site="$out/lib/python${python.pythonVersion}/site-packages"
+      mkdir -p "$site"
+      mv "$out/lib/libespeak_align.so" "$site/espeak_align.so"
+    '';
+  };
+  espeakAlignSite = "${espeak-align}/lib/python${python.pythonVersion}/site-packages";
 
   # Native libs the manylinux wheels resolve at runtime, with the sonames
   # they ask for. The devshell preloads exactly these files; the image
@@ -30,10 +42,6 @@
     {
       pkg = pkgs.zlib;
       sonames = ["libz.so.1"];
-    }
-    {
-      pkg = pkgs.espeak;
-      sonames = ["libespeak-ng.so.1"];
     }
   ];
 
@@ -81,18 +89,6 @@ in
     name = "tinfer";
     src = ../.;
     inherit python runtimeLibs runtimeExecutableDeps;
-    extraBuildInputs =
-      [
-        (pkgs.runCommand "cargo-build-env" {} ''
-          mkdir -p "$out/nix-support"
-          cat > "$out/nix-support/setup-hook" <<'EOF'
-          export CARGO_HOME="$NIX_BUILD_TOP/cargo-home"
-          export CARGO_TARGET_DIR="$NIX_BUILD_TOP/cargo-target"
-          mkdir -p "$CARGO_HOME" "$CARGO_TARGET_DIR"
-          EOF
-        '')
-      ]
-      ++ memberBuildInputs;
     imageCheck = ["python" "-m" "server.main" "--smoke-test"];
     imageCheckEnv.TINFER_SMOKE_TEST_CPU_OK = "1";
     # Serving only deserializes engines (built by the trtc pipeline);
@@ -105,7 +101,8 @@ in
 
     extraLdLibraryPath = ":" + nvidiaDriverPath;
     extraLibraryPath = ":" + nvidiaDriverPath;
-    members = ["server" "tinfer" "tinfer/espeak_align"];
+    members = ["server" "tinfer"];
+    extraPythonPath = ":" + espeakAlignSite;
     config = {
       Env = lib.mapAttrsToList (k: v: "${k}=${v}") (commonEnv
         // {
@@ -124,8 +121,16 @@ in
       (old.passthru or {})
       // {
         runtime = {
-          inherit python memberBuildInputs runtimeLibs runtimeExecutableDeps nvidiaDriverDirs nvidiaDriverPath;
+          inherit python runtimeLibs runtimeExecutableDeps nvidiaDriverDirs nvidiaDriverPath espeakAlignSite;
+          espeakAlign = espeak-align;
           env = commonEnv;
+          # Toolchain for hacking the espeak_align crate directly
+          # (cargo test / the editable dev symlink).
+          crateDevTools = [
+            pkgs.espeak
+            pkgs.rustc
+            pkgs.cargo
+          ];
           # The wheelLibs sonames as absolute paths (the devshell preloads
           # these).
           preloadLibs = lib.concatMap (l: map (s: "${l.pkg}/lib/${s}") l.sonames) wheelLibs;

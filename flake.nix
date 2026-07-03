@@ -7,6 +7,8 @@
     nix2container.follows = "x2container/nix2container";
     vast-cli.url = "github:dialohq/vast-cli.nix";
     vast-cli.inputs.nixpkgs.follows = "nixpkgs";
+    naersk.url = "github:nix-community/naersk";
+    naersk.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = {
@@ -15,6 +17,7 @@
     x2container,
     nix2container,
     vast-cli,
+    naersk,
     ...
   }:
     flake-utils.lib.eachDefaultSystem (
@@ -25,12 +28,13 @@
         };
 
         tinfer-server = import ./nix/image.nix {
-          inherit pkgs;
+          inherit pkgs naersk;
           uv2container = x2container.lib.${system}.uv2container;
         };
       in {
         packages = rec {
           inherit tinfer-server;
+          espeak-align = tinfer-server.runtime.espeakAlign;
 
           vast-smoke-test = pkgs.writeShellApplication {
             name = "vast-smoke-test";

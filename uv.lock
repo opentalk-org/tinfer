@@ -8,7 +8,6 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "espeak-align",
     "server",
     "src",
     "tinfer",
@@ -238,11 +237,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/3e/cc/f2b03b24894faaaa4
 wheels = [
     { url = "https://files.pythonhosted.org/packages/78/01/8da8dd078b354a89602a875d310a0d725dad92b5b4d61069576e0a0e02e4/einops_exts-0.0.4-py3-none-any.whl", hash = "sha256:6d310a4c858e459ebff8288580f90255d354cfa3bde22a53b59baae64b48cb95", size = 3925, upload-time = "2023-01-05T20:02:42.796Z" },
 ]
-
-[[package]]
-name = "espeak-align"
-version = "0.1.0"
-source = { editable = "tinfer/espeak_align" }
 
 [[package]]
 name = "filelock"
@@ -1190,7 +1184,6 @@ inference = [
     { name = "aiohttp" },
     { name = "einops" },
     { name = "einops-exts" },
-    { name = "espeak-align" },
     { name = "librosa" },
     { name = "munch" },
     { name = "nltk" },
@@ -1210,7 +1203,6 @@ requires-dist = [
     { name = "aiohttp", marker = "extra == 'inference'", specifier = ">=3.13.3" },
     { name = "einops", marker = "extra == 'inference'", specifier = ">=0.8.2" },
     { name = "einops-exts", marker = "extra == 'inference'", specifier = ">=0.0.4" },
-    { name = "espeak-align", marker = "extra == 'inference'", editable = "tinfer/espeak_align" },
     { name = "grpcio", specifier = ">=1.76.0" },
     { name = "librosa", marker = "extra == 'inference'", specifier = ">=0.11.0" },
     { name = "munch", marker = "extra == 'inference'", specifier = ">=4.0.0" },
