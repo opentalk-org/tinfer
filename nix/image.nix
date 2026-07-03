@@ -1,0 +1,109 @@
+# The serving image. Exports its runtime contract via passthru.runtime;
+# the devshell consumes only that, so the two can't drift. Python deps
+# come from the same uv.lock in both.
+{
+  pkgs,
+  uv2container,
+}: let
+  lib = pkgs.lib;
+
+  python = pkgs.python311;
+  cudaNvcc = pkgs.cudaPackages.cuda_nvcc;
+
+  # Toolchain for building workspace members (espeak_align links
+  # libespeak-ng).
+  memberBuildInputs = [
+    pkgs.espeak
+    pkgs.rustc
+    pkgs.cargo
+  ];
+
+  # Runtime shared libraries. zlib: libtriton.so links libz; without it
+  # torch.compile silently falls back to eager.
+  runtimeLibs = [
+    pkgs.espeak
+    pkgs.ffmpeg
+    pkgs.gcc
+    pkgs.stdenv.cc.cc.lib
+    pkgs.glibc
+    pkgs.zlib
+  ];
+
+  # Executables needed at runtime (torch.compile, triton, audio).
+  runtimeExecutableDeps = [
+    pkgs.ffmpeg
+    pkgs.patchelf
+    pkgs.gcc
+    pkgs.openssl
+    cudaNvcc
+  ];
+
+  # Driver locations: nvidia container toolkit mounts, then the stock
+  # distro path bare hosts have.
+  nvidiaDriverDirs = [
+    "/usr/local/nvidia/lib"
+    "/usr/local/nvidia/lib64"
+    "/usr/lib/x86_64-linux-gnu"
+  ];
+  nvidiaDriverPath = lib.concatStringsSep ":" nvidiaDriverDirs;
+
+  commonEnv = {
+    CC = "${pkgs.gcc}/bin/gcc";
+    SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+    PYTHONUNBUFFERED = "1";
+    TRITON_PTXAS_PATH = "${cudaNvcc}/bin/ptxas";
+    TRITON_PTXAS_BLACKWELL_PATH = "${cudaNvcc}/bin/ptxas";
+  };
+in
+  (uv2container.buildImage {
+    name = "tinfer";
+    src = ../.;
+    inherit python runtimeLibs runtimeExecutableDeps;
+    extraBuildInputs =
+      [
+        (pkgs.runCommand "cargo-build-env" {} ''
+          mkdir -p "$out/nix-support"
+          cat > "$out/nix-support/setup-hook" <<'EOF'
+          export CARGO_HOME="$NIX_BUILD_TOP/cargo-home"
+          export CARGO_TARGET_DIR="$NIX_BUILD_TOP/cargo-target"
+          mkdir -p "$CARGO_HOME" "$CARGO_TARGET_DIR"
+          EOF
+        '')
+      ]
+      ++ memberBuildInputs;
+    imageCheck = ["python" "-m" "server.main" "--smoke-test"];
+    imageCheckEnv.TINFER_SMOKE_TEST_CPU_OK = "1";
+    # Serving only deserializes engines (built by the trtc pipeline);
+    # the tensorrt wheel's engine-builder payload — including Windows
+    # binaries — is 5.6GB of dead weight.
+    prunePackageFiles."tensorrt-cu12-libs" = [
+      "libnvinfer_builder_resource*"
+      "*_win_*"
+    ];
+
+    extraLdLibraryPath = ":" + nvidiaDriverPath;
+    extraLibraryPath = ":" + nvidiaDriverPath;
+    members = ["server" "tinfer" "tinfer/espeak_align"];
+    config = {
+      Env = lib.mapAttrsToList (k: v: "${k}=${v}") (commonEnv
+        // {
+          USER = "root";
+          HOME = "/root";
+          TORCHINDUCTOR_CACHE_DIR = "/tmp/torchinductor";
+          # A directory: triton asserts $TRITON_LIBCUDA_PATH/libcuda.so.1
+          # exists (the previous file-path value could never pass that).
+          TRITON_LIBCUDA_PATH = "/usr/local/nvidia/lib";
+        });
+      Cmd = ["python" "-m" "server.main"];
+    };
+  })
+  .overrideAttrs (old: {
+    passthru =
+      (old.passthru or {})
+      // {
+        runtime = {
+          inherit python memberBuildInputs runtimeLibs runtimeExecutableDeps nvidiaDriverDirs nvidiaDriverPath;
+          env = commonEnv;
+        };
+      };
+  })
