@@ -135,7 +135,7 @@ class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
                 return self._chunk_to_response(chunk)
         finally:
             await self.health.release_connection()
-            
+
     async def SynthesizeStream(
         self, request: styletts_pb2.SynthesizeRequest, context: grpc.ServicerContext
     ) -> AsyncIterator[styletts_pb2.SynthesizeResponse]:
