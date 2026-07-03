@@ -141,6 +141,7 @@ class WorkerProcess(Process):
         request_ipc: TTSRequestIPC = data["request"]
         if request_ipc.request_id in self.cancelled_requests:
             self.cancelled_requests.remove(request_ipc.request_id)
+        request_ipc.worker_queued_at = time.monotonic()
         self.scheduler.add_request(request_ipc)
         log.info(
             "worker_request_queued",
@@ -156,12 +157,13 @@ class WorkerProcess(Process):
         scheduler_queue_size = max(0, self._scheduler_queue_size() - len(batch))
         now = time.monotonic()
         for request in batch:
+            assert request.worker_queued_at is not None, "worker_queued_at must be set before scheduling"
             log.info(
                 "worker_request_started",
                 worker_id=self.worker_id,
                 request_id=request.request_id,
                 chunk_index=request.chunk_index,
-                queue_wait_ms=int(round((now - request.created_at) * 1000)),
+                queue_wait_ms=int(round((now - request.worker_queued_at) * 1000)),
                 scheduler_queue_size=scheduler_queue_size,
             )
 

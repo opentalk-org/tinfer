@@ -74,6 +74,7 @@ class TTSRequestIPC:
     method: str = "generate_batch"
     chunk_index: int = 0
     created_at: float = field(default_factory=monotonic)
+    worker_queued_at: float | None = None
     alignment_type: AlignmentType = AlignmentType.WORD
     is_first: bool = False
     start_time: float = 0.0
