@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tinfer realtime highlight</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="toolbar" aria-label="Connection settings">
+      <label>
+        <span>Protocol</span>
+        <select id="protocol">
+          <option value="grpc">gRPC</option>
+          <option value="websocket">WebSocket</option>
+        </select>
+      </label>
+      <label>
+        <span>API host</span>
+        <input id="host" value="localhost" autocomplete="off" spellcheck="false">
+      </label>
+      <label>
+        <span>Port</span>
+        <input id="port" value="50051" inputmode="numeric" autocomplete="off">
+      </label>
+      <label>
+        <span>Model</span>
+        <select id="model"></select>
+      </label>
+      <label>
+        <span>Voice</span>
+        <select id="voice"></select>
+      </label>
+    </section>
+
+    <section class="compose" aria-label="Text to speech">
+      <textarea id="text" spellcheck="true">To jest krótki test podświetlania aktualnie wypowiadanego słowa w czasie rzeczywistym.</textarea>
+      <div class="actions">
+        <button id="send" type="button">Send</button>
+        <button id="stop" type="button">Stop</button>
+        <div class="metric">
+          <span>First byte</span>
+          <strong id="first-byte">-</strong>
+        </div>
+        <div class="metric">
+          <span>Status</span>
+          <strong id="status">Idle</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="reader" aria-label="Spoken text">
+      <div id="highlight" class="highlight"></div>
+    </section>
+  </main>
+
+  <script src="./renderer.js"></script>
+</body>
+</html>
