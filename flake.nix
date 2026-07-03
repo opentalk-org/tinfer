@@ -48,12 +48,15 @@
         ];
 
         # Shared libraries the Python runtime needs on LD_LIBRARY_PATH.
+        # zlib: triton's libtriton.so links libz; without it torch.compile
+        # can't even import triton and silently falls back to eager.
         runtimeLibs = [
           pkgs.espeak
           pkgs.ffmpeg
           pkgs.gcc
           gccLib
           pkgs.glibc
+          pkgs.zlib
         ];
 
         # Executables the server (torch.compile, triton, audio handling)
