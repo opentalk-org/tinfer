@@ -11,6 +11,9 @@ import time
 from dataclasses import replace
 from tinfer.models.chunked import ChunkedModel
 import numpy as np
+from tinfer.support.observability import get_logger
+
+log = get_logger(__name__)
 
 class ProcessExecutor(BaseExecutor):
     def __init__(
@@ -60,6 +63,7 @@ class ProcessExecutor(BaseExecutor):
                                     self._pending_per_worker[worker_id].pop(i)
                                     break
                     if worker._process is not None and not worker._process.is_alive():
+                        self._log_worker_process_crashed(worker_id, worker)
                         for p in self._pending_per_worker[worker_id]:
                             err = type("Result", (), {
                                 "request_id": p["request_id"],
@@ -114,6 +118,15 @@ class ProcessExecutor(BaseExecutor):
         self._model_to_worker[model_id] = worker_id
 
         return self._workers[worker_id]
+
+    def _log_worker_process_crashed(self, worker_id: int, worker: Any) -> None:
+        log.error(
+            "worker_process_crashed",
+            worker_id=worker_id,
+            device=self.devices[worker_id],
+            exitcode=worker._process.exitcode,
+            pending_queue_size=len(self._pending_per_worker[worker_id]),
+        )
 
     def load_model(
         self,
@@ -175,6 +188,12 @@ class ProcessExecutor(BaseExecutor):
                     "chunk_index": getattr(item, "chunk_index", 0),
                 })
             worker = self._workers[worker_id]
+            log.debug(
+                "worker_queue_dispatch",
+                worker_id=worker_id,
+                batch_size=len(worker_items),
+                pending_queue_size=len(self._pending_per_worker[worker_id]),
+            )
             worker.send_to_process(worker_items)
     
     def cancel_request(self, request_id: str) -> None:

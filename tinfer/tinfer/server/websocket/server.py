@@ -5,7 +5,10 @@ from aiohttp.web_ws import WebSocketResponse
 from typing import Optional
 
 from tinfer.core.async_engine import AsyncStreamingTTS
+from tinfer.support.observability import get_logger, record_span_exception, start_span
 from .handler import WebSocketHandler
+
+log = get_logger(__name__)
 
 
 class WebSocketServer:
@@ -30,6 +33,7 @@ class WebSocketServer:
         self._site = web.TCPSite(self._runner, self.host, self.port)
         await self._site.start()
         self._running = True
+        log.info("websocket_server_started", host=self.host, port=self.port)
 
     async def stop(self, grace_period: float = 5.0) -> None:
         if not self._running or self._shutdown_event is None:
@@ -45,6 +49,7 @@ class WebSocketServer:
         self._runner = None
         self._site = None
         self._shutdown_event = None
+        log.info("websocket_server_stopped", host=self.host, port=self.port)
 
     async def serve(self) -> None:
         if not self._running:
@@ -62,6 +67,7 @@ class WebSocketServer:
         
         voice_id = request.match_info.get("voice_id", "")
         query_params = dict(request.query)
+        peer = request.remote
         
         handler = WebSocketHandler(
             ws=ws,
@@ -70,12 +76,31 @@ class WebSocketServer:
             query_params=query_params,
         )
         
-        try:
-            await handler.handle()
-        except Exception as e:
-            if not ws.closed:
-                await ws.close(code=1011, message=f"Server error: {str(e)}")
-        finally:
-            await handler.cleanup()
+        with start_span(
+            "websocket.connection",
+            __name__,
+            kind="server",
+            attributes={
+                "network.peer.address": peer or "",
+                "tinfer.voice_id": voice_id,
+                "tinfer.model_id": query_params.get("model_id", "styletts2"),
+            },
+        ) as span:
+            log.info(
+                "websocket_connected",
+                peer=peer,
+                voice_id=voice_id,
+                model_id=query_params.get("model_id", "styletts2"),
+            )
+            try:
+                await handler.handle()
+            except Exception as e:
+                record_span_exception(span, e)
+                log.exception("websocket_handler_failed")
+                if not ws.closed:
+                    await ws.close(code=1011, message=f"Server error: {str(e)}")
+            finally:
+                await handler.cleanup()
+                log.info("websocket_disconnected")
         
         return ws

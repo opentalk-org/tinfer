@@ -24,9 +24,12 @@ from tinfer.models.impl.styletts2.model.modules.config import ModelConfig
 from tinfer.models.impl.styletts2.model.tensorrt_accelerator import (
     StyleTTS2TensorRTAccelerator,
 )
+from tinfer.support.observability import get_logger
 from .phonemizer import StyleTTS2Phonemizer
 from .inference_config import StyleTTS2Params
 from tinfer.models.impl.styletts2.voice.cache import VoiceCache
+
+log = get_logger(__name__)
 
 
 def length_to_mask(lengths):
@@ -95,19 +98,7 @@ def timed_operation(name: str):
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             elapsed_ms = (time.perf_counter() - start_time) * 1000
-            print(
-                "TINFER_PROFILE "
-                + json.dumps(
-                    {
-                        "scope": "model_stage",
-                        "stage": name,
-                        "elapsed_ms": elapsed_ms,
-                    },
-                    sort_keys=True,
-                ),
-                flush=True,
-            )
-
+            log.debug("model_stage_profile", scope="model_stage", stage=name, elapsed_ms=elapsed_ms)
 class StyleTTS2(ChunkedModel):
     def __init__(self, device: str = "cuda") -> None:
         self._loaded = False
@@ -166,13 +157,13 @@ class StyleTTS2(ChunkedModel):
         # pass
         # pass
         # self._model['decoder'].generator.compile_resblocks()
-        print("Compiling decoder...")
+        log.info("decoder_compile_started")
         self._model['decoder'].generator._forward_compiled = torch.compile(
             self._model['decoder'].generator._forward_compiled,
             mode='reduce-overhead',
             dynamic=True
         )
-        print("Decoder compiled")
+        log.info("decoder_compile_finished")
 
         #self._model['decoder'].generator = torch.compile(self._model['decoder'].generator, mode='reduce-overhead')
 

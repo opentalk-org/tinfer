@@ -174,7 +174,6 @@ class Generator(torch.nn.Module):
         return spec, phase
 
     def remove_weight_norm(self):
-        print('Removing weight norm...')
         for l in self.ups:
             remove_weight_norm(l)
         for l in self.resblocks:
