@@ -93,9 +93,9 @@
           mkdir -p "$CARGO_HOME" "$CARGO_TARGET_DIR"
           EOF
         '';
-      in {
-        packages = rec {
-          tinfer-server = x2container.lib.${system}.uv2container.buildImage {
+
+        tinfer-server =
+          (x2container.lib.${system}.uv2container.buildImage {
             name = "tinfer";
             src = ./.;
             inherit python runtimeLibs runtimeExecutableDeps;
@@ -117,7 +117,22 @@
               Env = lib.mapAttrsToList (k: v: "${k}=${v}") imageEnv;
               Cmd = ["python" "-m" "server.main"];
             };
-          };
+          })
+          # The image exports its runtime contract; the devshell consumes
+          # only these attributes, so it cannot drift from the image.
+          .overrideAttrs (old: {
+            passthru =
+              (old.passthru or {})
+              // {
+                runtime = {
+                  inherit python memberBuildInputs runtimeLibs runtimeExecutableDeps nvidiaDriverDirs nvidiaDriverPath;
+                  env = commonEnv;
+                };
+              };
+          });
+      in {
+        packages = rec {
+          inherit tinfer-server;
 
           vast-smoke-test = pkgs.writeShellApplication {
             name = "vast-smoke-test";
@@ -176,42 +191,45 @@
           default = tinfer-server;
         };
 
-        devShells.default = pkgs.mkShell {
-          packages = [pkgs.uv python] ++ memberBuildInputs ++ runtimeExecutableDeps;
+        devShells.default = let
+          rt = tinfer-server.runtime;
+        in
+          pkgs.mkShell {
+            packages = [pkgs.uv rt.python] ++ rt.memberBuildInputs ++ rt.runtimeExecutableDeps;
 
-          env =
-            commonEnv
-            // {
-              # Build .venv against the exact interpreter the image ships.
-              UV_PYTHON = "${python}/bin/python${python.pythonVersion}";
-              UV_PYTHON_PREFERENCE = "only-system";
-              UV_PYTHON_DOWNLOADS = "never";
-            };
+            env =
+              rt.env
+              // {
+                # Build .venv against the exact interpreter the image ships.
+                UV_PYTHON = "${rt.python}/bin/python${rt.python.pythonVersion}";
+                UV_PYTHON_PREFERENCE = "only-system";
+                UV_PYTHON_DOWNLOADS = "never";
+              };
 
-          shellHook = ''
-            # Image's library path minus nix glibc (the host loader keeps its
-            # own libc), plus the host driver dirs.
-            export LD_LIBRARY_PATH=${lib.makeLibraryPath (lib.remove pkgs.glibc runtimeLibs)}:${nvidiaDriverPath}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
-            export LIBRARY_PATH=${lib.makeLibraryPath [gccLib]}:${nvidiaDriverPath}''${LIBRARY_PATH:+:$LIBRARY_PATH}
+            shellHook = ''
+              # Image's library path minus nix glibc (the host loader keeps
+              # its own libc), plus the host driver dirs.
+              export LD_LIBRARY_PATH=${lib.makeLibraryPath (lib.remove pkgs.glibc rt.runtimeLibs)}:${rt.nvidiaDriverPath}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+              export LIBRARY_PATH=${lib.makeLibraryPath [gccLib]}:${rt.nvidiaDriverPath}''${LIBRARY_PATH:+:$LIBRARY_PATH}
 
-            # triton dlopens the driver's libcuda.so; the image pins the
-            # container path instead.
-            if [ -z "''${TRITON_LIBCUDA_PATH:-}" ]; then
-              for d in ${lib.escapeShellArgs nvidiaDriverDirs}; do
-                if [ -e "$d/libcuda.so" ]; then
-                  export TRITON_LIBCUDA_PATH="$d/libcuda.so"
-                  break
-                fi
-              done
-            fi
+              # triton dlopens the driver's libcuda.so; the image pins the
+              # container path instead.
+              if [ -z "''${TRITON_LIBCUDA_PATH:-}" ]; then
+                for d in ${lib.escapeShellArgs rt.nvidiaDriverDirs}; do
+                  if [ -e "$d/libcuda.so" ]; then
+                    export TRITON_LIBCUDA_PATH="$d/libcuda.so"
+                    break
+                  fi
+                done
+              fi
 
-            if [ -e .venv/bin/activate ]; then
-              . .venv/bin/activate
-            else
-              echo "no .venv yet — run: uv sync --all-packages"
-            fi
-          '';
-        };
+              if [ -e .venv/bin/activate ]; then
+                . .venv/bin/activate
+              else
+                echo "no .venv yet — run: uv sync --all-packages"
+              fi
+            '';
+          };
       }
     );
 }
