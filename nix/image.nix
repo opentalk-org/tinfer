@@ -104,6 +104,13 @@ in
         runtime = {
           inherit python memberBuildInputs runtimeLibs runtimeExecutableDeps nvidiaDriverDirs nvidiaDriverPath;
           env = commonEnv;
+          # Sonames the manylinux wheels need that nothing on a bare host
+          # provides, by absolute path (the devshell preloads these).
+          preloadLibs = [
+            "${pkgs.stdenv.cc.cc.lib}/lib/libstdc++.so.6"
+            "${pkgs.zlib}/lib/libz.so.1"
+            "${pkgs.espeak}/lib/libespeak-ng.so.1"
+          ];
         };
       };
   })
