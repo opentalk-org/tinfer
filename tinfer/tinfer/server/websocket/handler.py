@@ -8,6 +8,7 @@ from typing import Any, Optional
 from aiohttp.web_ws import WebSocketResponse
 from tinfer.core.async_engine import AsyncStreamingTTS
 from tinfer.core.request import AudioChunk, AlignmentType
+from tinfer.support.latency import FirstAudioLatencyTimer
 from tinfer.support.observability import get_logger, start_span
 from tinfer.utils.alignment_formatter import AlignmentFormatter
 from tinfer.utils.audio_encoder import encode_audio_to_base64, parse_output_format, get_sample_rate
@@ -50,6 +51,7 @@ class WebSocketHandler:
         self._stream_task: Optional[asyncio.Task] = None
         self._close_requested = False
         self._streaming_started = False
+        self._first_audio_timer = FirstAudioLatencyTimer()
 
     async def handle(self) -> None:
         self._start_inactivity_timer()
@@ -126,6 +128,7 @@ class WebSocketHandler:
             )
             text = data.get("text", "")
             if text and text.strip():
+                self._first_audio_timer.start()
                 self.stream.add_text(text)
                 self.stream.force_generate()
                 self._text_added_event.set()
@@ -151,6 +154,7 @@ class WebSocketHandler:
             return
 
         if self.stream:
+            self._first_audio_timer.start()
             self.stream.add_text(text)
             if try_trigger_generation or flush:
                 self.stream.force_generate()
@@ -198,12 +202,15 @@ class WebSocketHandler:
                     response = await self._format_response(chunk)
                     await self._send_response(response)
                     sent_any = True
-                    log.info(
-                        "websocket_audio_chunk_sent",
-                        chunk_index=chunk.chunk_index,
-                        audio_samples=len(chunk.audio),
-                        alignment_type=self._alignment_type(chunk),
-                    )
+                    payload = {
+                        "chunk_index": chunk.chunk_index,
+                        "audio_samples": len(chunk.audio),
+                        "alignment_type": self._alignment_type(chunk),
+                    }
+                    first_audio_latency_ms = self._first_audio_timer.consume_ms()
+                    if first_audio_latency_ms is not None:
+                        payload["first_audio_latency_ms"] = first_audio_latency_ms
+                    log.info("websocket_audio_chunk_sent", **payload)
                 if sent_any and not self.closed and not self.ws.closed:
                     should_exit = await self._send_final_if_needed()
                     if should_exit:

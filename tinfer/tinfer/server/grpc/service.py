@@ -13,6 +13,7 @@ from . import styletts_pb2
 from . import styletts_pb2_grpc
 from tinfer.core.request import Alignment
 from tinfer.support.errors import InferenceError
+from tinfer.support.latency import FirstAudioLatencyTimer
 from tinfer.support.observability import get_logger, record_span_exception, start_span
 
 log = get_logger(__name__)
@@ -86,6 +87,8 @@ class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
             kind="server",
             attributes={"tinfer.model_id": model_id, "tinfer.voice_id": voice_id, "tinfer.text_length": len(text)},
         ) as span:
+            first_audio_timer = FirstAudioLatencyTimer()
+            first_audio_timer.start()
             log.info("grpc_synthesize_started", model_id=model_id, voice_id=voice_id, text_length=len(text))
             try:
                 chunk: AudioChunk = await self.tts.generate_full(
@@ -107,6 +110,7 @@ class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
                 return self._create_response(b"", None)
             log.info(
                 "grpc_synthesize_finished",
+                first_audio_latency_ms=first_audio_timer.consume_ms(),
                 audio_samples=len(chunk.audio),
                 alignment_type=self._alignment_type(chunk),
             )
@@ -124,9 +128,11 @@ class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
             kind="server",
             attributes={"tinfer.model_id": model_id, "tinfer.voice_id": voice_id, "tinfer.text_length": len(text)},
         ):
+            first_audio_timer = FirstAudioLatencyTimer()
             log.info("grpc_synthesize_stream_started", model_id=model_id, voice_id=voice_id, text_length=len(text))
 
             stream = self.tts.create_stream(model_id, voice_id, params)
+            first_audio_timer.start()
             stream.add_text(text)
             stream.force_generate()
 
@@ -136,12 +142,15 @@ class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
                     context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
                     context.set_details(chunk.error)
                     break
-                log.info(
-                    "grpc_synthesize_stream_chunk",
-                    chunk_index=chunk.chunk_index,
-                    audio_samples=len(chunk.audio),
-                    alignment_type=self._alignment_type(chunk),
-                )
+                payload = {
+                    "chunk_index": chunk.chunk_index,
+                    "audio_samples": len(chunk.audio),
+                    "alignment_type": self._alignment_type(chunk),
+                }
+                first_audio_latency_ms = first_audio_timer.consume_ms()
+                if first_audio_latency_ms is not None:
+                    payload["first_audio_latency_ms"] = first_audio_latency_ms
+                log.info("grpc_synthesize_stream_chunk", **payload)
                 yield self._chunk_to_response(chunk)
 
             stream.close()
@@ -158,6 +167,7 @@ class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
         stream = None
         closed = False
         error_occurred = False
+        first_audio_timer = FirstAudioLatencyTimer()
 
         async def request_handler():
             nonlocal config_received, stream, closed, error_occurred
@@ -184,6 +194,7 @@ class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
                         if stream is None:
                             continue
                         if request.HasField("text_chunk"):
+                            first_audio_timer.start()
                             stream.add_text(request.text_chunk)
                             log.info("grpc_incremental_text_received", text_length=len(request.text_chunk))
                         elif request.HasField("force_synthesis"):
@@ -223,12 +234,15 @@ class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
                         error_occurred = True
                         break
                     response = self._chunk_to_response(chunk)
-                    log.info(
-                        "grpc_incremental_chunk",
-                        chunk_index=chunk.chunk_index,
-                        audio_samples=len(chunk.audio),
-                        alignment_type=self._alignment_type(chunk),
-                    )
+                    payload = {
+                        "chunk_index": chunk.chunk_index,
+                        "audio_samples": len(chunk.audio),
+                        "alignment_type": self._alignment_type(chunk),
+                    }
+                    first_audio_latency_ms = first_audio_timer.consume_ms()
+                    if first_audio_latency_ms is not None:
+                        payload["first_audio_latency_ms"] = first_audio_latency_ms
+                    log.info("grpc_incremental_chunk", **payload)
                     yield response
                 
                 if closed and request_task.done():
