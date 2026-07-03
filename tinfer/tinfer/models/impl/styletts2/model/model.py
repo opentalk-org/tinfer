@@ -85,6 +85,19 @@ def _trim_leading_silence_and_shift_alignments(
     return audio[trim_samples:], shifted
 
 
+def _alignment_items_for_debug_log(alignments: list[AlignmentItem]) -> list[dict[str, Any]]:
+    return [
+        {
+            "item": item.item,
+            "start_ms": item.start_ms,
+            "end_ms": item.end_ms,
+            "char_start": item.char_start,
+            "char_end": item.char_end,
+        }
+        for item in alignments
+    ]
+
+
 @contextmanager
 def timed_operation(name: str):
     profile_enabled = bool(os.getenv("TINFER_PROFILE"))
@@ -811,6 +824,13 @@ class StyleTTS2(ChunkedModel):
                 sample_rate,
                 final_alignments,
             )
+            if target_alignment_type in (AlignmentType.CHAR, AlignmentType.WORD):
+                log.debug(
+                    "alignment_processed",
+                    text=original_texts[b],
+                    alignment_type=target_alignment_type.value,
+                    alignments=_alignment_items_for_debug_log(final_alignments),
+                )
             audio = np.concatenate([audio, np.zeros(int(0.15 * sample_rate), dtype=audio.dtype)])
             
             updated_style_vector = s_pred_cpu[b] if use_diffusion and s_pred_cpu is not None else ref_s_batch_cpu[b]
@@ -933,10 +953,39 @@ class StyleTTS2(ChunkedModel):
         if len(results) == 1:
             return results[0]
         sample_rate = results[0].sample_rate
-        audio = np.concatenate([np.asarray(result.data) for result in results], axis=-1)
+        audio_parts = [np.asarray(result.data) for result in results]
+        audio = np.concatenate(audio_parts, axis=-1)
         metadata = dict(results[-1].metadata)
+        merged_alignments: list[AlignmentItem] = []
+        time_offset_ms = 0
+        search_start = 0
+
+        for result, audio_part in zip(results, audio_parts):
+            window_text = result.metadata.get("text", "")
+            if isinstance(window_text, str) and window_text:
+                char_offset = original_text.find(window_text, search_start)
+                if char_offset < 0:
+                    char_offset = search_start
+                search_start = char_offset + len(window_text)
+            else:
+                char_offset = search_start
+
+            for item in result.metadata.get("word_alignments", []) or []:
+                merged_alignments.append(
+                    AlignmentItem(
+                        item=item.item,
+                        char_start=item.char_start + char_offset,
+                        char_end=item.char_end + char_offset,
+                        start_ms=item.start_ms + time_offset_ms,
+                        end_ms=item.end_ms + time_offset_ms,
+                    )
+                )
+
+            time_offset_ms += int(round((audio_part.shape[-1] / sample_rate) * 1000.0)) if sample_rate else 0
+
         metadata["text"] = original_text
         metadata["window_count"] = len(results)
+        metadata["word_alignments"] = merged_alignments
         return IntermediateRepresentation(data=audio, sample_rate=sample_rate, metadata=metadata)
 
     def _generate_token_windows(

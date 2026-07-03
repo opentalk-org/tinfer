@@ -3,6 +3,8 @@ syntax = "proto3";
 package styletts.v1;
 
 service StyleTTSService {
+  rpc Health(HealthRequest) returns (HealthResponse);
+
   // 1. UNARY
   // Standard request/response. Best for short phrases.
   rpc Synthesize(SynthesizeRequest) returns (SynthesizeResponse);
@@ -15,6 +17,19 @@ service StyleTTSService {
   // You send text piecemeal (e.g., from an LLM stream). We stream audio back.
   // Best for live conversational AI.
   rpc SynthesizeIncremental(stream IncrementalSynthesizeRequest) returns (stream SynthesizeResponse);
+}
+
+message HealthRequest {}
+
+enum HealthStatus {
+  HEALTH_STATUS_UNKNOWN = 0;
+  SERVING = 1;
+  NOT_SERVING = 2;
+}
+
+message HealthResponse {
+  bool ready = 1;
+  HealthStatus status = 2;
 }
 
 message SynthesizeRequest {

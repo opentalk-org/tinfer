@@ -99,6 +99,14 @@ class StyleTTS2Phonemizer:
         with self._engine_lock:
             words, phonemes_list = self._engine.align(preprocessed, _PUNCTUATION, threads=8)
 
+        log.debug(
+            "rust_phonemizer_output",
+            text=text,
+            preprocessed=preprocessed,
+            words=words,
+            phonemes=phonemes_list,
+        )
+
         phonemes_list = [self._normalize_phoneme_string(p) for p in phonemes_list]
         phonemes_list = [self._filter_to_vocab(p) for p in phonemes_list]
         phonemized_string = self._normalize_phoneme_string("".join(phonemes_list))
@@ -118,6 +126,13 @@ class StyleTTS2Phonemizer:
         preprocessed, preprocessed_to_original = self._preprocess_text_with_mapping(text)
         with self._engine_lock:
             aligned = self._engine.align_with_spans(preprocessed, _PUNCTUATION, threads=8)
+
+        log.debug(
+            "rust_phonemizer_output",
+            text=text,
+            preprocessed=preprocessed,
+            items=[dict(item) for item in aligned],
+        )
 
         mapped: list[dict[str, Any]] = []
         consumed_original = 0
@@ -178,6 +193,14 @@ class StyleTTS2Phonemizer:
         mapped = self.align_text_with_original_spans(text)
         phonemized_string = self._normalize_phoneme_string(
             "".join(str(item["phonemes"]) for item in mapped)
+        )
+        log.debug(
+            "text_phonemized",
+            text=text,
+            phonemized=phonemized_string,
+            words=[item["original_text"] for item in mapped],
+            phonemes=[item["phonemes"] for item in mapped],
+            mapping=mapped,
         )
         return phonemized_string, mapped
 
