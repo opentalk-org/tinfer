@@ -6,6 +6,27 @@ from pathlib import Path
 import torch
 
 
+def _unique_output_path(output_dir: Path, base_name: str, source_name: str, text: str | None, used: dict[str, tuple[str | None, str | None]]) -> Path:
+    if base_name not in used:
+        used[base_name] = (text, source_name)
+        return output_dir / f"{base_name}.pth"
+
+    existing_text, existing_source = used[base_name]
+    if existing_text == text and existing_source == source_name:
+        return output_dir / f"{base_name}.pth"
+
+    source_path = Path(source_name)
+    suffix = source_path.parent.name if source_path.parent.name else "duplicate"
+    candidate = f"{base_name}_{suffix}"
+    index = 2
+    while candidate in used and used[candidate] != (text, source_name):
+        candidate = f"{base_name}_{suffix}_{index}"
+        index += 1
+
+    used[candidate] = (text, source_name)
+    return output_dir / f"{candidate}.pth"
+
+
 def convert_json_to_pth(json_path: str, output_dir: str = None):
     json_file = Path(json_path)
     if not json_file.exists():
@@ -45,20 +66,24 @@ def convert_json_to_pth(json_path: str, output_dir: str = None):
     print("Processing embeddings...")
     
     saved_files = []
+    used_names: dict[str, tuple[str | None, str | None]] = {}
     for i, item, default_name in items:
         if isinstance(item, dict):
             if 'tensor' in item:
                 tensor_data = item['tensor']
                 file_name = item.get('file', default_name)
                 text = item.get('text')
+                length = item.get('len')
             else:
                 tensor_data = item
                 file_name = default_name
                 text = None
+                length = None
         else:
             tensor_data = item
             file_name = default_name
             text = None
+            length = None
         
         if isinstance(tensor_data, dict):
             if 'tensor' in tensor_data:
@@ -84,9 +109,17 @@ def convert_json_to_pth(json_path: str, output_dir: str = None):
         else:
             base_name = str(file_name)
         
-        output_path = output_dir / f"{base_name}.pth"
+        output_path = _unique_output_path(output_dir, base_name, str(file_name), text, used_names)
         
-        torch.save(tensor, str(output_path))
+        torch.save(
+            {
+                "tensor": tensor,
+                "text": text,
+                "len": length,
+                "file": str(file_name),
+            },
+            str(output_path),
+        )
         
         saved_files.append(output_path)
         print(f"  [{i+1}/{len(items)}] Saved {output_path.name} (shape: {tensor.shape})")
@@ -117,4 +150,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -5,6 +5,7 @@ from typing import Any, TypedDict
 import queue
 from enum import Enum
 from time import monotonic
+import re
 
 import numpy as np
 from tinfer.utils.audio_encoder import AudioFormat
@@ -61,6 +62,7 @@ class AudioChunkIPC:
     chunk_index: int = 0
     nonce: str = ""
     error: str | None = None
+    context: dict[str, Any] | None = None
 
 @dataclass
 class TTSRequestIPC:
@@ -84,6 +86,7 @@ class TTSRequestIPC:
     target_sample_rate: int | None = None
     target_encoding: AudioFormat | None = None
     first_audio_latency_started_at: float | None = None
+    source_text: str | None = None
 
 @dataclass
 class TTSRequest:
@@ -95,6 +98,7 @@ class TTSRequest:
 
     text_buffer: str = ""
     text_committed_pos: int = 0
+    speed_reference_text: str | None = None
 
     chunker_state: dict[str, Any] = field(default_factory=dict)
     stream_state: dict[str, Any] = field(default_factory=dict)
@@ -126,6 +130,8 @@ class TTSRequest:
         if self.first_text_at is None:
             self.first_text_at = monotonic()
         self.text_buffer += text
+        if self.speed_reference_text is None and baseline_speed_clean_length(self.text_buffer) >= 250:
+            self.speed_reference_text = self.text_buffer
 
     def get_pending_text(self) -> str:
         return self.text_buffer[self.text_committed_pos:]
@@ -152,7 +158,9 @@ class TTSRequest:
         if elapsed_ms >= self.timeout_trigger_ms:
             return True
 
-        if len(pending_text) > self.chunk_length_schedule[self.chunker_state.get("chunk_index", 0)]:
+        chunk_index = self.chunker_state["chunk_index"] if "chunk_index" in self.chunker_state else 0
+        schedule_index = min(chunk_index, len(self.chunk_length_schedule) - 1)
+        if len(pending_text) > self.chunk_length_schedule[schedule_index]:
             return True
         
         return False
@@ -162,3 +170,8 @@ class TTSRequest:
 
     def set_state(self, state: dict[str, Any]) -> None:
         self.stream_state = state
+
+
+def baseline_speed_clean_length(text: str) -> int:
+    normalized = re.sub(r"\s\s*", " ", text.lower())
+    return len(re.sub(r"[^a-ząęćłóśźżń ]", "", normalized))

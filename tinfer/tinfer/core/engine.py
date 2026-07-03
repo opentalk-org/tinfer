@@ -217,6 +217,9 @@ class StreamingTTS:
                 chunk_index=result.chunk_index,
                 error=error,
             )
+            result_context = getattr(result, "context", None)
+            if result_context is not None:
+                request.set_state(result_context)
             request.audio_queue.put(chunk)
             request.pending_chunks -= 1
             log.debug(
@@ -282,6 +285,7 @@ class StreamingTTS:
         request = self._requests[request_id]
         request.text_buffer = ""
         request.text_committed_pos = 0
+        request.speed_reference_text = None
         request.force_next_generation = False
         request.pending_chunks = 0
         request.nonce = str(uuid.uuid4())
@@ -335,6 +339,7 @@ class StreamingTTS:
                     target_sample_rate=target_sample_rate,
                     target_encoding=target_encoding,
                     first_audio_latency_started_at=request.first_text_at if current_chunk_index == 0 else None,
+                    source_text=request.speed_reference_text if request.speed_reference_text is not None else request.text_buffer,
                 )
                 to_send.append(item)
                 if request.pending_chunks == 0:
@@ -342,7 +347,7 @@ class StreamingTTS:
                     request.collected_time = 0.0
 
                 request.pending_chunks += 1
-                request.commit_text(len(text_chunk))
+                request.commit_text(text_span[1] - request.text_committed_pos)
                 log.debug(
                     "text_chunk_dispatched",
                     request_id=request.request_id,
