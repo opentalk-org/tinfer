@@ -1,6 +1,5 @@
 # The serving image. Exports its runtime contract via passthru.runtime;
-# the devshell consumes only that, so the two can't drift. Python deps
-# come from the same uv.lock in both.
+# the devshell consumes only that, so the two can't drift.
 {
   pkgs,
   uv2container,
@@ -11,10 +10,8 @@
   python = pkgs.python311;
   cudaNvcc = pkgs.cudaPackages.cuda_nvcc;
 
-  # The extension module as a nix-built cdylib; python imports the .so
-  # off PYTHONPATH, no wheel. espeak-ng resolves via rpath. naersk
-  # caches the compiled dependency graph keyed by Cargo.lock, so source
-  # edits only rebuild the crate itself.
+  # naersk-built cdylib; python imports the .so off PYTHONPATH, no wheel.
+  # espeak-ng resolves via rpath.
   espeak-align = (pkgs.callPackage naersk {}).buildPackage {
     src = ../tinfer/espeak_align;
     copyLibs = true;
@@ -30,10 +27,9 @@
   };
   espeakAlignSite = "${espeak-align}/lib/python${python.pythonVersion}/site-packages";
 
-  # Native libs the manylinux wheels resolve at runtime, with the sonames
-  # they ask for. The devshell preloads exactly these files; the image
-  # exposes the packages on LD_LIBRARY_PATH. zlib: libtriton.so links
-  # libz; without it torch.compile silently falls back to eager.
+  # Sonames the manylinux wheels resolve: preloaded by the devshell, on
+  # LD_LIBRARY_PATH in the image. Without libz triton can't load and
+  # torch.compile silently falls back to eager.
   wheelLibs = [
     {
       pkg = pkgs.stdenv.cc.cc.lib;
@@ -45,36 +41,15 @@
     }
   ];
 
-  # Image-only: glibc for prebuilt binaries shipped in wheels (in the
-  # devshell the host loader owns libc), ffmpeg/gcc libs for torchaudio
-  # and torch.compile.
-  runtimeLibs =
-    map (l: l.pkg) wheelLibs
-    ++ [
-      pkgs.ffmpeg-headless
-      pkgs.gcc
-      pkgs.glibc
-    ];
+  # glibc: prebuilt wheel binaries (the devshell uses the host loader).
+  runtimeLibs = map (l: l.pkg) wheelLibs ++ [pkgs.ffmpeg-headless pkgs.gcc pkgs.glibc];
 
-  # Executables needed at runtime (torch.compile, triton, audio).
-  # ffmpeg-headless has every codec the server encodes with (lame, opus,
-  # mulaw, pcm); the default variant drags in ~750MB of display/capture
-  # dependencies.
-  runtimeExecutableDeps = [
-    pkgs.ffmpeg-headless
-    pkgs.patchelf
-    pkgs.gcc
-    pkgs.openssl
-    cudaNvcc
-  ];
+  # ffmpeg-headless covers every codec the server encodes (lame, opus,
+  # mulaw, pcm); the default variant adds ~750MB of display/capture closure.
+  runtimeExecutableDeps = [pkgs.ffmpeg-headless pkgs.patchelf pkgs.gcc pkgs.openssl cudaNvcc];
 
-  # Driver locations: nvidia container toolkit mounts, then the stock
-  # distro path bare hosts have.
-  nvidiaDriverDirs = [
-    "/usr/local/nvidia/lib"
-    "/usr/local/nvidia/lib64"
-    "/usr/lib/x86_64-linux-gnu"
-  ];
+  # Container-toolkit mount points, then the stock path of bare hosts.
+  nvidiaDriverDirs = ["/usr/local/nvidia/lib" "/usr/local/nvidia/lib64" "/usr/lib/x86_64-linux-gnu"];
   nvidiaDriverPath = lib.concatStringsSep ":" nvidiaDriverDirs;
 
   commonEnv = {
@@ -124,15 +99,9 @@ in
           inherit python runtimeLibs runtimeExecutableDeps nvidiaDriverDirs nvidiaDriverPath espeakAlignSite;
           espeakAlign = espeak-align;
           env = commonEnv;
-          # Toolchain for hacking the espeak_align crate directly
-          # (cargo test / the editable dev symlink).
-          crateDevTools = [
-            pkgs.espeak
-            pkgs.rustc
-            pkgs.cargo
-          ];
-          # The wheelLibs sonames as absolute paths (the devshell preloads
-          # these).
+          # For hacking the espeak_align crate directly (cargo test, the
+          # editable dev symlink).
+          crateDevTools = [pkgs.espeak pkgs.rustc pkgs.cargo];
           preloadLibs = lib.concatMap (l: map (s: "${l.pkg}/lib/${s}") l.sonames) wheelLibs;
         };
       };
