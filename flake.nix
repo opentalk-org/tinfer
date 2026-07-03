@@ -19,7 +19,11 @@
   }:
     flake-utils.lib.eachDefaultSystem (
       system: let
-        pkgs = import nixpkgs {inherit system;};
+        pkgs = import nixpkgs {
+          inherit system;
+          config.allowUnfree = true;
+        };
+        cudaNvcc = pkgs.cudaPackages.cuda_nvcc;
         gccLib = pkgs.stdenv.cc.cc.lib;
         cargoBuildEnv = pkgs.runCommand "cargo-build-env" {} ''
           mkdir -p "$out/nix-support"
@@ -62,7 +66,13 @@
             # toolkit injects the driver libraries.
             extraLdLibraryPath = ":/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/lib/x86_64-linux-gnu";
             extraLibraryPath = ":/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/lib/x86_64-linux-gnu";
-            runtimeExecutableDeps = [pkgs.ffmpeg pkgs.patchelf pkgs.gcc pkgs.openssl];
+            runtimeExecutableDeps = [
+              pkgs.ffmpeg
+              pkgs.patchelf
+              pkgs.gcc
+              pkgs.openssl
+              cudaNvcc
+            ];
             members = ["server" "tinfer" "tinfer/espeak_align"];
             config = {
               Env = [
@@ -73,6 +83,8 @@
                 "TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor"
                 "PYTHONUNBUFFERED=1"
                 "TRITON_LIBCUDA_PATH=/usr/local/nvidia/lib/libcuda.so"
+                "TRITON_PTXAS_PATH=${cudaNvcc}/bin/ptxas"
+                "TRITON_PTXAS_BLACKWELL_PATH=${cudaNvcc}/bin/ptxas"
               ];
               Cmd = ["python" "-m" "server.main"];
             };
