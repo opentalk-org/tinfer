@@ -23,11 +23,8 @@
         gccLib = pkgs.stdenv.cc.cc.lib;
         python = pkgs.python311;
 
-        # The espeak_align extension module as a plain nix-built cdylib — no
-        # wheel, no maturin, no rust toolchain inside the uv/image machinery.
-        # CPython imports a properly named .so straight off PYTHONPATH, and
-        # the nix cc wrapper records an rpath to nix's espeak-ng, so linkage
-        # needs no environment variables anywhere.
+        # The extension module as a nix-built cdylib; python imports the .so
+        # off PYTHONPATH, no wheel. espeak-ng resolves via rpath.
         espeak-align = pkgs.rustPlatform.buildRustPackage {
           pname = "espeak-align";
           version = "0.1.0";
@@ -37,8 +34,6 @@
           nativeBuildInputs = [python];
           env.PYO3_PYTHON = "${python}/bin/python${python.pythonVersion}";
           buildAndTestSubdir = "espeak_align";
-          # buildRustPackage installs binaries; we want the cdylib as an
-          # importable extension module in site-packages layout.
           postInstall = ''
             site="$out/lib/python${python.pythonVersion}/site-packages"
             mkdir -p "$site"
@@ -153,13 +148,9 @@
           packages = [pkgs.espeak pkgs.uv pkgs.cargo pkgs.rustc pkgs.espeak-ng];
           shellHook = ''
             export LD_LIBRARY_PATH=${pkgs.espeak}/lib:$LD_LIBRARY_PATH
-            # espeak_align is nix-built (packages.espeak-align), no wheel.
-            # Editable dev: a symlink named espeak_align.so points into the
-            # crate's cargo output and sits FIRST on PYTHONPATH, so the loop
-            # after editing rust code is just incremental
-            #   cargo build --manifest-path tinfer/espeak_align/Cargo.toml
-            # (a dangling symlink is skipped by the import system, falling
-            # back to the nix-built module until the first local build).
+            # Editable espeak_align: the symlink tracks cargo's debug output,
+            # so rust edits only need `cargo build`; while it dangles, imports
+            # fall through to the nix-built module.
             export PYO3_PYTHON=${python}/bin/python${python.pythonVersion}
             dev_site="$PWD/.direnv/python-dev"
             mkdir -p "$dev_site"
