@@ -83,6 +83,7 @@ class TTSRequestIPC:
     nonce: str = ""
     target_sample_rate: int | None = None
     target_encoding: AudioFormat | None = None
+    first_audio_latency_started_at: float | None = None
 
 @dataclass
 class TTSRequest:

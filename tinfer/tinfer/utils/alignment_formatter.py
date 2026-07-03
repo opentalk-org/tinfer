@@ -30,7 +30,6 @@ class AlignmentFormatter:
             "charDurationsMs": char_durations,
         }
 
-
     def to_grpc_format(self, alignment: Alignment) -> dict[str, Any]:
         return [
             {

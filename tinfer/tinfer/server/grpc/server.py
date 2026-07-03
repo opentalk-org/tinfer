@@ -8,14 +8,16 @@ import asyncio
 from concurrent import futures
 
 from tinfer.core.async_engine import AsyncStreamingTTS
+from tinfer.server.health import HealthState
 from tinfer.support.observability import get_logger
 
 log = get_logger(__name__)
 
 class GRPCServer:
-    def __init__(self, tts: AsyncStreamingTTS, port: int = 50051) -> None:
+    def __init__(self, tts: AsyncStreamingTTS, port: int = 50051, health: HealthState | None = None) -> None:
         self.tts = tts
         self.port = port
+        self.health = health or HealthState(warmup_complete=True)
         self._server: grpc.aio.Server | None = None
         self._thread_pool: futures.ThreadPoolExecutor | None = None
         self._running = False
@@ -27,7 +29,7 @@ class GRPCServer:
         self._thread_pool = futures.ThreadPoolExecutor(max_workers=10)
         self._server = grpc.aio.server(self._thread_pool)
         
-        service = StyleTTSService(self.tts)
+        service = StyleTTSService(self.tts, health=self.health)
         styletts_pb2_grpc.add_StyleTTSServiceServicer_to_server(service, self._server)
         
         listen_addr = f"[::]:{self.port}"

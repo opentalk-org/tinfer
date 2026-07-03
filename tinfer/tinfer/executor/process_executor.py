@@ -234,21 +234,28 @@ class ProcessExecutor(BaseExecutor):
         if self._callback_thread and self._callback_thread.is_alive():
             self._callback_thread.join(timeout=1.0)
         for worker in self._workers.values():
-            if worker._process and worker._process.is_alive():
-                if worker._input_queue is not None:
-                    worker._ipc_protocol.send_message(
-                        worker._input_queue,
-                        MessageType.SHUTDOWN,
-                        {}
-                    )
-                worker._process.join(timeout=1.0)
-                if worker._process.is_alive():
-                    worker._process.terminate()
-                    worker._process.join(timeout=2.0)
+            try:
+                if worker._process and worker._process.is_alive():
+                    if worker._input_queue is not None:
+                        worker._ipc_protocol.send_message(
+                            worker._input_queue,
+                            MessageType.SHUTDOWN,
+                            {}
+                        )
+                    worker._process.join(timeout=1.0)
                     if worker._process.is_alive():
-                        worker._process.kill()
-                        worker._process.join()
+                        worker._process.terminate()
+                        worker._process.join(timeout=2.0)
+                        if worker._process.is_alive():
+                            worker._process.kill()
+                            worker._process.join()
+            finally:
+                worker.close_queues()
         if self._shm_manager:
             self._shm_manager.cleanup()
+        self._workers.clear()
+        self._model_to_worker.clear()
+        self._pending_per_worker.clear()
+        self._load_args_per_worker.clear()
 
     

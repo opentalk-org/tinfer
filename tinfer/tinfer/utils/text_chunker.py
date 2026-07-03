@@ -22,6 +22,9 @@ class TextChunker:
 
         # TODO: better handling for chunking schedule
         chunks = self.split_text_if_needed(pending_text, request, current_chunk_index)
+        chunks = self._enforce_min_chars_trigger(chunks, request.min_chars_trigger)
+        if not chunks:
+            return []
 
         if single_chunk:
             is_final = len(chunks) == 1
@@ -54,6 +57,37 @@ class TextChunker:
         
         separators = ["\n\n", "\n", r"(?<=[.!?]) +", r"(?<=[,;]) +", " "]
         return self._split_text_recursive(text, request, chunk_index, separators, 0)
+
+    def _enforce_min_chars_trigger(self, chunks: List[str], min_chars_trigger: int) -> List[str]:
+        if min_chars_trigger <= 0:
+            return chunks
+
+        result = []
+        pending = ""
+
+        for chunk in chunks:
+            if not chunk:
+                continue
+
+            if pending:
+                pending += chunk
+                if len(pending.strip()) >= min_chars_trigger:
+                    result.append(pending)
+                    pending = ""
+                continue
+
+            if len(chunk.strip()) >= min_chars_trigger:
+                result.append(chunk)
+            else:
+                pending = chunk
+
+        if pending:
+            if result:
+                result[-1] += pending
+            elif len(pending.strip()) >= min_chars_trigger:
+                result.append(pending)
+
+        return result
 
     def get_max_chunk_size(self, request: TTSRequest, chunk_index: int) -> int:
         """Get max chunk size for current chunk index."""

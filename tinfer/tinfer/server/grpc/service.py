@@ -8,11 +8,11 @@ from tinfer.core.request import AudioChunk, AlignmentType
 from tinfer.utils.alignment_formatter import AlignmentFormatter
 from tinfer.utils.audio_encoder import AudioFormat
 from typing import AsyncIterator, Any
-import asyncio
 from . import styletts_pb2
 from . import styletts_pb2_grpc
 from tinfer.core.request import Alignment
 from tinfer.support.errors import InferenceError
+from tinfer.server.health import HealthState
 from tinfer.support.latency import FirstAudioLatencyTimer
 from tinfer.support.observability import get_logger, record_span_exception, start_span
 
@@ -20,8 +20,9 @@ log = get_logger(__name__)
 
 class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
 
-    def __init__(self, tts: AsyncStreamingTTS) -> None:
+    def __init__(self, tts: AsyncStreamingTTS, health: HealthState | None = None) -> None:
         self.tts = tts
+        self.health = health or HealthState(warmup_complete=True)
         self.alignment_formatter = AlignmentFormatter()
 
     def _audio_to_bytes(self, audio: np.ndarray) -> bytes:
@@ -78,89 +79,116 @@ class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
             return None
         return chunk.alignments.type_.value if hasattr(chunk.alignments.type_, "value") else str(chunk.alignments.type_)
 
+    async def _try_acquire_connection(self, context: grpc.ServicerContext) -> bool:
+        if await self.health.try_acquire_connection():
+            return True
+        context.set_code(grpc.StatusCode.UNAVAILABLE)
+        context.set_details("Server is not accepting new synthesis connections")
+        return False
+
+    async def Health(self, request: styletts_pb2.HealthRequest, context: grpc.ServicerContext) -> styletts_pb2.HealthResponse:
+        ready = self.health.ready
+        return styletts_pb2.HealthResponse(
+            ready=ready,
+            status=styletts_pb2.HealthStatus.SERVING if ready else styletts_pb2.HealthStatus.NOT_SERVING,
+        )
+
     async def Synthesize(self, request: styletts_pb2.SynthesizeRequest, context: grpc.ServicerContext) -> styletts_pb2.SynthesizeResponse:
-        model_id, voice_id, params = self._get_params(request)
-        text = request.text
-        with start_span(
-            "grpc.Synthesize",
-            __name__,
-            kind="server",
-            attributes={"tinfer.model_id": model_id, "tinfer.voice_id": voice_id, "tinfer.text_length": len(text)},
-        ) as span:
-            first_audio_timer = FirstAudioLatencyTimer()
-            first_audio_timer.start()
-            log.info("grpc_synthesize_started", model_id=model_id, voice_id=voice_id, text_length=len(text))
-            try:
-                chunk: AudioChunk = await self.tts.generate_full(
-                    model_id=model_id,
-                    voice_id=voice_id,
-                    text=text,
-                    params=params,
+        if not await self._try_acquire_connection(context):
+            return self._create_response(b"", None)
+        try:
+            model_id, voice_id, params = self._get_params(request)
+            text = request.text
+            with start_span(
+                "grpc.Synthesize",
+                __name__,
+                kind="server",
+                attributes={"tinfer.model_id": model_id, "tinfer.voice_id": voice_id, "tinfer.text_length": len(text)},
+            ) as span:
+                first_audio_timer = FirstAudioLatencyTimer()
+                first_audio_timer.start()
+                log.info("grpc_synthesize_started", model_id=model_id, voice_id=voice_id, text_length=len(text))
+                try:
+                    chunk: AudioChunk = await self.tts.generate_full(
+                        model_id=model_id,
+                        voice_id=voice_id,
+                        text=text,
+                        params=params,
+                    )
+                except InferenceError as e:
+                    record_span_exception(span, e)
+                    log.warning("grpc_synthesize_invalid_request", error=str(e))
+                    context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                    context.set_details(str(e))
+                    return self._create_response(b"", None)
+                if getattr(chunk, "error", None):
+                    log.warning("grpc_synthesize_chunk_error", error=chunk.error)
+                    context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                    context.set_details(chunk.error)
+                    return self._create_response(b"", None)
+                log.info(
+                    "grpc_synthesize_finished",
+                    first_audio_latency_ms=first_audio_timer.consume_ms(),
+                    audio_samples=len(chunk.audio),
+                    alignment_type=self._alignment_type(chunk),
                 )
-            except InferenceError as e:
-                record_span_exception(span, e)
-                log.warning("grpc_synthesize_invalid_request", error=str(e))
-                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-                context.set_details(str(e))
-                return self._create_response(b"", None)
-            if getattr(chunk, "error", None):
-                log.warning("grpc_synthesize_chunk_error", error=chunk.error)
-                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-                context.set_details(chunk.error)
-                return self._create_response(b"", None)
-            log.info(
-                "grpc_synthesize_finished",
-                first_audio_latency_ms=first_audio_timer.consume_ms(),
-                audio_samples=len(chunk.audio),
-                alignment_type=self._alignment_type(chunk),
-            )
-            return self._chunk_to_response(chunk)
+                return self._chunk_to_response(chunk)
+        finally:
+            await self.health.release_connection()
             
     async def SynthesizeStream(
         self, request: styletts_pb2.SynthesizeRequest, context: grpc.ServicerContext
     ) -> AsyncIterator[styletts_pb2.SynthesizeResponse]:
-        model_id, voice_id, params = self._get_params(request)
+        if not await self._try_acquire_connection(context):
+            return
+        try:
+            model_id, voice_id, params = self._get_params(request)
 
-        text = request.text
-        with start_span(
-            "grpc.SynthesizeStream",
-            __name__,
-            kind="server",
-            attributes={"tinfer.model_id": model_id, "tinfer.voice_id": voice_id, "tinfer.text_length": len(text)},
-        ):
-            first_audio_timer = FirstAudioLatencyTimer()
-            log.info("grpc_synthesize_stream_started", model_id=model_id, voice_id=voice_id, text_length=len(text))
+            text = request.text
+            with start_span(
+                "grpc.SynthesizeStream",
+                __name__,
+                kind="server",
+                attributes={"tinfer.model_id": model_id, "tinfer.voice_id": voice_id, "tinfer.text_length": len(text)},
+            ):
+                first_audio_timer = FirstAudioLatencyTimer()
+                log.info("grpc_synthesize_stream_started", model_id=model_id, voice_id=voice_id, text_length=len(text))
 
-            stream = self.tts.create_stream(model_id, voice_id, params)
-            first_audio_timer.start()
-            stream.add_text(text)
-            stream.force_generate()
+                stream = self.tts.create_stream(model_id, voice_id, params)
+                first_audio_timer.start()
+                stream.add_text(text)
+                stream.force_generate()
 
-            async for chunk in stream.pull_audio():
-                if getattr(chunk, "error", None):
-                    log.warning("grpc_synthesize_stream_chunk_error", error=chunk.error)
-                    context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-                    context.set_details(chunk.error)
-                    break
-                payload = {
-                    "chunk_index": chunk.chunk_index,
-                    "audio_samples": len(chunk.audio),
-                    "alignment_type": self._alignment_type(chunk),
-                }
-                first_audio_latency_ms = first_audio_timer.consume_ms()
-                if first_audio_latency_ms is not None:
-                    payload["first_audio_latency_ms"] = first_audio_latency_ms
-                log.info("grpc_synthesize_stream_chunk", **payload)
-                yield self._chunk_to_response(chunk)
+                async for chunk in stream.pull_audio():
+                    if getattr(chunk, "error", None):
+                        log.warning("grpc_synthesize_stream_chunk_error", error=chunk.error)
+                        context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                        context.set_details(chunk.error)
+                        break
+                    payload = {
+                        "chunk_index": chunk.chunk_index,
+                        "audio_samples": len(chunk.audio),
+                        "alignment_type": self._alignment_type(chunk),
+                    }
+                    first_audio_latency_ms = first_audio_timer.consume_ms()
+                    if first_audio_latency_ms is not None:
+                        payload["first_audio_latency_ms"] = first_audio_latency_ms
+                    log.info("grpc_synthesize_stream_chunk", **payload)
+                    yield self._chunk_to_response(chunk)
 
-            stream.close()
-            log.info("grpc_synthesize_stream_finished")
+                stream.close()
+                log.info("grpc_synthesize_stream_finished")
+        finally:
+            await self.health.release_connection()
 
     async def SynthesizeIncremental(
         self,
         request_iterator: AsyncIterator[styletts_pb2.IncrementalSynthesizeRequest],
         context: grpc.ServicerContext,
     ) -> AsyncIterator[styletts_pb2.SynthesizeResponse]:
+        if not await self._try_acquire_connection(context):
+            return
+        acquired = True
         span_cm = start_span("grpc.SynthesizeIncremental", __name__, kind="server")
         span = span_cm.__enter__()
         config_received = False
@@ -220,6 +248,9 @@ class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
             if not request_task.done():
                 request_task.cancel()
             span_cm.__exit__(None, None, None)
+            if acquired:
+                acquired = False
+                await self.health.release_connection()
             return
         
         try:
@@ -257,3 +288,5 @@ class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
                 request_task.cancel()
             log.info("grpc_incremental_finished")
             span_cm.__exit__(None, None, None)
+            if acquired:
+                await self.health.release_connection()

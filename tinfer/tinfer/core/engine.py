@@ -334,6 +334,7 @@ class StreamingTTS:
                     nonce=request.nonce,
                     target_sample_rate=target_sample_rate,
                     target_encoding=target_encoding,
+                    first_audio_latency_started_at=request.first_text_at if current_chunk_index == 0 else None,
                 )
                 to_send.append(item)
                 if request.pending_chunks == 0:
