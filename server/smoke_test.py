@@ -40,6 +40,9 @@ def _imports():
         "einops",
         "torch",
         "torchaudio",
+        # torch.compile falls back to eager silently if triton can't load
+        # (e.g. a missing native lib); fail loudly here instead.
+        "triton",
         "espeak_align",
         "tinfer.core.engine",
         "tinfer.server.websocket",
