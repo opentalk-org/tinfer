@@ -23,8 +23,10 @@ python -m server.main  # needs converted_models/
 ```
 
 `.venv` is built against the image's nix interpreter and auto-activated on
-shell entry. GPU works on bare hosts: the shell adds the host NVIDIA driver
-dirs to `LD_LIBRARY_PATH` and probes `TRITON_LIBCUDA_PATH`.
+shell entry. Native deps of the wheels (libstdc++, zlib, espeak-ng, the host
+NVIDIA driver) are preloaded by absolute path via a generated
+`sitecustomize.py` — no `LD_LIBRARY_PATH`, so other programs in the shell
+are unaffected.
 
 ## Prerequirements (non-Nix)
 
