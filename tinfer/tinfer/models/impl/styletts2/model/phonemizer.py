@@ -8,7 +8,7 @@ import espeak_align
 from nltk.tokenize import TweetTokenizer
 from tinfer.support.observability import get_logger
 
-_PUNCTUATION = ';:,.!?¡¿—…"«»""'   
+_PUNCTUATION = ';:,.!?¡¿—–…"«»""'
 _ENGINE_CACHE: dict[tuple[str, bool, int], tuple[espeak_align.Engine, threading.Lock]] = {}
 _engine_cache_lock = threading.Lock()
 log = get_logger(__name__)
@@ -43,7 +43,7 @@ class StyleTTS2Phonemizer:
 
     def _init_tokenizer(self) -> None:
         _pad = "$"
-        _punctuation = ';:,.!?¡¿—…"«»"" '
+        _punctuation = ';:,.!?¡¿—…"«»“” '
         _letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
         _letters_ipa = "ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʂʃʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢ\u0303\u032f\u032a\u0306ˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘'̩'\u0361"
         symbols = [_pad] + list(_punctuation) + list(_letters) + list(_letters_ipa)
@@ -51,11 +51,13 @@ class StyleTTS2Phonemizer:
         self.index_to_symbol = {i: s for s, i in self.word_index_dictionary.items()}
 
     def _preprocess_text(self, text: str) -> str:
+        text = re.sub(r"\s\s*", " ", text)
+        if not re.search(r"[\.\?!]$", text):
+            text = f"{text}."
         text = re.sub(re.compile(r'[„“”«»"]'), '"', text)
         text = re.sub(re.compile("[-—−‒‒–]"), "—", text)
         text = re.sub(re.compile(r"[\(\)\*\/\[\]]"), "", text)
-        # text = re.sub(re.compile(r"[" + re.escape(';:,.!?¡¿—… \t\n""«»"" ') + r"]+$"), "", text).strip()
-        return text
+        return " ".join(self.t_tokenizer.tokenize(text))
 
     def _preprocess_text_with_mapping(self, text: str) -> tuple[str, list[tuple[int, int]]]:
         chars: list[str] = []
@@ -64,18 +66,62 @@ class StyleTTS2Phonemizer:
         dash_chars = set("-—−‒–")
         deleted_chars = set("()*/[]")
 
-        for idx, char in enumerate(text):
+        idx = 0
+        while idx < len(text):
+            char = text[idx]
+            if char.isspace():
+                start = idx
+                while idx < len(text) and text[idx].isspace():
+                    idx += 1
+                chars.append(" ")
+                spans.append((start, idx))
+                continue
+            chars.append(char)
+            spans.append((idx, idx + 1))
+            idx += 1
+
+        if not re.search(r"[\.\?!]$", "".join(chars)):
+            chars.append(".")
+            spans.append((len(text), len(text)))
+
+        normalized_chars: list[str] = []
+        normalized_spans: list[tuple[int, int]] = []
+        for char, span in zip(chars, spans):
             if char in deleted_chars:
                 continue
             if char in quote_chars:
-                chars.append('"')
+                normalized_chars.append('"')
             elif char in dash_chars:
-                chars.append("—")
+                normalized_chars.append("—")
             else:
-                chars.append(char)
-            spans.append((idx, idx + 1))
+                normalized_chars.append(char)
+            normalized_spans.append(span)
 
-        return "".join(chars), spans
+        normalized = "".join(normalized_chars)
+        token_spans: list[tuple[int, int]] = []
+        cursor = 0
+        for token in self.t_tokenizer.tokenize(normalized):
+            start = normalized.find(token, cursor)
+            if start < 0:
+                raise ValueError(f"TweetTokenizer token not found in preprocessed text: {token}")
+            end = start + len(token)
+            token_spans.append((start, end))
+            cursor = end
+        tokenized_chars: list[str] = []
+        tokenized_spans: list[tuple[int, int]] = []
+        previous_end = 0
+
+        for start, end in token_spans:
+            if tokenized_chars:
+                current_start = normalized_spans[start][0]
+                previous_original_end = normalized_spans[previous_end - 1][1]
+                tokenized_chars.append(" ")
+                tokenized_spans.append((previous_original_end, max(previous_original_end, current_start)))
+            tokenized_chars.extend(normalized_chars[start:end])
+            tokenized_spans.extend(normalized_spans[start:end])
+            previous_end = end
+
+        return "".join(tokenized_chars), tokenized_spans
 
     @staticmethod
     def _normalize_phoneme_string(s: str) -> str:
@@ -108,8 +154,9 @@ class StyleTTS2Phonemizer:
         )
 
         phonemes_list = [self._normalize_phoneme_string(p) for p in phonemes_list]
-        phonemes_list = [self._filter_to_vocab(p) for p in phonemes_list]
-        phonemized_string = self._normalize_phoneme_string("".join(phonemes_list))
+        phonemized_string = self._normalize_phoneme_string(
+            " ".join(phoneme for phoneme in phonemes_list if phoneme)
+        )
 
         log.debug(
             "text_phonemized",
@@ -140,7 +187,7 @@ class StyleTTS2Phonemizer:
         for item in aligned:
             start = int(item["start"])
             end = int(item["end"])
-            phonemes = self._filter_to_vocab(self._normalize_phoneme_string(str(item["phonemes"])))
+            phonemes = self._normalize_phoneme_string(str(item["phonemes"]))
             if start < end:
                 original_start = preprocessed_to_original[start][0]
                 original_end = preprocessed_to_original[end - 1][1]
@@ -191,18 +238,30 @@ class StyleTTS2Phonemizer:
 
     def process_text_with_original_spans(self, text: str) -> tuple[str, list[dict[str, Any]]]:
         mapped = self.align_text_with_original_spans(text)
+        phoneme_items = [str(item["phonemes"]) for item in mapped if item["phonemes"]]
         phonemized_string = self._normalize_phoneme_string(
-            "".join(str(item["phonemes"]) for item in mapped)
+            " ".join(phoneme_items)
         )
+        mapped_for_alignment: list[dict[str, Any]] = []
+        non_empty_seen = 0
+        last_non_empty = len(phoneme_items) - 1
+        for item in mapped:
+            mapped_item = dict(item)
+            if mapped_item["phonemes"]:
+                if non_empty_seen < last_non_empty:
+                    mapped_item["phonemes"] = f"{mapped_item['phonemes']} "
+                non_empty_seen += 1
+            mapped_item["phonemes"] = self._filter_to_vocab(str(mapped_item["phonemes"]))
+            mapped_for_alignment.append(mapped_item)
         log.debug(
             "text_phonemized",
             text=text,
             phonemized=phonemized_string,
-            words=[item["original_text"] for item in mapped],
-            phonemes=[item["phonemes"] for item in mapped],
-            mapping=mapped,
+            words=[item["original_text"] for item in mapped_for_alignment],
+            phonemes=[item["phonemes"] for item in mapped_for_alignment],
+            mapping=mapped_for_alignment,
         )
-        return phonemized_string, mapped
+        return phonemized_string, mapped_for_alignment
 
     def tokenize(self, text: str) -> list[int]:
         return [self.word_index_dictionary[c] for c in text if c in self.word_index_dictionary]

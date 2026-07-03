@@ -27,6 +27,7 @@ from tinfer.models.impl.styletts2.model.tensorrt_accelerator import (
 from tinfer.support.observability import get_logger
 from .phonemizer import StyleTTS2Phonemizer
 from .inference_config import StyleTTS2Params
+from .speed_correction import baseline_speed_corrected_for_request
 from tinfer.models.impl.styletts2.voice.cache import VoiceCache
 
 log = get_logger(__name__)
@@ -392,16 +393,29 @@ class StyleTTS2(ChunkedModel):
         if self._model is None:
             raise RuntimeError("Model not initialized")
     
-    def _prepare_voice_contexts(self, contexts: list[dict[str, Any] | None], batch_size: int) -> None:
+    def _prepare_voice_contexts(self, texts: list[str], contexts: list[dict[str, Any] | None], batch_size: int) -> None:
         for i in range(batch_size):
-            context = contexts[i] if i < len(contexts) and contexts[i] is not None else {}
+            if i >= len(contexts):
+                contexts.append({})
+            elif contexts[i] is None:
+                contexts[i] = {}
+            context = contexts[i]
             
             if context.get("reset_voice", False):
-                if "base_voice" in context:
-                    context["updated_voice"] = context["base_voice"].copy() if isinstance(context["base_voice"], np.ndarray) else context["base_voice"].clone()
+                context.pop("previous_style_vector", None)
+                context.pop("updated_voice", None)
                 context["reset_voice"] = False
             
             voice_id = context.get("voice_id")
+            if voice_id == "auto":
+                voice_entry = self._voice_cache.pick_auto(texts[i])
+                base_voice_tensor = voice_entry.tensor
+                base_voice_np = base_voice_tensor.cpu().numpy() if isinstance(base_voice_tensor, torch.Tensor) else base_voice_tensor
+                context["base_voice"] = base_voice_np.copy() if isinstance(base_voice_np, np.ndarray) else base_voice_np
+                context["auto_voice_id"] = voice_entry.voice_id
+                context["auto_voice_source"] = voice_entry.source_file
+                continue
+
             if voice_id is not None and "base_voice" not in context:
                 if not self.has_voice(voice_id):
                     raise ValueError(f"Voice ID '{voice_id}' not found in cache. Available voices: {self.list_voices()}")
@@ -409,19 +423,18 @@ class StyleTTS2(ChunkedModel):
                 base_voice_tensor = self.get_voice(voice_id)
                 base_voice_np = base_voice_tensor.cpu().numpy() if isinstance(base_voice_tensor, torch.Tensor) else base_voice_tensor
                 context["base_voice"] = base_voice_np.copy() if isinstance(base_voice_np, np.ndarray) else base_voice_np
-                context["updated_voice"] = base_voice_np.copy() if isinstance(base_voice_np, np.ndarray) else base_voice_np
     
     def _prepare_voice_tensors(self, contexts: list[dict[str, Any] | None], batch_size: int) -> torch.Tensor:
         ref_s_list = []
         for i in range(batch_size):
             context = contexts[i] if i < len(contexts) and contexts[i] is not None else {}
             
-            if "updated_voice" in context:
-                ref_s = context["updated_voice"]
-            elif "base_voice" in context:
+            if "base_voice" in context:
                 ref_s = context["base_voice"]
             elif "style_vector" in context:
                 ref_s = context["style_vector"]
+            elif "updated_voice" in context:
+                ref_s = context["updated_voice"]
             else:
                 raise ValueError(f"Voice conditioning required for StyleTTS2 (request {i}). Provide voice_id, updated_voice, base_voice, or style_vector in context.")
             
@@ -436,9 +449,12 @@ class StyleTTS2(ChunkedModel):
     def _prepare_previous_style_vectors(self, contexts: list[dict[str, Any] | None], batch_size: int) -> list:
         prev_s_list = []
         for i in range(batch_size):
-            if "style_vector" in contexts[i]:
-                prev_s = contexts[i]["style_vector"]
-                prev_s = torch.from_numpy(prev_s).to(self._device)
+            context = contexts[i] if i < len(contexts) and contexts[i] is not None else {}
+            if "previous_style_vector" in context:
+                prev_s = context["previous_style_vector"]
+                if isinstance(prev_s, np.ndarray):
+                    prev_s = torch.from_numpy(prev_s)
+                prev_s = prev_s.to(self._device)
                 if prev_s.dim() == 1:
                     prev_s = prev_s.unsqueeze(0)
                 prev_s_list.append(prev_s)
@@ -613,6 +629,7 @@ class StyleTTS2(ChunkedModel):
                     beta = styletts2_params_list[i].beta
                     ref[i] = alpha * ref[i] + (1 - alpha) * ref_s_batch[i, :128]
                     s[i] = beta * s[i] + (1 - beta) * ref_s_batch[i, 128:]
+                s_pred = torch.cat([ref, s], dim=-1)
             else:
                 s = ref_s_batch[:, 128:]
                 ref = ref_s_batch[:, :128]
@@ -624,19 +641,10 @@ class StyleTTS2(ChunkedModel):
                 
                 duration = self._model.predictor.duration_proj(x)
                 duration = torch.sigmoid(duration).sum(axis=-1)
+                speed_tensor = torch.tensor([styletts2_params_list[i].speed for i in range(batch_size)], device=self._device).unsqueeze(1)
+                duration = duration / speed_tensor
                 pred_dur = torch.round(duration).clamp(min=1)
                 pred_dur = pred_dur * (~text_mask).float()
-                
-                speed_tensor = torch.tensor([styletts2_params_list[i].speed for i in range(batch_size)], device=self._device).unsqueeze(1)
-                pred_dur = pred_dur * speed_tensor
-                pred_dur = pred_dur.clamp(min=1)
-
-                for b in range(batch_size):
-                    for token_idx in range(input_lengths[b] - 1, 0, -1):
-                        symbol = self._phonemizer.index_to_symbol.get(int(tokens_tensor[b, token_idx].item()), "")
-                        if symbol.isalpha():
-                            break
-                        pred_dur[b, token_idx] = 1
                 
             decoder_type = getattr(self._model_config.decoder, 'type', None) if hasattr(self._model_config, 'decoder') else None
             
@@ -777,12 +785,12 @@ class StyleTTS2(ChunkedModel):
             
             if audio.ndim > 1:
                 audio = audio.squeeze()
-            
-            max_audio_length = len(audio)
+
             expected_audio_length = int(actual_mel_frames * decoder_hop_length)
             if 0 < expected_audio_length < len(audio):
-                end_margin_samples = int(self._end_trim_margin_ms * self._sample_rate / 1000)
-                audio = audio[: min(len(audio), expected_audio_length + end_margin_samples)]
+                audio = audio[:expected_audio_length]
+            if len(audio) > 100:
+                audio = audio[:-100]
 
             sample_rate = self._sample_rate
             target_alignment_type = alignment_type
@@ -819,11 +827,6 @@ class StyleTTS2(ChunkedModel):
                 else:
                     final_alignments = phoneme_alignments
 
-            audio, final_alignments = _trim_leading_silence_and_shift_alignments(
-                audio,
-                sample_rate,
-                final_alignments,
-            )
             if target_alignment_type in (AlignmentType.CHAR, AlignmentType.WORD):
                 log.debug(
                     "alignment_processed",
@@ -831,11 +834,11 @@ class StyleTTS2(ChunkedModel):
                     alignment_type=target_alignment_type.value,
                     alignments=_alignment_items_for_debug_log(final_alignments),
                 )
-            audio = np.concatenate([audio, np.zeros(int(0.15 * sample_rate), dtype=audio.dtype)])
             
             updated_style_vector = s_pred_cpu[b] if use_diffusion and s_pred_cpu is not None else ref_s_batch_cpu[b]
             
             if b < len(contexts) and contexts[b] is not None:
+                contexts[b]["previous_style_vector"] = updated_style_vector.copy()
                 contexts[b]["updated_voice"] = updated_style_vector.copy()
             
             metadata = {
@@ -1013,6 +1016,7 @@ class StyleTTS2(ChunkedModel):
             merged_results.append(self._merge_window_results(window_results, text))
         return merged_results
 
+    @torch.inference_mode()
     def generate_batch(
         self,
         texts: list[str],
@@ -1026,12 +1030,19 @@ class StyleTTS2(ChunkedModel):
             batch_size = len(texts)
             
             with timed_operation("prepare_voice_contexts"):
-                self._prepare_voice_contexts(contexts, batch_size)
+                self._prepare_voice_contexts(texts, contexts, batch_size)
 
             styletts2_params_list = []
             for i in range(batch_size):
                 valid_params = {f.name: params[i][f.name] for f in fields(StyleTTS2Params) if f.name in params[i]}
-                styletts2_params_list.append(StyleTTS2Params(**valid_params))
+                styletts2_params = StyleTTS2Params(**valid_params)
+                styletts2_params.speed = baseline_speed_corrected_for_request(
+                    styletts2_params.speed,
+                    texts[i],
+                    request_metadata[i]["source_text"] if "source_text" in request_metadata[i] else None,
+                    request_metadata[i]["chunk_index"],
+                )
+                styletts2_params_list.append(styletts2_params)
 
             if self._phonemizer is None:
                 raise RuntimeError("Phonemizer not initialized")

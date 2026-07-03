@@ -251,10 +251,12 @@ class WorkerProcess(Process):
                 "chunk_index": req.chunk_index,
                 "text_span": req.text_span,
                 "text": req.text,
+                "context": context,
                 "alignment_type": req.alignment_type,
                 "nonce": req.nonce,
                 "target_sample_rate": req.target_sample_rate,
                 "target_encoding": req.target_encoding,
+                "source_text": req.source_text,
             })
         
         return texts, contexts, params_list, request_metadata
@@ -361,6 +363,7 @@ class WorkerProcess(Process):
             
             audio_ref = self.shm_manager.serialize_array(audio_data)
             alignments = self._build_alignments(ir)
+            context_ref = self.shm_manager.serialize_recursive(metadata["context"])
 
             chunk_ipc = AudioChunkIPC(
                 request_id=request_id,
@@ -370,6 +373,7 @@ class WorkerProcess(Process):
                 alignments=alignments,
                 chunk_index=metadata["chunk_index"],
                 nonce=metadata["nonce"],
+                context=context_ref,
             )
             
             self.ipc_protocol.send_message(
@@ -491,6 +495,7 @@ class WorkerManager:
                     chunk_index=chunk_data["chunk_index"],
                     nonce=chunk_data["nonce"],
                     error=chunk_data.get("error") if isinstance(chunk_data, dict) else getattr(chunk_data, "error", None),
+                    context=self._shm_manager.deserialize_recursive(chunk_data["context"]) if "context" in chunk_data else None,
                 )
                 results.append(chunk_with_audio)
                 
@@ -511,6 +516,8 @@ class WorkerManager:
                 audio_ref = chunk_data.audio
                 audio_array = shm_manager.deserialize_array(audio_ref)
                 chunk_data.audio = audio_array
+                if chunk_data.context is not None:
+                    chunk_data.context = shm_manager.deserialize_recursive(chunk_data.context)
                 chunks.append(chunk_data)
         
         return chunks
