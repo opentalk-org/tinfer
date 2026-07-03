@@ -7,6 +7,8 @@
     nix2container.follows = "x2container/nix2container";
     vast-cli.url = "github:dialohq/vast-cli.nix";
     vast-cli.inputs.nixpkgs.follows = "nixpkgs";
+    naersk.url = "github:nix-community/naersk";
+    naersk.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = {
@@ -15,6 +17,7 @@
     x2container,
     nix2container,
     vast-cli,
+    naersk,
     ...
   }:
     flake-utils.lib.eachDefaultSystem (
@@ -24,23 +27,21 @@
         python = pkgs.python311;
 
         # The extension module as a nix-built cdylib; python imports the .so
-        # off PYTHONPATH, no wheel. espeak-ng resolves via rpath.
-        espeak-align = pkgs.rustPlatform.buildRustPackage {
-          pname = "espeak-align";
-          version = "0.1.0";
+        # off PYTHONPATH, no wheel. espeak-ng resolves via rpath. naersk
+        # caches the compiled dependency graph keyed by Cargo.lock, so source
+        # edits only rebuild the crate itself.
+        espeak-align = (pkgs.callPackage naersk {}).buildPackage {
           src = ./tinfer/espeak_align;
-          cargoLock.lockFile = ./tinfer/espeak_align/Cargo.lock;
+          copyLibs = true;
+          copyBins = false;
           buildInputs = [pkgs.espeak-ng];
           nativeBuildInputs = [python];
-          env.PYO3_PYTHON = "${python}/bin/python${python.pythonVersion}";
-          buildAndTestSubdir = "espeak_align";
+          PYO3_PYTHON = "${python}/bin/python${python.pythonVersion}";
           postInstall = ''
             site="$out/lib/python${python.pythonVersion}/site-packages"
             mkdir -p "$site"
-            cp target/*/release/libespeak_align.so "$site/espeak_align.so" 2>/dev/null \
-              || cp target/release/libespeak_align.so "$site/espeak_align.so"
+            mv "$out/lib/libespeak_align.so" "$site/espeak_align.so"
           '';
-          doCheck = false;
         };
       in {
         packages = rec {
