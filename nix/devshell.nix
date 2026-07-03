@@ -6,10 +6,19 @@
   lib = pkgs.lib;
   rt = tinfer-server.runtime;
 
-  sitecustomize = pkgs.writeTextDir "sitecustomize.py" (builtins.replaceStrings
-    ["@preloadLibs@" "@nvidiaDriverDirs@"]
-    [(builtins.toJSON rt.preloadLibs) (builtins.toJSON rt.nvidiaDriverDirs)]
-    (builtins.readFile ./sitecustomize.py));
+  sitecustomize = pkgs.linkFarm "tinfer-sitecustomize" [
+    {
+      name = "sitecustomize.py";
+      path = ./sitecustomize.py;
+    }
+    {
+      name = "preload.json";
+      path = pkgs.writeText "preload.json" (builtins.toJSON {
+        preload_libs = rt.preloadLibs;
+        nvidia_driver_dirs = rt.nvidiaDriverDirs;
+      });
+    }
+  ];
 
   devPlatform =
     if pkgs.stdenv.isDarwin
