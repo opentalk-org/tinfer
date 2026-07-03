@@ -11,7 +11,7 @@ tinfer: Fast production ready TTS inference server with gRPC and elevenlabs-comp
 
 ## Prerequirements
 
-- [espeak-ng](https://github.com/espeak-ng/espeak-ng): Required for phonemizer functionality. On Debian/Ubuntu, install `espeak-ng` and `libespeak-ng-dev` so Rust builds can link `libespeak-ng`.
+- [espeak-ng](https://github.com/espeak-ng/espeak-ng): Required for phonemizer functionality (linked by the nix-built espeak_align module; the flake devShell provides it).
 - Python >= 3.12
 
 ## Installation
