@@ -21,16 +21,9 @@
       system: let
         pkgs = import nixpkgs {inherit system;};
         gccLib = pkgs.stdenv.cc.cc.lib;
-        # The one GPU-container contract for every GPU image this flake
-        # produces. libcuda/libnvidia-ml always come from the HOST driver,
-        # injected by the container runtime; the image only carries CUDA
-        # runtime libs. Nix binaries use the nix loader, which never reads
-        # the container's /etc/ld.so.cache, so the injection locations must
-        # be on LD_LIBRARY_PATH explicitly (nix libs first, so they win):
-        # /usr/local/nvidia is the legacy mount, /usr/lib/x86_64-linux-gnu is
-        # where nvidia-container-toolkit actually places driver libs. The
-        # NVIDIA_* markers tell the runtime to inject when the host default
-        # doesn't already.
+        # libcuda comes from the host driver; the nix loader ignores the
+        # container's ld.so.cache, so both injection paths must be on
+        # LD_LIBRARY_PATH (after nix libs).
         gpuContainer = {
           driverLibraryPath = ":/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/lib/x86_64-linux-gnu";
           env = [
@@ -62,8 +55,7 @@
             imageCheckEnv.TINFER_SMOKE_TEST_CPU_OK = "1";
             # Serving only deserializes engines (built by the trtc pipeline);
             # the tensorrt wheel's engine-builder payload — including Windows
-            # binaries — is 5.6GB of dead weight. The trtc-builder image below
-            # deliberately does NOT prune this: it is the thing that builds.
+            # binaries — is 5.6GB of dead weight.
             prunePackageFiles."tensorrt-cu12-libs" = [
               "libnvinfer_builder_resource*"
               "*_win_*"
@@ -95,11 +87,6 @@
               Cmd = ["python" "-m" "server.main"];
             };
           };
-
-          # trtc (the TensorRT compile pipeline) lives in dialohq/trtc and is a
-          # locked git dependency of tinfer[inference]. Builder images come
-          # from that repo's CI (ghcr.io/dialohq/trtc-builder:trt<major.minor>);
-          # rent one with: eval "$(nix run github:dialohq/trtc#launch-builder)"
 
           vast-smoke-test = pkgs.writeShellApplication {
             name = "vast-smoke-test";

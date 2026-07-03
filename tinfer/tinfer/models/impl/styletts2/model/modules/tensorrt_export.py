@@ -1,9 +1,4 @@
-"""Model-owned TensorRT export adapters for StyleTTS2.
-
-Only the graph rewrites and wrapper modules that ONNX export needs live here;
-what to export, with which shapes, is declared in trt_bundle.py, and the
-export/build mechanics are trtc's.
-"""
+"""TensorRT export adapters for StyleTTS2 (graph rewrites + wrapper modules)."""
 
 from __future__ import annotations
 
@@ -34,8 +29,7 @@ def onnx_istft20_inverse(
     *,
     hop_length: int = 5,
 ) -> torch.Tensor:
-    """torch.istft equivalent for n_fft=20 without complex ops, which ONNX and
-    TensorRT cannot represent: irFFT as real cos/sin matmuls + overlap-add."""
+    """torch.istft for n_fft=20 without complex ops (unsupported by ONNX/TRT)."""
     if magnitude.shape[1] != 11 or phase.shape[1] != 11:
         raise ValueError("onnx_istft20_inverse expects 11 frequency bins for n_fft=20")
 

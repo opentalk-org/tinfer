@@ -1,9 +1,4 @@
-"""StyleTTS2-specific TensorRT runtime policy: engine naming and shape buckets.
-
-Engine loading, binding and execution are generic and live in trtc.runtime;
-this module keeps only what is about *this* model plus thin accessors with the
-historical API used by model.py and the process worker.
-"""
+"""StyleTTS2 TensorRT runtime policy: engine naming and shape buckets."""
 
 from __future__ import annotations
 

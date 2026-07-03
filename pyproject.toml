@@ -19,11 +19,8 @@ name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
-# NVIDIA's index hosts REAL tensorrt wheels; pypi.org only has a wheel_stub
-# sdist that downloads them at build time — a build-time network fetch that
-# breaks hermetic image builds. Non-explicit so the transitive
-# tensorrt-cu12-libs/-bindings resolve here too; it only hosts NVIDIA
-# packages, and locked versions/hashes keep everything else unchanged.
+# Real tensorrt wheels; the pypi.org sdist downloads them at build time,
+# breaking hermetic image builds.
 [[tool.uv.index]]
 name = "nvidia"
 url = "https://pypi.nvidia.com"

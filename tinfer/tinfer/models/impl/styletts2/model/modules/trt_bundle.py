@@ -1,9 +1,4 @@
-"""trtc bundle for StyleTTS2: everything this model compiles to TensorRT.
-
-Entry point for `trtc compile <this file> <converted model dir or model.pth>`.
-The model-specific residue lives here and in tensorrt_export.py (adapters);
-export/build/serve mechanics are trtc's.
-"""
+"""trtc bundle for StyleTTS2: what this model compiles to TensorRT."""
 
 from __future__ import annotations
 
@@ -28,8 +23,7 @@ def resolve_converted_model_path(path: str | Path) -> Path:
 
 @contextmanager
 def _trt_export_mode() -> Iterator[None]:
-    """Flip the model's ONNX-friendly code paths (manual iSTFT, manual
-    instance norm) on for the duration of tracing."""
+    """Enable the model's ONNX-friendly code paths during tracing."""
     previous = os.environ.get("TINFER_TRT_EXPORT")
     os.environ["TINFER_TRT_EXPORT"] = "1"
     try:
@@ -77,9 +71,7 @@ def bundle(
     model_path = resolve_converted_model_path(converted_model)
     model_dir = model_path.parent
     model = StyleTTS2(device=device)
-    # Force the pytorch engine: never load engines a prior compile stamped in —
-    # we are re-exporting the torch modules, and validating old engines here
-    # would wedge re-compiles on a box unlike the builder.
+    # Never load previously stamped engines: they may target a different GPU.
     model.load(
         str(model_path),
         device=device,
