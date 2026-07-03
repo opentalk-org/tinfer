@@ -1,0 +1,17 @@
+{
+  "name": "tinfer-realtime-highlight-electron",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron example for Tinfer streaming TTS with realtime spoken-word highlighting.",
+  "main": "main.js",
+  "scripts": {
+    "start": "env -u ELECTRON_RUN_AS_NODE electron . --no-sandbox",
+    "check": "node --check main.js && node --check preload.js && node --check renderer.js"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.0",
+    "@grpc/proto-loader": "^0.8.0",
+    "electron": "^40.10.6",
+    "ws": "^8.18.0"
+  }
+}
