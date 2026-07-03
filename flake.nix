@@ -112,7 +112,9 @@
                   USER = "root";
                   HOME = "/root";
                   TORCHINDUCTOR_CACHE_DIR = "/tmp/torchinductor";
-                  TRITON_LIBCUDA_PATH = "/usr/local/nvidia/lib/libcuda.so";
+                  # A directory: triton asserts $TRITON_LIBCUDA_PATH/libcuda.so.1
+                  # exists (the previous file-path value could never pass that).
+                  TRITON_LIBCUDA_PATH = "/usr/local/nvidia/lib";
                 });
               Cmd = ["python" "-m" "server.main"];
             };
@@ -203,10 +205,26 @@
                 UV_PYTHON = "${rt.python}/bin/python${rt.python.pythonVersion}";
                 UV_PYTHON_PREFERENCE = "only-system";
                 UV_PYTHON_DOWNLOADS = "never";
-                # Image's library path minus nix glibc (the host loader keeps
-                # its own libc), plus the host driver dirs.
-                LD_LIBRARY_PATH = "${lib.makeLibraryPath (lib.remove pkgs.glibc rt.runtimeLibs)}:${rt.nvidiaDriverPath}";
-                LIBRARY_PATH = "${lib.makeLibraryPath [gccLib]}:${rt.nvidiaDriverPath}";
+                # Native deps of the manylinux wheels are preloaded by
+                # absolute path at interpreter startup (same pattern as
+                # torch's _load_global_deps) — scoped to this project's
+                # python processes instead of a shell-wide LD_LIBRARY_PATH.
+                PYTHONPATH = pkgs.writeTextDir "sitecustomize.py" ''
+                  import ctypes, os
+                  for _p in [
+                      "${gccLib}/lib/libstdc++.so.6",
+                      "${pkgs.zlib}/lib/libz.so.1",
+                      "${pkgs.espeak}/lib/libespeak-ng.so.1",
+                  ]:
+                      ctypes.CDLL(_p, mode=ctypes.RTLD_GLOBAL)
+                  for _d in [${lib.concatMapStringsSep ", " (d: ''"${d}"'') rt.nvidiaDriverDirs}]:
+                      _p = os.path.join(_d, "libcuda.so.1")
+                      if os.path.exists(_p):
+                          ctypes.CDLL(_p, mode=ctypes.RTLD_GLOBAL)
+                          # dir containing libcuda, for triton's -lcuda link
+                          os.environ.setdefault("TRITON_LIBCUDA_PATH", _d)
+                          break
+                '';
               };
 
             shellHook = ''
