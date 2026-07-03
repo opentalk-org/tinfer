@@ -1,7 +1,6 @@
 from __future__ import annotations
 import grpc
 from grpc.aio import Server
-from grpc_health.v1 import health_pb2, health_pb2_grpc
 
 from .service import StyleTTSService
 from . import styletts_pb2_grpc
@@ -14,19 +13,29 @@ from tinfer.support.observability import get_logger
 log = get_logger(__name__)
 
 
-class GrpcHealthService(health_pb2_grpc.HealthServicer):
+class GrpcHealthService:
+    _SERVING_RESPONSE = b"\x08\x01"
+    _NOT_SERVING_RESPONSE = b"\x08\x02"
+
     def __init__(self, health: HealthState) -> None:
         self.health = health
 
-    def Check(
-        self,
-        request: health_pb2.HealthCheckRequest,
-        context: grpc.ServicerContext,
-    ) -> health_pb2.HealthCheckResponse:
-        status = health_pb2.HealthCheckResponse.SERVING
-        if not self.health.ready:
-            status = health_pb2.HealthCheckResponse.NOT_SERVING
-        return health_pb2.HealthCheckResponse(status=status)
+    def Check(self, request: bytes, context: grpc.ServicerContext) -> bytes:
+        if self.health.ready:
+            return self._SERVING_RESPONSE
+        return self._NOT_SERVING_RESPONSE
+
+    def register(self, server: grpc.aio.Server) -> None:
+        rpc_method_handlers = {
+            "Check": grpc.unary_unary_rpc_method_handler(
+                self.Check,
+                request_deserializer=lambda request: request,
+                response_serializer=lambda response: response,
+            ),
+        }
+        generic_handler = grpc.method_handlers_generic_handler("grpc.health.v1.Health", rpc_method_handlers)
+        server.add_generic_rpc_handlers((generic_handler,))
+        server.add_registered_method_handlers("grpc.health.v1.Health", rpc_method_handlers)
 
 
 class GRPCServer:
@@ -48,7 +57,7 @@ class GRPCServer:
         service = StyleTTSService(self.tts, health=self.health)
         health_service = GrpcHealthService(self.health)
         styletts_pb2_grpc.add_StyleTTSServiceServicer_to_server(service, self._server)
-        health_pb2_grpc.add_HealthServicer_to_server(health_service, self._server)
+        health_service.register(self._server)
         
         listen_addr = f"[::]:{self.port}"
         self._server.add_insecure_port(listen_addr)
