@@ -8,7 +8,9 @@ from multiprocessing import get_context
 from typing import Any
 from tinfer.models.registry import get_model_class
 import asyncio
+import logging
 import numpy as np
+import os
 import time
 import multiprocessing
 import signal
@@ -21,6 +23,11 @@ log = get_logger(__name__)
 _mp_context = get_context('spawn')
 Process = _mp_context.Process
 Queue = _mp_context.Queue
+
+def _log_level_from_env() -> int:
+    level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+    return getattr(logging, level_name, logging.INFO)
+
 class WorkerProcess(Process):
     def __init__(self, device: str, worker_id: int, input_queue: Queue, output_queue: Queue, max_batch_size: int):
         super().__init__()
@@ -41,7 +48,7 @@ class WorkerProcess(Process):
         return len(getattr(self.scheduler, "_requests", {}))
 
     def run(self) -> None:
-        setup_json_logs(force=True)
+        setup_json_logs(level=_log_level_from_env(), force=True)
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         log.info("worker_started", worker_id=self.worker_id, device=self.device, max_batch_size=self.max_batch_size)
         try:
@@ -168,6 +175,7 @@ class WorkerProcess(Process):
             )
 
     def _log_model_inference_finished(self, batch: list[TTSRequestIPC], inference_ms: int) -> None:
+        now = time.monotonic()
         log.info(
             "model_inference_finished",
             worker_id=self.worker_id,
@@ -175,6 +183,16 @@ class WorkerProcess(Process):
             inference_ms=inference_ms,
             request_ids=[request.request_id for request in batch],
         )
+        for request in batch:
+            started_at = request.first_audio_latency_started_at
+            if started_at is None:
+                continue
+            log.info(
+                "worker_first_audio_ready",
+                request_id=request.request_id,
+                chunk_index=request.chunk_index,
+                first_audio_latency_ms=int(round((now - started_at) * 1000)),
+            )
     
     def _process_batch(self, batch: list[TTSRequestIPC]) -> None:
         if not batch:
@@ -383,6 +401,17 @@ class WorkerManager:
             self.device, self.workder_id, self._input_queue, self._output_queue, self.max_batch_size
         )
         self._process.start()
+
+    def close_queues(self) -> None:
+        if self._input_queue is not None:
+            self._input_queue.close()
+            self._input_queue.cancel_join_thread()
+            self._input_queue = None
+
+        if self._output_queue is not None:
+            self._output_queue.close()
+            self._output_queue.cancel_join_thread()
+            self._output_queue = None
 
     def run(self):
         self._start_process()

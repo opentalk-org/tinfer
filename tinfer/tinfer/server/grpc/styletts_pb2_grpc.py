@@ -8,9 +8,10 @@ import warnings
 
 from . import styletts_pb2 as styletts__pb2
 
-GRPC_GENERATED_VERSION = '1.76.0'
+GRPC_GENERATED_VERSION = '1.81.1'
 GRPC_VERSION = getattr(grpc, '__version__', 'unknown')
 _version_not_supported = False
+
 _grpc_utilities = importlib.import_module("grpc._utilities") if importlib.util.find_spec("grpc._utilities") else None
 
 if _grpc_utilities is not None:
@@ -29,7 +30,7 @@ if _version_not_supported:
     )
 
 
-class StyleTTSServiceStub(object):
+class StyleTTSServiceStub:
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -38,6 +39,11 @@ class StyleTTSServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
+        self.Health = channel.unary_unary(
+                '/styletts.v1.StyleTTSService/Health',
+                request_serializer=styletts__pb2.HealthRequest.SerializeToString,
+                response_deserializer=styletts__pb2.HealthResponse.FromString,
+                _registered_method=True)
         self.Synthesize = channel.unary_unary(
                 '/styletts.v1.StyleTTSService/Synthesize',
                 request_serializer=styletts__pb2.SynthesizeRequest.SerializeToString,
@@ -55,8 +61,14 @@ class StyleTTSServiceStub(object):
                 _registered_method=True)
 
 
-class StyleTTSServiceServicer(object):
+class StyleTTSServiceServicer:
     """Missing associated documentation comment in .proto file."""
+
+    def Health(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
 
     def Synthesize(self, request, context):
         """1. UNARY
@@ -86,6 +98,11 @@ class StyleTTSServiceServicer(object):
 
 def add_StyleTTSServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
+            'Health': grpc.unary_unary_rpc_method_handler(
+                    servicer.Health,
+                    request_deserializer=styletts__pb2.HealthRequest.FromString,
+                    response_serializer=styletts__pb2.HealthResponse.SerializeToString,
+            ),
             'Synthesize': grpc.unary_unary_rpc_method_handler(
                     servicer.Synthesize,
                     request_deserializer=styletts__pb2.SynthesizeRequest.FromString,
@@ -109,8 +126,35 @@ def add_StyleTTSServiceServicer_to_server(servicer, server):
 
 
  # This class is part of an EXPERIMENTAL API.
-class StyleTTSService(object):
+class StyleTTSService:
     """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def Health(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/styletts.v1.StyleTTSService/Health',
+            styletts__pb2.HealthRequest.SerializeToString,
+            styletts__pb2.HealthResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
 
     @staticmethod
     def Synthesize(request,

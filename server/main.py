@@ -1,5 +1,6 @@
 from pathlib import Path
 import asyncio
+import logging
 import random
 import signal
 from dotenv import load_dotenv
@@ -9,6 +10,7 @@ from tinfer.core.async_engine import AsyncStreamingTTS
 from tinfer.config.engine_config import StreamingTTSConfig
 from tinfer.server.websocket import WebSocketServer
 from tinfer.server.grpc.server import GRPCServer
+from tinfer.server.health import HealthState
 import os
 from tinfer.support.observability import get_logger
 
@@ -17,6 +19,11 @@ from server.observability import setup_observability
 base_dir = Path(__file__).parent.parent
 script_dir = Path(__file__).parent
 log = get_logger(__name__)
+
+
+def _log_level_from_env() -> int:
+    level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+    return getattr(logging, level_name, logging.INFO)
 
 def _load_tts_config() -> StreamingTTSConfig:
     path = script_dir / "config.yml"
@@ -90,19 +97,17 @@ async def main():
     setup_observability(
         service_name=os.getenv("OTEL_SERVICE_NAME", "tinfer-server"),
         environment=os.getenv("DEPLOYMENT_ENVIRONMENT", os.getenv("ENVIRONMENT", "dev")),
+        level=_log_level_from_env(),
     )
 
     log.info("server_starting")
+    health = HealthState()
     
     tts, model_ids, voice_ids = load_models(warmup=False)
     if not model_ids:
         log.warning("server_exiting_no_models")
         return
 
-    log.info("models_warmup_started", model_count=len(model_ids))
-    await tts.async_warmup(model_ids, voice_ids)
-    log.info("models_ready", model_count=len(model_ids))
-    
     async_tts = AsyncStreamingTTS(tts)
 
     host = os.getenv("TINFER_HOST", "0.0.0.0")
@@ -113,9 +118,9 @@ async def main():
     
     servers = []
     if use_websocket:
-        servers.append((WebSocketServer(async_tts, host=host, port=websocket_port), f"WebSocket {host}:{websocket_port}"))
+        servers.append((WebSocketServer(async_tts, host=host, port=websocket_port, health=health), f"WebSocket {host}:{websocket_port}"))
     if use_grpc:
-        servers.append((GRPCServer(async_tts, port=grpc_port), f"gRPC {host}:{grpc_port}"))
+        servers.append((GRPCServer(async_tts, port=grpc_port, health=health), f"gRPC {host}:{grpc_port}"))
     
     shutdown_event = asyncio.Event()
     
@@ -130,23 +135,32 @@ async def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
+    tasks = [asyncio.create_task(s.serve()) for s, _ in servers]
+
     for _, label in servers:
         log.info("server_listener_starting", listener=label)
-    log.info("server_ready")
-    
-    tasks = [asyncio.create_task(s.serve()) for s, _ in servers]
-    
+
     try:
+        log.info("models_warmup_started", model_count=len(model_ids))
+        await tts.async_warmup(model_ids, voice_ids)
+        health.mark_warmup_complete()
+        log.info("models_ready", model_count=len(model_ids))
+        log.info("server_ready")
         await shutdown_event.wait()
     except KeyboardInterrupt:
         log.info("server_shutdown_keyboard_interrupt")
     finally:
+        await health.begin_draining()
+        log.info("server_draining_started", active_connections=health.active_connections)
+        await health.wait_for_no_active_connections()
+        log.info("server_draining_finished")
         for s, _ in servers:
             await s.stop(grace_period=0)
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         async_tts.stop()
+        await health.mark_stopped()
         log.info("server_stopped")
 
 if __name__ == "__main__":
