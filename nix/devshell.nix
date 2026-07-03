@@ -6,21 +6,38 @@
   lib = pkgs.lib;
   rt = tinfer-server.runtime;
 
-  # Preload the wheels' native deps by absolute path at interpreter startup
-  # (torch's _load_global_deps pattern): scoped to this project's python
-  # processes, no shell-wide LD_LIBRARY_PATH.
+  # Preload the wheels' native deps by absolute path (torch's
+  # _load_global_deps pattern): scoped to this project's python processes,
+  # no shell-wide LD_LIBRARY_PATH. Lazy: nothing is mapped until the first
+  # C-extension import, so pure-python processes stay untouched.
   sitecustomize = pkgs.writeTextDir "sitecustomize.py" ''
-    import ctypes, os, sys
+    import sys
+
     if sys.platform == "linux":
-        for _p in [${lib.concatMapStringsSep ", " (p: ''"${p}"'') rt.preloadLibs}]:
-            ctypes.CDLL(_p, mode=ctypes.RTLD_GLOBAL)
-        for _d in [${lib.concatMapStringsSep ", " (d: ''"${d}"'') rt.nvidiaDriverDirs}]:
-            _p = os.path.join(_d, "libcuda.so.1")
-            if os.path.exists(_p):
+        import ctypes, os
+        from importlib.machinery import ExtensionFileLoader, PathFinder
+
+        def _preload():
+            for _p in [${lib.concatMapStringsSep ", " (p: ''"${p}"'') rt.preloadLibs}]:
                 ctypes.CDLL(_p, mode=ctypes.RTLD_GLOBAL)
-                # dir containing libcuda, for triton's -lcuda link
-                os.environ.setdefault("TRITON_LIBCUDA_PATH", _d)
-                break
+            for _d in [${lib.concatMapStringsSep ", " (d: ''"${d}"'') rt.nvidiaDriverDirs}]:
+                if os.path.exists(os.path.join(_d, "libcuda.so.1")):
+                    ctypes.CDLL(os.path.join(_d, "libcuda.so.1"), mode=ctypes.RTLD_GLOBAL)
+                    # dir containing libcuda, for triton's -lcuda link
+                    os.environ.setdefault("TRITON_LIBCUDA_PATH", _d)
+                    break
+
+        class _PreloadOnFirstExtension:
+            invalidate_caches = staticmethod(PathFinder.invalidate_caches)
+
+            def find_spec(self, fullname, path=None, target=None):
+                spec = PathFinder.find_spec(fullname, path, target)
+                if spec is not None and isinstance(spec.loader, ExtensionFileLoader):
+                    sys.meta_path.remove(self)
+                    _preload()
+                return spec
+
+        sys.meta_path.insert(sys.meta_path.index(PathFinder), _PreloadOnFirstExtension())
   '';
 
   devPlatform =
