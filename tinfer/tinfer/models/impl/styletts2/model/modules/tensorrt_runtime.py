@@ -9,6 +9,7 @@ from typing import Mapping
 
 import tensorrt as trt
 import torch
+from tinfer.support.tensorrt_observability import TensorRTJSONLogger
 
 
 def next_power_of_two(value: int, minimum: int = 1, maximum: int | None = None) -> int:
@@ -153,7 +154,7 @@ class _TensorRTRunner:
             raise FileNotFoundError(f"Missing TensorRT {self.component_name} engine: {self.engine_path}")
 
         self._trt = trt
-        self._logger = trt.Logger(trt.Logger.WARNING)
+        self._logger = TensorRTJSONLogger(trt.Logger.WARNING)
         with trt.Runtime(self._logger) as runtime:
             self._engine = runtime.deserialize_cuda_engine(self.engine_path.read_bytes())
         if self._engine is None:

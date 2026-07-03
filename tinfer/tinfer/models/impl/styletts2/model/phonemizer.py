@@ -6,10 +6,12 @@ from typing import Any, Union
 
 import espeak_align
 from nltk.tokenize import TweetTokenizer
+from tinfer.support.observability import get_logger
 
 _PUNCTUATION = ';:,.!?¡¿—…"«»""'   
 _ENGINE_CACHE: dict[tuple[str, bool, int], tuple[espeak_align.Engine, threading.Lock]] = {}
 _engine_cache_lock = threading.Lock()
+log = get_logger(__name__)
 
 
 def _get_engine(language: str, tie: bool, espeak_workers: int) -> tuple[espeak_align.Engine, threading.Lock]:
@@ -101,9 +103,12 @@ class StyleTTS2Phonemizer:
         phonemes_list = [self._filter_to_vocab(p) for p in phonemes_list]
         phonemized_string = self._normalize_phoneme_string("".join(phonemes_list))
 
-        print(phonemized_string)
-        print(words)
-        print(phonemes_list)
+        log.debug(
+            "text_phonemized",
+            phonemized=phonemized_string,
+            words=words,
+            phonemes=phonemes_list,
+        )
 
         if word_alignment:
             return phonemized_string, (words, phonemes_list)

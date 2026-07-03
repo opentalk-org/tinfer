@@ -97,7 +97,6 @@ class Generator(torch.nn.Module):
         return self._forward_compiled(x, s, har_source)
 
     def remove_weight_norm(self):
-        print('Removing weight norm...')
         for l in self.ups:
             remove_weight_norm(l)
         for l in self.resblocks:

@@ -15,8 +15,11 @@ from time import monotonic
 import numpy as np
 from tinfer.core.request import Alignment, AlignmentItem
 from tinfer.utils.audio_encoder import AudioFormat, parse_output_format
-from tinfer.errors import InferenceError
+from tinfer.support.errors import InferenceError
 import asyncio
+from tinfer.support.observability import get_logger
+
+log = get_logger(__name__)
 
 _STREAM_PARAM_KEYS = frozenset({
     "chunk_length_schedule",
@@ -146,8 +149,10 @@ class StreamingTTS:
 
         self._cancel_request(request_id)
         self._requests.pop(request_id)
+        log.info("stream_closed", request_id=request_id, active_streams=len(self._requests))
 
     def load_model(self, model_id: str, model_path: str, voices_folder: str | None = None):
+        log.info("engine_model_loading", model_id=model_id, path=model_path, voices_folder=voices_folder)
         self.executor.load_model(
             model_id,
             model_path,
@@ -168,6 +173,7 @@ class StreamingTTS:
 
     def unload_model(self, model_id: str):
         self.executor.unload_model(model_id)
+        log.info("engine_model_unloaded", model_id=model_id)
 
     def run(self):
         self._stop_timeout = False
@@ -213,6 +219,14 @@ class StreamingTTS:
             )
             request.audio_queue.put(chunk)
             request.pending_chunks -= 1
+            log.debug(
+                "audio_chunk_queued",
+                request_id=request_id,
+                chunk_index=result.chunk_index,
+                pending_chunks=request.pending_chunks,
+                audio_queue_size=request.audio_queue.qsize(),
+                has_error=error is not None,
+            )
 
             if result.error is None:
                 request.collected_time += len(result.audio) / result.sample_rate
@@ -272,6 +286,7 @@ class StreamingTTS:
         request.pending_chunks = 0
         request.nonce = str(uuid.uuid4())
         request.audio_queue.queue.clear()
+        log.info("stream_cancelled", request_id=request_id)
 
     def signal_input(self):
         now = monotonic()
@@ -327,23 +342,37 @@ class StreamingTTS:
 
                 request.pending_chunks += 1
                 request.commit_text(len(text_chunk))
+                log.debug(
+                    "text_chunk_dispatched",
+                    request_id=request.request_id,
+                    chunk_index=current_chunk_index,
+                    text_length=len(text_chunk),
+                    pending_chunks=request.pending_chunks,
+                    audio_queue_size=request.audio_queue.qsize(),
+                    is_final=is_final,
+                )
 
                 if not is_final and len(request.get_pending_text()) > 0:
                     self.timeout_queue.put((now, request.request_id))
 
+        if to_send:
+            log.info("engine_dispatch", request_count=len(to_send), active_streams=len(self._requests))
         self.executor.send_to_process(to_send)
 
-    def warmup(self, model_ids: list[str], voice_ids: list[str], num_warmup_tasks: int = 4):
+    async def async_warmup(self, model_ids: list[str], voice_ids: list[str], num_warmup_tasks: int = 4):
         if len(model_ids) != len(voice_ids):
             raise ValueError("model_ids and voice_ids must have the same length")
+
+        async def drain_stream(stream: TTSStream):
+            async for _ in stream.pull_audio():
+                pass
 
         for model_id, voice_id in zip(model_ids, voice_ids):
             stream = self.create_stream(model_id, voice_id=voice_id, params={})
             for i in range(5):
                 stream.add_text("".join(["Hello, world!"] * (i + 1)))
                 stream.force_generate()
-                audio_chunks = stream.collect_audio()
-                del audio_chunks
+                await drain_stream(stream)
             stream.close()
 
         for model_id, voice_id in zip(model_ids, voice_ids):
@@ -358,10 +387,18 @@ class StreamingTTS:
                 streams[i].add_text("Hello, world! Hello, world! Hello, world! Hello, world! Hello, world!")
                 streams[i].force_generate()
             for stream in streams[:batch_size]:
-                audio_chunks = stream.collect_audio()
-                del audio_chunks
+                await drain_stream(stream)
             for stream in streams:
                 stream.close()
+            log.info("model_ready_to_respond", model_id=model_id, voice_id=voice_id)
+
+    def warmup(self, model_ids: list[str], voice_ids: list[str], num_warmup_tasks: int = 4):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(self.async_warmup(model_ids, voice_ids, num_warmup_tasks))
+        else:
+            raise RuntimeError("warmup() cannot run inside an active event loop; use async_warmup() instead")
 
     def stop(self):
         self._stop_timeout = True

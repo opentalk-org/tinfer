@@ -8,6 +8,9 @@ import asyncio
 from concurrent import futures
 
 from tinfer.core.async_engine import AsyncStreamingTTS
+from tinfer.support.observability import get_logger
+
+log = get_logger(__name__)
 
 class GRPCServer:
     def __init__(self, tts: AsyncStreamingTTS, port: int = 50051) -> None:
@@ -32,6 +35,7 @@ class GRPCServer:
         
         await self._server.start()
         self._running = True
+        log.info("grpc_server_started", port=self.port)
 
     async def stop(self, grace_period: float = 5.0) -> None:
         if not self._running or self._server is None:
@@ -43,6 +47,7 @@ class GRPCServer:
             self._thread_pool = None
         self._running = False
         self._server = None
+        log.info("grpc_server_stopped", port=self.port)
 
     async def serve(self) -> None:
         if not self._running:

@@ -15,9 +15,9 @@ import time
 random.seed(int(time.time() * 1_000_000))
 
 packs = [
-    ("agnieszka", "66a4ecf82e2a7ae68b14add9_7.97_4.27"),
+    # ("agnieszka", "66a4ecf82e2a7ae68b14add9_7.97_4.27"),
     ("magda", "magda_001"),
-    ("olam", "any"),
+    # ("olam", "any"),
 ]
 
 

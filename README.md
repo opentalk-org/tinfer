@@ -37,3 +37,12 @@ are unaffected.
 
 - **Client only**: `pip install .`
 - **Server / local inference**: `pip install .[inference]`
+
+## VastAI installation
+
+```bash
+apt-get update
+apt-get install -y espeak-ng libespeak-ng-dev
+
+uv sync --package tinfer --extra inference
+```
