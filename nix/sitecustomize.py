@@ -1,27 +1,29 @@
 """Preload nix-provided native deps of the manylinux wheels.
 
-Installed on PYTHONPATH by the devshell (devshell.nix substitutes the
-@-placeholders). Same idea as torch's _load_global_deps — libraries are
-loaded by absolute path and later NEEDED entries resolve by SONAME from
-the link map — but lazy: nothing is mapped until the first C-extension
-import, so pure-python processes stay untouched.
+The devshell puts this module on PYTHONPATH next to a preload.json
+holding {"preload_libs": [...], "nvidia_driver_dirs": [...]} (see
+devshell.nix); without that file the module is a no-op. Same idea as
+torch's _load_global_deps — libraries are loaded by absolute path and
+later NEEDED entries resolve by SONAME from the link map — but lazy:
+nothing is mapped until the first C-extension import, so pure-python
+processes stay untouched.
 """
 
+import json
+import os
 import sys
 
-_PRELOAD_LIBS = @preloadLibs@
-_NVIDIA_DRIVER_DIRS = @nvidiaDriverDirs@
+_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "preload.json")
 
 
-def _install():
+def _install(preload_libs, nvidia_driver_dirs):
     import ctypes
-    import os
     from importlib.machinery import ExtensionFileLoader, PathFinder
 
     def preload():
-        for path in _PRELOAD_LIBS:
+        for path in preload_libs:
             ctypes.CDLL(path, mode=ctypes.RTLD_GLOBAL)
-        for dirname in _NVIDIA_DRIVER_DIRS:
+        for dirname in nvidia_driver_dirs:
             if os.path.exists(os.path.join(dirname, "libcuda.so.1")):
                 ctypes.CDLL(os.path.join(dirname, "libcuda.so.1"), mode=ctypes.RTLD_GLOBAL)
                 # dir containing libcuda, for triton's -lcuda link
@@ -48,5 +50,7 @@ def _install():
         sys.meta_path.insert(sys.meta_path.index(PathFinder), PreloadOnFirstExtension())
 
 
-if sys.platform == "linux":
-    _install()
+if sys.platform == "linux" and os.path.exists(_CONFIG):
+    with open(_CONFIG) as _f:
+        _config = json.load(_f)
+    _install(_config["preload_libs"], _config["nvidia_driver_dirs"])
