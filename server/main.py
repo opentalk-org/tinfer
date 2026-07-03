@@ -10,18 +10,22 @@ from tinfer.config.engine_config import StreamingTTSConfig
 from tinfer.server.websocket import WebSocketServer
 from tinfer.server.grpc.server import GRPCServer
 import os
+from tinfer.support.observability import get_logger
+
+from server.observability import setup_observability
 
 base_dir = Path(__file__).parent.parent
 script_dir = Path(__file__).parent
+log = get_logger(__name__)
 
 def _load_tts_config() -> StreamingTTSConfig:
     path = script_dir / "config.yml"
     if path.exists():
         config = StreamingTTSConfig.from_yaml(path)
-        print(f"Loaded config from {path}")
+        log.info("config_loaded", path=str(path))
         return config
-    print(f"Warning: config.yml not found at {path}")
-    print("Using default config")
+    log.warning("config_missing", path=str(path))
+    log.info("config_default_used")
     return StreamingTTSConfig()
 
 def _random_voice_from_folder(voices_folder: Path) -> str:
@@ -38,13 +42,13 @@ def _random_voice_from_folder(voices_folder: Path) -> str:
     return random.choice(names)
 
 
-def load_models():
+def load_models(warmup: bool = True):
     converted_models_dir = os.getenv("TINFER_MODELS_DIR", str(base_dir / "converted_models"))
     converted_models_dir = Path(converted_models_dir)
     
     if not converted_models_dir.exists():
-        print(f"Warning: converted_models directory not found at {converted_models_dir}")
-        return StreamingTTS(_load_tts_config()), []
+        log.warning("converted_models_missing", path=str(converted_models_dir))
+        return StreamingTTS(_load_tts_config()), [], []
     
     config = _load_tts_config()
     tts = StreamingTTS(config)
@@ -60,39 +64,44 @@ def load_models():
         voices_folder = model_dir / "voices"
         
         if not model_path.exists():
-            print(f"Skipping {model_dir.name}: model.pth not found")
+            log.warning("model_skipped", model_id=model_dir.name, reason="model_path_missing", path=str(model_path))
             continue
         
         model_id = model_dir.name
         voices_folder_str = str(voices_folder) if voices_folder.exists() else None
-        
-        print(f"Loading model '{model_id}' from {model_path}")
-        if voices_folder_str:
-            print(f"Loading voices from {voices_folder_str}")
         
         tts.load_model(model_id, str(model_path), voices_folder=voices_folder_str)
         model_ids.append(model_id)
         voice_ids.append(_random_voice_from_folder(voices_folder))
     
     if not model_ids:
-        print("No models found to load")
-        return tts, []
+        log.warning("models_not_found")
+        return tts, [], []
     
-    print(f"\nWarming up {len(model_ids)} model(s)...")
-    tts.warmup(model_ids, voice_ids)
-    print("All models ready!")
+    if warmup:
+        log.info("models_warmup_started", model_count=len(model_ids))
+        tts.warmup(model_ids, voice_ids)
+        log.info("models_ready", model_count=len(model_ids))
     
-    return tts, model_ids
+    return tts, model_ids, voice_ids
 
 async def main():
     load_dotenv()
+    setup_observability(
+        service_name=os.getenv("OTEL_SERVICE_NAME", "tinfer-server"),
+        environment=os.getenv("DEPLOYMENT_ENVIRONMENT", os.getenv("ENVIRONMENT", "dev")),
+    )
 
-    print("Starting TTS Servers...")
+    log.info("server_starting")
     
-    tts, model_ids = load_models()
+    tts, model_ids, voice_ids = load_models(warmup=False)
     if not model_ids:
-        print("No models loaded. Exiting.")
+        log.warning("server_exiting_no_models")
         return
+
+    log.info("models_warmup_started", model_count=len(model_ids))
+    await tts.async_warmup(model_ids, voice_ids)
+    log.info("models_ready", model_count=len(model_ids))
     
     async_tts = AsyncStreamingTTS(tts)
 
@@ -111,7 +120,7 @@ async def main():
     shutdown_event = asyncio.Event()
     
     def signal_handler(sig, frame):
-        print("\nShutting down servers...")
+        log.info("server_shutdown_signal", signal=str(sig))
         try:
             loop = asyncio.get_running_loop()
             loop.call_soon_threadsafe(shutdown_event.set)
@@ -122,15 +131,15 @@ async def main():
     signal.signal(signal.SIGTERM, signal_handler)
     
     for _, label in servers:
-        print(f"{label}...")
-    print("Press Ctrl+C to stop the servers")
+        log.info("server_listener_starting", listener=label)
+    log.info("server_ready")
     
     tasks = [asyncio.create_task(s.serve()) for s, _ in servers]
     
     try:
         await shutdown_event.wait()
     except KeyboardInterrupt:
-        print("\nShutting down...")
+        log.info("server_shutdown_keyboard_interrupt")
     finally:
         for s, _ in servers:
             await s.stop(grace_period=0)
@@ -138,7 +147,7 @@ async def main():
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         async_tts.stop()
-        print("Servers stopped")
+        log.info("server_stopped")
 
 if __name__ == "__main__":
     import sys

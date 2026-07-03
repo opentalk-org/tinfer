@@ -12,7 +12,10 @@ import asyncio
 from . import styletts_pb2
 from . import styletts_pb2_grpc
 from tinfer.core.request import Alignment
-from tinfer.errors import InferenceError
+from tinfer.support.errors import InferenceError
+from tinfer.support.observability import get_logger, record_span_exception, start_span
+
+log = get_logger(__name__)
 
 class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
 
@@ -69,25 +72,45 @@ class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
         alignments = chunk.alignments
         return self._create_response(audio_bytes, alignments)
 
+    def _alignment_type(self, chunk: AudioChunk) -> str | None:
+        if not chunk.alignments or not chunk.alignments.items:
+            return None
+        return chunk.alignments.type_.value if hasattr(chunk.alignments.type_, "value") else str(chunk.alignments.type_)
+
     async def Synthesize(self, request: styletts_pb2.SynthesizeRequest, context: grpc.ServicerContext) -> styletts_pb2.SynthesizeResponse:
         model_id, voice_id, params = self._get_params(request)
         text = request.text
-        try:
-            chunk: AudioChunk = await self.tts.generate_full(
-                model_id=model_id,
-                voice_id=voice_id,
-                text=text,
-                params=params,
+        with start_span(
+            "grpc.Synthesize",
+            __name__,
+            kind="server",
+            attributes={"tinfer.model_id": model_id, "tinfer.voice_id": voice_id, "tinfer.text_length": len(text)},
+        ) as span:
+            log.info("grpc_synthesize_started", model_id=model_id, voice_id=voice_id, text_length=len(text))
+            try:
+                chunk: AudioChunk = await self.tts.generate_full(
+                    model_id=model_id,
+                    voice_id=voice_id,
+                    text=text,
+                    params=params,
+                )
+            except InferenceError as e:
+                record_span_exception(span, e)
+                log.warning("grpc_synthesize_invalid_request", error=str(e))
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details(str(e))
+                return self._create_response(b"", None)
+            if getattr(chunk, "error", None):
+                log.warning("grpc_synthesize_chunk_error", error=chunk.error)
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details(chunk.error)
+                return self._create_response(b"", None)
+            log.info(
+                "grpc_synthesize_finished",
+                audio_samples=len(chunk.audio),
+                alignment_type=self._alignment_type(chunk),
             )
-        except InferenceError as e:
-            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details(str(e))
-            return self._create_response(b"", None)
-        if getattr(chunk, "error", None):
-            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details(chunk.error)
-            return self._create_response(b"", None)
-        return self._chunk_to_response(chunk)
+            return self._chunk_to_response(chunk)
             
     async def SynthesizeStream(
         self, request: styletts_pb2.SynthesizeRequest, context: grpc.ServicerContext
@@ -95,25 +118,42 @@ class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
         model_id, voice_id, params = self._get_params(request)
 
         text = request.text
+        with start_span(
+            "grpc.SynthesizeStream",
+            __name__,
+            kind="server",
+            attributes={"tinfer.model_id": model_id, "tinfer.voice_id": voice_id, "tinfer.text_length": len(text)},
+        ):
+            log.info("grpc_synthesize_stream_started", model_id=model_id, voice_id=voice_id, text_length=len(text))
 
-        stream = self.tts.create_stream(model_id, voice_id, params)
-        stream.add_text(text)
-        stream.force_generate()
+            stream = self.tts.create_stream(model_id, voice_id, params)
+            stream.add_text(text)
+            stream.force_generate()
 
-        async for chunk in stream.pull_audio():
-            if getattr(chunk, "error", None):
-                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-                context.set_details(chunk.error)
-                break
-            yield self._chunk_to_response(chunk)
+            async for chunk in stream.pull_audio():
+                if getattr(chunk, "error", None):
+                    log.warning("grpc_synthesize_stream_chunk_error", error=chunk.error)
+                    context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                    context.set_details(chunk.error)
+                    break
+                log.info(
+                    "grpc_synthesize_stream_chunk",
+                    chunk_index=chunk.chunk_index,
+                    audio_samples=len(chunk.audio),
+                    alignment_type=self._alignment_type(chunk),
+                )
+                yield self._chunk_to_response(chunk)
 
-        stream.close()
+            stream.close()
+            log.info("grpc_synthesize_stream_finished")
 
     async def SynthesizeIncremental(
         self,
         request_iterator: AsyncIterator[styletts_pb2.IncrementalSynthesizeRequest],
         context: grpc.ServicerContext,
     ) -> AsyncIterator[styletts_pb2.SynthesizeResponse]:
+        span_cm = start_span("grpc.SynthesizeIncremental", __name__, kind="server")
+        span = span_cm.__enter__()
         config_received = False
         stream = None
         closed = False
@@ -133,6 +173,7 @@ class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
                         config_received = True
                         model_id, voice_id, params = self._get_params(request)
                         stream = self.tts.create_stream(model_id, voice_id, params)
+                        log.info("grpc_incremental_config_received", model_id=model_id, voice_id=voice_id)
                     elif not config_received:
                         context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
                         context.set_details("Config must be sent in first request")
@@ -144,13 +185,18 @@ class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
                             continue
                         if request.HasField("text_chunk"):
                             stream.add_text(request.text_chunk)
+                            log.info("grpc_incremental_text_received", text_length=len(request.text_chunk))
                         elif request.HasField("force_synthesis"):
                             stream.force_generate()
+                            log.info("grpc_incremental_force_synthesis")
                         elif request.HasField("cancel"):
                             stream.cancel()
+                            log.info("grpc_incremental_cancel")
             except Exception as e:
                 error_occurred = True
                 closed = True
+                record_span_exception(span, e)
+                log.exception("grpc_incremental_request_handler_failed")
             finally:
                 closed = True
 
@@ -162,6 +208,7 @@ class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
         if error_occurred or stream is None:
             if not request_task.done():
                 request_task.cancel()
+            span_cm.__exit__(None, None, None)
             return
         
         try:
@@ -170,11 +217,18 @@ class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
                 async for chunk in stream.pull_audio():
                     has_audio = True
                     if getattr(chunk, "error", None):
+                        log.warning("grpc_incremental_chunk_error", error=chunk.error)
                         context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
                         context.set_details(chunk.error)
                         error_occurred = True
                         break
                     response = self._chunk_to_response(chunk)
+                    log.info(
+                        "grpc_incremental_chunk",
+                        chunk_index=chunk.chunk_index,
+                        audio_samples=len(chunk.audio),
+                        alignment_type=self._alignment_type(chunk),
+                    )
                     yield response
                 
                 if closed and request_task.done():
@@ -187,3 +241,5 @@ class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
                 stream.close()
             if not request_task.done():
                 request_task.cancel()
+            log.info("grpc_incremental_finished")
+            span_cm.__exit__(None, None, None)

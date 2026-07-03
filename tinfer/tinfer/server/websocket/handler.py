@@ -8,8 +8,11 @@ from typing import Any, Optional
 from aiohttp.web_ws import WebSocketResponse
 from tinfer.core.async_engine import AsyncStreamingTTS
 from tinfer.core.request import AudioChunk, AlignmentType
+from tinfer.support.observability import get_logger, start_span
 from tinfer.utils.alignment_formatter import AlignmentFormatter
 from tinfer.utils.audio_encoder import encode_audio_to_base64, parse_output_format, get_sample_rate
+
+log = get_logger(__name__)
 
 
 class WebSocketHandler:
@@ -57,14 +60,33 @@ class WebSocketHandler:
             if msg.type == 1:
                 try:
                     data = json.loads(msg.data)
-                    await self._process_message(data)
+                    with start_span(
+                        "websocket.message",
+                        __name__,
+                        attributes={
+                            "messaging.operation": "receive",
+                            "message.size": len(msg.data),
+                            "tinfer.model_id": self.model_id,
+                            "tinfer.voice_id": self.voice_id,
+                            "tinfer.config_received": self.config_received,
+                        },
+                    ):
+                        log.info(
+                            "websocket_message_received",
+                            message_size=len(msg.data),
+                            config_received=self.config_received,
+                        )
+                        await self._process_message(data)
                 except json.JSONDecodeError:
+                    log.warning("websocket_invalid_json")
                     await self._send_error("Invalid JSON message")
                     break
                 except Exception as e:
+                    log.exception("websocket_message_failed")
                     await self._send_error(f"Error processing message: {str(e)}")
                     break
             elif msg.type == 2:
+                log.warning("websocket_binary_rejected")
                 await self._send_error("Binary messages not supported")
                 break
             elif msg.type == 257:
@@ -97,12 +119,18 @@ class WebSocketHandler:
             self.config_received = True
             self._reset_inactivity_timer()
             self._stream_task = asyncio.create_task(self._stream_audio())
+            log.info(
+                "websocket_stream_created",
+                output_format=self.output_format_str,
+                sync_alignment=self.sync_alignment,
+            )
             text = data.get("text", "")
             if text and text.strip():
                 self.stream.add_text(text)
                 self.stream.force_generate()
                 self._text_added_event.set()
         except Exception as e:
+            log.exception("websocket_stream_create_failed")
             await self._send_error(f"Failed to create stream: {str(e)}")
             self.closed = True
 
@@ -128,6 +156,12 @@ class WebSocketHandler:
                 self.stream.force_generate()
             self._text_added_event.set()
             self._reset_inactivity_timer()
+            log.info(
+                "websocket_text_accepted",
+                text_length=len(text),
+                try_trigger_generation=try_trigger_generation,
+                flush=flush,
+            )
 
     def _map_params_to_tinfer(
         self,
@@ -164,6 +198,12 @@ class WebSocketHandler:
                     response = await self._format_response(chunk)
                     await self._send_response(response)
                     sent_any = True
+                    log.info(
+                        "websocket_audio_chunk_sent",
+                        chunk_index=chunk.chunk_index,
+                        audio_samples=len(chunk.audio),
+                        alignment_type=self._alignment_type(chunk),
+                    )
                 if sent_any and not self.closed and not self.ws.closed:
                     should_exit = await self._send_final_if_needed()
                     if should_exit:
@@ -186,6 +226,7 @@ class WebSocketHandler:
         except asyncio.CancelledError:
             pass
         except Exception as e:
+            log.exception("websocket_streaming_failed")
             if not self.closed and not self.ws.closed:
                 await self._send_error(f"Streaming error: {str(e)}")
             self.closed = True
@@ -213,6 +254,11 @@ class WebSocketHandler:
             response["alignment"] = char_data
         return response
 
+    def _alignment_type(self, chunk: AudioChunk) -> str | None:
+        if not chunk.alignments or not chunk.alignments.items:
+            return None
+        return chunk.alignments.type_.value if hasattr(chunk.alignments.type_, "value") else str(chunk.alignments.type_)
+
     async def _send_response(self, response: dict[str, Any]) -> None:
         if self.closed or self.ws.closed:
             return
@@ -223,7 +269,7 @@ class WebSocketHandler:
             self._reset_inactivity_timer()
         except Exception as e:
             if self.enable_logging:
-                print(f"Error sending response: {e}")
+                log.exception("websocket_send_response_failed")
             self.closed = True
 
     async def _send_error(self, error_message: str) -> None:
@@ -235,8 +281,9 @@ class WebSocketHandler:
                 "error": error_message,
             }
             await self.ws.send_str(json.dumps(error_response))
+            log.warning("websocket_error_sent", error=error_message)
         except Exception:
-            pass
+            log.exception("websocket_send_error_failed")
         finally:
             self.closed = True
 

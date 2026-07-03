@@ -9,12 +9,14 @@ from typing import Any
 from tinfer.models.registry import get_model_class
 import asyncio
 import numpy as np
-import queue as queue_module
 import time
 import multiprocessing
 import signal
 import torch
+from tinfer.support.observability import get_logger, setup_json_logs
 from tinfer.utils.audio_encoder import AudioFormat, DefaultAudioEncoder
+
+log = get_logger(__name__)
 
 _mp_context = get_context('spawn')
 Process = _mp_context.Process
@@ -31,15 +33,18 @@ class WorkerProcess(Process):
         self.shm_manager = SharedMemoryManager()
         self.ipc_protocol = IPCProtocol()
         self.models: dict[str, Any] = {}
-        self.request_queue: queue_module.Queue[TTSRequestIPC] | None = None
         self.cancelled_requests: set[str] = set()
         self.scheduler = WorkerScheduler(max_batch_size)
         self.audio_encoder = DefaultAudioEncoder()
 
+    def _scheduler_queue_size(self) -> int:
+        return len(getattr(self.scheduler, "_requests", {}))
+
     def run(self) -> None:
+        setup_json_logs(force=True)
         signal.signal(signal.SIGINT, signal.SIG_IGN)
+        log.info("worker_started", worker_id=self.worker_id, device=self.device, max_batch_size=self.max_batch_size)
         try:
-            self.request_queue = queue_module.Queue()
             while True:
                 processed_messages = self._process_messages()
                 
@@ -48,10 +53,11 @@ class WorkerProcess(Process):
                 for batch in batches:
                     self._process_batch(batch)
                 
-                if not processed_messages and self.request_queue.empty():
+                if not processed_messages and self._scheduler_queue_size() == 0:
                     time.sleep(0.010)
         finally:
             self.shm_manager.cleanup()
+            log.info("worker_stopped", worker_id=self.worker_id, device=self.device)
     
     def _process_messages(self) -> bool:
         processed_messages = False
@@ -87,6 +93,16 @@ class WorkerProcess(Process):
         compile_models = data["compile_models"]
         voices_folder = data.get("voices_folder")
         runtime_engine = data.get("runtime_engine")
+        log.info(
+            "worker_model_loading",
+            worker_id=self.worker_id,
+            device=self.device,
+            model_id=model_id,
+            path=path,
+            voices_folder=voices_folder,
+            compile_models=compile_models,
+            runtime_engine=runtime_engine,
+        )
         model_class = get_model_class("styletts2") # TODO: handle other models in future
         model = model_class()
         model.load(
@@ -97,6 +113,7 @@ class WorkerProcess(Process):
         )
         model.max_batch_size = self.max_batch_size
         self.models[model_id] = model
+        log.info("worker_model_loaded", worker_id=self.worker_id, device=self.device, model_id=model_id)
     
     def _handle_register_model(self, data: dict) -> None:
         model_id = data["model_id"]
@@ -125,6 +142,37 @@ class WorkerProcess(Process):
         if request_ipc.request_id in self.cancelled_requests:
             self.cancelled_requests.remove(request_ipc.request_id)
         self.scheduler.add_request(request_ipc)
+        log.info(
+            "worker_request_queued",
+            worker_id=self.worker_id,
+            request_id=request_ipc.request_id,
+            model_id=request_ipc.model_id,
+            voice_id=request_ipc.voice_id,
+            chunk_index=request_ipc.chunk_index,
+            scheduler_queue_size=self._scheduler_queue_size(),
+        )
+
+    def _log_batch_started(self, batch: list[TTSRequestIPC]) -> None:
+        scheduler_queue_size = max(0, self._scheduler_queue_size() - len(batch))
+        now = time.monotonic()
+        for request in batch:
+            log.info(
+                "worker_request_started",
+                worker_id=self.worker_id,
+                request_id=request.request_id,
+                chunk_index=request.chunk_index,
+                queue_wait_ms=int(round((now - request.created_at) * 1000)),
+                scheduler_queue_size=scheduler_queue_size,
+            )
+
+    def _log_model_inference_finished(self, batch: list[TTSRequestIPC], inference_ms: int) -> None:
+        log.info(
+            "model_inference_finished",
+            worker_id=self.worker_id,
+            batch_size=len(batch),
+            inference_ms=inference_ms,
+            request_ids=[request.request_id for request in batch],
+        )
     
     def _process_batch(self, batch: list[TTSRequestIPC]) -> None:
         if not batch:
@@ -132,6 +180,7 @@ class WorkerProcess(Process):
         
         model_id = batch[0].model_id
         model = self.models.get(model_id)
+        self._log_batch_started(batch)
         
         try:
             texts, contexts, params_list, request_metadata = self._prepare_batch_data(batch)
@@ -141,9 +190,19 @@ class WorkerProcess(Process):
                 return
             
             with torch.no_grad():
+                inference_started_at = time.perf_counter()
                 results = self._execute_batch(model, texts, contexts, params_list, request_metadata)
+                inference_ms = int(round((time.perf_counter() - inference_started_at) * 1000))
+            self._log_model_inference_finished(batch, inference_ms)
             self._send_batch_results(results, request_metadata)
         except Exception as e:
+            log.exception(
+                "worker_batch_failed",
+                worker_id=self.worker_id,
+                model_id=model_id,
+                batch_size=len(batch),
+                request_ids=[request.request_id for request in batch],
+            )
             for req in batch:
                 metadata = {
                     "request_id": req.request_id,

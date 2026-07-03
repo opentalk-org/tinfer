@@ -12,6 +12,7 @@ dependencies = [
     "grpcio>=1.76.0",
     "numpy>=2.4.2",
     "protobuf>=6.33.5",
+    "structlog>=25.5.0",
 ]
 
 [tool.setuptools.packages.find]
