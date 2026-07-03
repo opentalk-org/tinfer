@@ -21,6 +21,16 @@
       system: let
         pkgs = import nixpkgs {inherit system;};
         gccLib = pkgs.stdenv.cc.cc.lib;
+        # libcuda comes from the host driver; the nix loader ignores the
+        # container's ld.so.cache, so both injection paths must be on
+        # LD_LIBRARY_PATH (after nix libs).
+        gpuContainer = {
+          driverLibraryPath = ":/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/lib/x86_64-linux-gnu";
+          env = [
+            "NVIDIA_VISIBLE_DEVICES=all"
+            "NVIDIA_DRIVER_CAPABILITIES=compute,utility"
+          ];
+        };
         cargoBuildEnv = pkgs.runCommand "cargo-build-env" {} ''
           mkdir -p "$out/nix-support"
           cat > "$out/nix-support/setup-hook" <<'EOF'
@@ -58,22 +68,22 @@
               gccLib
               pkgs.glibc
             ];
-            # /usr/lib/x86_64-linux-gnu is where the modern nvidia container
-            # toolkit injects the driver libraries.
-            extraLdLibraryPath = ":/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/lib/x86_64-linux-gnu";
-            extraLibraryPath = ":/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/lib/x86_64-linux-gnu";
+            extraLdLibraryPath = gpuContainer.driverLibraryPath;
+            extraLibraryPath = gpuContainer.driverLibraryPath;
             runtimeExecutableDeps = [pkgs.ffmpeg pkgs.patchelf pkgs.gcc pkgs.openssl];
             members = ["server" "tinfer" "tinfer/espeak_align"];
             config = {
-              Env = [
-                "CC=${pkgs.gcc}/bin/gcc"
-                "USER=root"
-                "HOME=/root"
-                "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
-                "TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor"
-                "PYTHONUNBUFFERED=1"
-                "TRITON_LIBCUDA_PATH=/usr/local/nvidia/lib/libcuda.so"
-              ];
+              Env =
+                gpuContainer.env
+                ++ [
+                  "CC=${pkgs.gcc}/bin/gcc"
+                  "USER=root"
+                  "HOME=/root"
+                  "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+                  "TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor"
+                  "PYTHONUNBUFFERED=1"
+                  "TRITON_LIBCUDA_PATH=/usr/local/nvidia/lib/libcuda.so"
+                ];
               Cmd = ["python" "-m" "server.main"];
             };
           };

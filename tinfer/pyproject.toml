@@ -33,4 +33,5 @@ inference = [
     "torchaudio>=2.10.0",
     "tensorrt-cu12",
     "onnx==1.22.0",
+    "trtc",
 ]
