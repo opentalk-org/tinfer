@@ -73,7 +73,7 @@
             extraLibraryPath = ":/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/lib/x86_64-linux-gnu";
             runtimeExecutableDeps = [pkgs.ffmpeg pkgs.patchelf pkgs.gcc pkgs.openssl];
             members = ["server" "tinfer"];
-            pythonLibs = [espeak-align];
+            extraPythonPath = ":${espeak-align}/lib/python${python.pythonVersion}/site-packages";
             config = {
               Env = [
                 "CC=${pkgs.gcc}/bin/gcc"
@@ -148,18 +148,15 @@
           packages = [pkgs.espeak pkgs.uv pkgs.cargo pkgs.rustc pkgs.espeak-ng];
           shellHook = ''
             export LD_LIBRARY_PATH=${pkgs.espeak}/lib:$LD_LIBRARY_PATH
-            # Editable espeak_align: the symlink tracks cargo's debug output,
-            # so rust edits only need `cargo build`; while it dangles, imports
-            # fall through to the nix-built module.
             export PYO3_PYTHON=${python}/bin/python${python.pythonVersion}
-            dev_site="$PWD/.direnv/python-dev"
-            mkdir -p "$dev_site"
-            ln -sfn "$PWD/tinfer/espeak_align/target/debug/libespeak_align${
+            # Editable espeak_align: dev/<platform> holds a committed symlink
+            # onto cargo's debug output; while it dangles, imports fall
+            # through to the nix-built module.
+            export PYTHONPATH="$PWD/tinfer/espeak_align/dev/${
               if pkgs.stdenv.isDarwin
-              then ".dylib"
-              else ".so"
-            }" "$dev_site/espeak_align.so"
-            export PYTHONPATH="$dev_site:${espeak-align}/lib/python${python.pythonVersion}/site-packages"''${PYTHONPATH:+:$PYTHONPATH}
+              then "darwin"
+              else "linux"
+            }:${espeak-align}/lib/python${python.pythonVersion}/site-packages"''${PYTHONPATH:+:$PYTHONPATH}
           '';
         };
       }

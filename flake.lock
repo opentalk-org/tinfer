@@ -191,11 +191,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1783030418,
-        "narHash": "sha256-yYQeZD2ClQXC4dDJspa48V1TD56WmSgIP8zMwR3LoRw=",
+        "lastModified": 1783065794,
+        "narHash": "sha256-RXS3ZGgJ/deP5oWqln0ykSXg92LxKjhBCzI5+Lxso/M=",
         "owner": "dialohq",
         "repo": "x2container.nix",
-        "rev": "9a7da8e10f0c88e2a9c50725565ac345b1c879c7",
+        "rev": "185e4bdf6e031d15245af907a48265f3f68d7882",
         "type": "github"
       },
       "original": {
