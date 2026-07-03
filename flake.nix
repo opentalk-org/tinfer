@@ -76,30 +76,23 @@
           TRITON_PTXAS_BLACKWELL_PATH = "${cudaNvcc}/bin/ptxas";
         };
 
-        imageEnv =
-          commonEnv
-          // {
-            USER = "root";
-            HOME = "/root";
-            TORCHINDUCTOR_CACHE_DIR = "/tmp/torchinductor";
-            TRITON_LIBCUDA_PATH = "/usr/local/nvidia/lib/libcuda.so";
-          };
-
-        cargoBuildEnv = pkgs.runCommand "cargo-build-env" {} ''
-          mkdir -p "$out/nix-support"
-          cat > "$out/nix-support/setup-hook" <<'EOF'
-          export CARGO_HOME="$NIX_BUILD_TOP/cargo-home"
-          export CARGO_TARGET_DIR="$NIX_BUILD_TOP/cargo-target"
-          mkdir -p "$CARGO_HOME" "$CARGO_TARGET_DIR"
-          EOF
-        '';
-
         tinfer-server =
           (x2container.lib.${system}.uv2container.buildImage {
             name = "tinfer";
             src = ./.;
             inherit python runtimeLibs runtimeExecutableDeps;
-            extraBuildInputs = [cargoBuildEnv] ++ memberBuildInputs;
+            extraBuildInputs =
+              [
+                (pkgs.runCommand "cargo-build-env" {} ''
+                  mkdir -p "$out/nix-support"
+                  cat > "$out/nix-support/setup-hook" <<'EOF'
+                  export CARGO_HOME="$NIX_BUILD_TOP/cargo-home"
+                  export CARGO_TARGET_DIR="$NIX_BUILD_TOP/cargo-target"
+                  mkdir -p "$CARGO_HOME" "$CARGO_TARGET_DIR"
+                  EOF
+                '')
+              ]
+              ++ memberBuildInputs;
             imageCheck = ["python" "-m" "server.main" "--smoke-test"];
             imageCheckEnv.TINFER_SMOKE_TEST_CPU_OK = "1";
             # Serving only deserializes engines (built by the trtc pipeline);
@@ -114,7 +107,13 @@
             extraLibraryPath = ":" + nvidiaDriverPath;
             members = ["server" "tinfer" "tinfer/espeak_align"];
             config = {
-              Env = lib.mapAttrsToList (k: v: "${k}=${v}") imageEnv;
+              Env = lib.mapAttrsToList (k: v: "${k}=${v}") (commonEnv
+                // {
+                  USER = "root";
+                  HOME = "/root";
+                  TORCHINDUCTOR_CACHE_DIR = "/tmp/torchinductor";
+                  TRITON_LIBCUDA_PATH = "/usr/local/nvidia/lib/libcuda.so";
+                });
               Cmd = ["python" "-m" "server.main"];
             };
           })
