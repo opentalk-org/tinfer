@@ -22,11 +22,7 @@ in
         # instead of a shell-wide LD_LIBRARY_PATH.
         PYTHONPATH = pkgs.writeTextDir "sitecustomize.py" ''
           import ctypes, os
-          for _p in [
-              "${pkgs.stdenv.cc.cc.lib}/lib/libstdc++.so.6",
-              "${pkgs.zlib}/lib/libz.so.1",
-              "${pkgs.espeak}/lib/libespeak-ng.so.1",
-          ]:
+          for _p in [${lib.concatMapStringsSep ", " (p: ''"${p}"'') rt.preloadLibs}]:
               ctypes.CDLL(_p, mode=ctypes.RTLD_GLOBAL)
           for _d in [${lib.concatMapStringsSep ", " (d: ''"${d}"'') rt.nvidiaDriverDirs}]:
               _p = os.path.join(_d, "libcuda.so.1")
