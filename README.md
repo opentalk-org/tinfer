@@ -11,29 +11,20 @@ tinfer: Fast production ready TTS inference server with gRPC and elevenlabs-comp
 
 ## Development (Nix)
 
-The flake ships a devshell that mirrors the serving image: both consume the
-same dependency lists declared once in `flake.nix` (interpreter, native
-toolchain, runtime libraries, env) and install Python packages from the same
-`uv.lock`, so the dev environment can't drift from what ships.
+The devshell and the serving image share one set of dependency lists in
+`flake.nix` and install Python packages from the same `uv.lock`, so the dev
+environment can't drift from what ships.
 
 ```bash
-nix develop            # or `direnv allow` once — .envrc uses the flake
-uv sync --all-packages # install the whole workspace (server + tinfer[inference] + espeak_align)
-python -m server.main --smoke-test  # verify runtime deps incl. CUDA end-to-end
-python -m server.main               # start the server (needs converted_models/)
+nix develop            # or `direnv allow` once
+uv sync --all-packages # whole workspace; client-only: uv sync --package tinfer
+python -m server.main --smoke-test
+python -m server.main  # needs converted_models/
 ```
 
-Notes:
-
-- The devshell pins `UV_PYTHON` to the same nix `python311` the image is
-  built with; `uv sync` creates `.venv` against it (re-entering the shell
-  auto-activates `.venv`).
-- GPU access works on bare hosts: the shell puts the host NVIDIA driver
-  directories on `LD_LIBRARY_PATH` and points `TRITON_LIBCUDA_PATH` at the
-  host `libcuda.so` (the image instead uses the nvidia container toolkit
-  mount paths).
-- Client-only work needs no extras: `uv sync --package tinfer` installs the
-  lightweight client surface.
+`.venv` is built against the image's nix interpreter and auto-activated on
+shell entry. GPU works on bare hosts: the shell adds the host NVIDIA driver
+dirs to `LD_LIBRARY_PATH` and probes `TRITON_LIBCUDA_PATH`.
 
 ## Prerequirements (non-Nix)
 
