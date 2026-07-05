@@ -1,10 +1,16 @@
 {
-  # cache.nixos.org can't serve unfree packages; this is the official CUDA
-  # binary cache (per wiki.nixos.org/wiki/CUDA), so cuda_nvcc substitutes
-  # instead of locally rebuilding on every machine.
+  # The full substituter set, stated explicitly so builds don't depend on
+  # machine nix.conf: the default cache plus the official CUDA cache
+  # (cache.nixos.org can't serve unfree packages).
   nixConfig = {
-    extra-substituters = ["https://cache.nixos-cuda.org"];
-    extra-trusted-public-keys = ["cache.nixos-cuda.org:74DUi4Ye579gUqzH4ziL9IyiJBlDpMRn9MBN8oNan9M="];
+    substituters = [
+      "https://cache.nixos.org"
+      "https://cache.nixos-cuda.org"
+    ];
+    trusted-public-keys = [
+      "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
+      "cache.nixos-cuda.org:74DUi4Ye579gUqzH4ziL9IyiJBlDpMRn9MBN8oNan9M="
+    ];
   };
 
   inputs = {
