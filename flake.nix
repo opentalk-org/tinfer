@@ -1,4 +1,12 @@
 {
+  # cache.nixos.org can't serve unfree packages; NVIDIA blessed this Flox
+  # cache for CUDA redistribution, so cuda_nvcc substitutes instead of
+  # locally rebuilding on every machine.
+  nixConfig = {
+    extra-substituters = ["https://cache.flox.dev"];
+    extra-trusted-public-keys = ["flox-cache-public-1:7F4OyH7ZCnFhcze3fJdfyXYLQw/aV7GEed86nQ7IsOs="];
+  };
+
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
