@@ -1,10 +1,10 @@
 {
-  # cache.nixos.org can't serve unfree packages; NVIDIA blessed this Flox
-  # cache for CUDA redistribution, so cuda_nvcc substitutes instead of
-  # locally rebuilding on every machine.
+  # cache.nixos.org can't serve unfree packages; this is the official CUDA
+  # binary cache (per wiki.nixos.org/wiki/CUDA), so cuda_nvcc substitutes
+  # instead of locally rebuilding on every machine.
   nixConfig = {
-    extra-substituters = ["https://cache.flox.dev"];
-    extra-trusted-public-keys = ["flox-cache-public-1:7F4OyH7ZCnFhcze3fJdfyXYLQw/aV7GEed86nQ7IsOs="];
+    extra-substituters = ["https://cache.nixos-cuda.org"];
+    extra-trusted-public-keys = ["cache.nixos-cuda.org:74DUi4Ye579gUqzH4ziL9IyiJBlDpMRn9MBN8oNan9M="];
   };
 
   inputs = {
