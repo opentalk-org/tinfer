@@ -17,6 +17,10 @@
         </select>
       </label>
       <label>
+        <span>Mode</span>
+        <select id="mode"></select>
+      </label>
+      <label>
         <span>API host</span>
         <input id="host" value="localhost" autocomplete="off" spellcheck="false">
       </label>
@@ -32,13 +36,42 @@
         <span>Voice</span>
         <select id="voice"></select>
       </label>
+      <label>
+        <span>Highlight</span>
+        <select id="granularity">
+          <option value="word">Word</option>
+          <option value="char">Character</option>
+        </select>
+      </label>
+    </section>
+
+    <section class="toolbar voice-settings" aria-label="Voice settings">
+      <label>
+        <span>Alpha</span>
+        <input id="alpha" type="number" min="0" max="1" step="0.05" value="0.3" inputmode="decimal" autocomplete="off">
+      </label>
+      <label>
+        <span>Beta</span>
+        <input id="beta" type="number" min="0" max="1" step="0.05" value="0.7" inputmode="decimal" autocomplete="off">
+      </label>
+      <label>
+        <!-- speaking rate: >1 = faster (shorter audio), <1 = slower -->
+        <span>Speed</span>
+        <input id="speed" type="number" min="0.5" max="2" step="0.05" value="1" inputmode="decimal" autocomplete="off">
+      </label>
+      <label>
+        <!-- WS generation_config.chunk_length_schedule: comma-separated char counts -->
+        <span>Chunk schedule</span>
+        <input id="schedule" value="120,160,250,290" autocomplete="off" spellcheck="false">
+      </label>
     </section>
 
     <section class="compose" aria-label="Text to speech">
       <textarea id="text" spellcheck="true">To jest krótki test podświetlania aktualnie wypowiadanego słowa w czasie rzeczywistym.</textarea>
       <div class="actions">
         <button id="send" type="button">Send</button>
-        <button id="stop" type="button">Stop</button>
+        <button id="cancel" type="button">Cancel</button>
+        <button id="save" type="button" disabled>Save WAV</button>
         <div class="metric">
           <span>First byte</span>
           <strong id="first-byte">-</strong>
@@ -47,6 +80,18 @@
           <span>Status</span>
           <strong id="status">Idle</strong>
         </div>
+      </div>
+      <div class="actions stream-controls" id="stream-controls">
+        <input id="chunk" placeholder="Live text chunk…" autocomplete="off" spellcheck="false">
+        <button id="send-chunk" type="button">Send chunk</button>
+        <button id="force" type="button">Force</button>
+        <button id="end" type="button">End</button>
+      </div>
+    </section>
+
+    <section class="viz" aria-label="Audio timeline">
+      <div class="track" id="track">
+        <p class="track-empty">Audio chunks appear here as they arrive.</p>
       </div>
     </section>
 

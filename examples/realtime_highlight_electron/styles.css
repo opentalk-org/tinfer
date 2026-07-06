@@ -29,13 +29,19 @@ body {
 
 .toolbar {
   display: grid;
-  grid-template-columns: 132px minmax(150px, 1fr) 92px minmax(150px, 1fr) minmax(220px, 1.4fr);
+  grid-template-columns: 120px minmax(110px, 0.9fr) minmax(140px, 1fr) 88px minmax(140px, 1fr) minmax(160px, 1.2fr) minmax(112px, 0.8fr);
   gap: 12px;
   align-items: end;
   padding: 16px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
+}
+
+.voice-settings {
+  grid-template-columns: repeat(3, minmax(88px, 120px)) minmax(180px, 280px);
+  justify-content: start;
+  margin-top: 12px;
 }
 
 label span,
@@ -71,6 +77,14 @@ select {
   padding: 0 10px;
 }
 
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.5;
+  background: var(--panel);
+  cursor: not-allowed;
+}
+
 .compose {
   margin-top: 14px;
   padding: 16px;
@@ -93,6 +107,21 @@ textarea {
   margin-top: 12px;
 }
 
+.stream-controls #chunk {
+  flex: 1 1 260px;
+  height: 38px;
+  padding: 0 10px;
+}
+
+.stream-controls button {
+  background: #475467;
+}
+
+.actions button:disabled,
+.stream-controls input:disabled {
+  opacity: 0.5;
+}
+
 button {
   min-width: 82px;
   height: 38px;
@@ -109,8 +138,8 @@ button:disabled {
   cursor: default;
 }
 
-#stop {
-  background: #475467;
+#cancel {
+  background: #b42318;
 }
 
 .metric {
@@ -161,6 +190,113 @@ button:disabled {
   background: var(--accent-soft);
   color: #073b35;
   outline: 1px solid rgba(20, 124, 114, 0.28);
+}
+
+.viz {
+  margin-top: 14px;
+  padding: 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+/* Audio timeline: one card per arriving chunk, laid left-to-right in arrival
+   order. Each card holds its alignment tokens; the bar under them fills as the
+   chunk plays and the card lights up while it is the one being spoken. */
+.track {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  min-height: 108px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+}
+
+.track-empty {
+  margin: auto;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.track.has-chunks .track-empty {
+  display: none;
+}
+
+.segment {
+  flex: 0 0 auto;
+  min-width: 120px;
+  max-width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+  transition: opacity 240ms ease, transform 240ms ease, border-color 120ms, background-color 120ms;
+}
+
+.segment.current {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.segment.played {
+  background: #f4f7f6;
+}
+
+.segment.fading {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.seg-tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex: 1 1 auto;
+  align-content: flex-start;
+}
+
+.chip {
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: #eef3f7;
+  color: var(--ink);
+  font-size: 14px;
+  white-space: nowrap;
+  animation: chip-bump 240ms cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+.chip-muted {
+  color: var(--muted);
+  font-style: italic;
+}
+
+@keyframes chip-bump {
+  from { transform: translateY(6px) scale(0.85); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+.seg-meta {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.seg-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.seg-fill {
+  width: 0;
+  height: 100%;
+  background: var(--accent);
+  transition: width 40ms linear;
 }
 
 @media (max-width: 860px) {

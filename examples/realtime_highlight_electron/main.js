@@ -142,16 +142,30 @@ function wordsFromCharAlignment(alignment) {
   return words.filter((item) => item.word && item.endMs >= item.startMs);
 }
 
+function charsFromCharAlignment(alignment) {
+  if (!alignment || !Array.isArray(alignment.chars)) return [];
+  const starts = alignment.charStartTimesMs || [];
+  const durations = alignment.charDurationsMs || [];
+  const items = [];
+  for (let i = 0; i < alignment.chars.length; i += 1) {
+    const char = String(alignment.chars[i]);
+    if (/\s/.test(char)) continue;
+    const startMs = Number(starts[i] || 0);
+    items.push({ word: char, startMs, endMs: startMs + Number(durations[i] || 0) });
+  }
+  return items.filter((item) => item.endMs >= item.startMs);
+}
+
+// A run's live controls are protocol-specific; each starter overwrites the
+// no-op defaults so the renderer can drive incremental/streaming sessions.
 function makeRun() {
   const run = {
     cancelled: false,
-    grpcCall: null,
-    websocket: null,
-    cancel() {
-      this.cancelled = true;
-      if (this.grpcCall) this.grpcCall.cancel();
-      if (this.websocket && this.websocket.readyState <= WebSocket.OPEN) this.websocket.close();
-    },
+    firstByteMs: null,
+    sendChunk() {},
+    force() {},
+    end() {},
+    cancel() {},
   };
   activeRun = run;
   return run;
@@ -175,45 +189,97 @@ function emitAudio(run, startedAt, audioBase64, alignments) {
   });
 }
 
-async function startGrpc(request) {
-  const run = makeRun();
-  const startedAt = performance.now();
-  const address = normalizeHostPort(request.host, request.port);
-  const client = new styletts.StyleTTSService(address, grpc.credentials.createInsecure());
-  const grpcRequest = {
-    text: request.text,
-    config: {
-      model_id: request.modelId,
-      voice_id: request.voiceId,
-      sample_rate_hz: SAMPLE_RATE,
-    },
-  };
+function grpcConfig(request) {
+  return { model_id: request.modelId, voice_id: request.voiceId, sample_rate_hz: SAMPLE_RATE };
+}
 
-  sendEvent({ type: "status", status: `Connecting to gRPC ${address}` });
-
-  return new Promise((resolve) => {
-    const stream = client.SynthesizeStream(grpcRequest);
-    run.grpcCall = stream;
-
-    stream.on("data", (response) => {
+function grpcReadSide(run, startedAt, resolve) {
+  return {
+    data(response) {
       const audioBase64 = Buffer.from(response.audio_data || []).toString("base64");
       emitAudio(run, startedAt, audioBase64, grpcAlignments(response));
-    });
-
-    stream.on("error", (error) => {
-      if (!run.cancelled) {
-        sendEvent({ type: "error", message: error.details || error.message || String(error) });
-      }
+    },
+    error(error) {
+      if (!run.cancelled) sendEvent({ type: "error", message: error.details || error.message || String(error) });
       clearRun(run);
       resolve({ ok: run.cancelled, cancelled: run.cancelled });
-    });
+    },
+    end() {
+      if (!run.cancelled) sendEvent({ type: "done" });
+      clearRun(run);
+      resolve({ ok: true });
+    },
+  };
+}
 
-    stream.on("end", () => {
+function startGrpcUnary(client, request, run, startedAt) {
+  sendEvent({ type: "status", status: "gRPC Synthesize (unary)" });
+  return new Promise((resolve) => {
+    const call = client.Synthesize({ text: request.text, config: grpcConfig(request) }, (error, response) => {
+      if (error) {
+        if (!run.cancelled) sendEvent({ type: "error", message: error.details || error.message || String(error) });
+        clearRun(run);
+        resolve({ ok: run.cancelled, cancelled: run.cancelled });
+        return;
+      }
+      const audioBase64 = Buffer.from(response.audio_data || []).toString("base64");
+      emitAudio(run, startedAt, audioBase64, grpcAlignments(response));
       if (!run.cancelled) sendEvent({ type: "done" });
       clearRun(run);
       resolve({ ok: true });
     });
+    run.cancel = () => { run.cancelled = true; call.cancel(); };
   });
+}
+
+function startGrpcStream(client, request, run, startedAt) {
+  sendEvent({ type: "status", status: "gRPC SynthesizeStream" });
+  return new Promise((resolve) => {
+    const stream = client.SynthesizeStream({ text: request.text, config: grpcConfig(request) });
+    run.cancel = () => { run.cancelled = true; stream.cancel(); };
+    const side = grpcReadSide(run, startedAt, resolve);
+    stream.on("data", side.data);
+    stream.on("error", side.error);
+    stream.on("end", side.end);
+  });
+}
+
+function startGrpcIncremental(client, request, run, startedAt) {
+  sendEvent({ type: "status", status: "gRPC Incremental — send chunks, Force to flush, End to finish" });
+  const call = client.SynthesizeIncremental();
+  call.write({ config: grpcConfig(request) });
+  if (request.text && request.text.trim()) call.write({ text_chunk: request.text });
+  run.sendChunk = (text) => { if (text && text.trim()) call.write({ text_chunk: text }); };
+  run.force = () => call.write({ force_synthesis: {} });
+  run.end = () => call.end();
+  run.cancel = () => {
+    run.cancelled = true;
+    try { call.write({ cancel: {} }); } catch (_) {}
+    call.cancel();
+  };
+  return new Promise((resolve) => {
+    const side = grpcReadSide(run, startedAt, resolve);
+    call.on("data", side.data);
+    call.on("error", side.error);
+    call.on("end", side.end);
+  });
+}
+
+// Unary returns the whole utterance in one message; the client is the receiver
+// and its default 4 MB cap rejects long audio ("Received message larger than max").
+const GRPC_CHANNEL_OPTIONS = {
+  "grpc.max_receive_message_length": 64 * 1024 * 1024,
+  "grpc.max_send_message_length": 64 * 1024 * 1024,
+};
+
+async function startGrpc(request) {
+  const run = makeRun();
+  const startedAt = performance.now();
+  const address = normalizeHostPort(request.host, request.port);
+  const client = new styletts.StyleTTSService(address, grpc.credentials.createInsecure(), GRPC_CHANNEL_OPTIONS);
+  if (request.mode === "unary") return startGrpcUnary(client, request, run, startedAt);
+  if (request.mode === "incremental") return startGrpcIncremental(client, request, run, startedAt);
+  return startGrpcStream(client, request, run, startedAt);
 }
 
 async function startWebSocket(request) {
@@ -225,17 +291,19 @@ async function startWebSocket(request) {
 
   return new Promise((resolve) => {
     const ws = new WebSocket(url, { maxPayload: 10 * 1024 * 1024 });
-    run.websocket = ws;
+    run.cancel = () => { run.cancelled = true; if (ws.readyState <= WebSocket.OPEN) ws.close(); };
+    run.sendChunk = (text) => { if (ws.readyState === WebSocket.OPEN && text && text.trim()) ws.send(JSON.stringify({ text })); };
+    run.force = () => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ text: "", try_trigger_generation: true })); };
+    run.end = () => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ text: "" })); };
 
     ws.on("open", () => {
       if (run.cancelled) return;
-      sendEvent({ type: "status", status: "Sending text" });
+      sendEvent({ type: "status", status: "WebSocket streaming — Send chunk, Force to flush, End to finish" });
       ws.send(JSON.stringify({
         text: request.text,
-        voice_settings: {},
-        generation_config: { chunk_length_schedule: CHUNK_SCHEDULE },
+        voice_settings: { alpha: request.alpha, beta: request.beta, speed: request.speed },
+        generation_config: { chunk_length_schedule: request.chunkSchedule || CHUNK_SCHEDULE },
       }));
-      ws.send(JSON.stringify({ text: "" }));
     });
 
     ws.on("message", (message) => {
@@ -258,7 +326,8 @@ async function startWebSocket(request) {
       }
       if (data.audio) {
         const alignment = data.normalizedAlignment || data.alignment;
-        emitAudio(run, startedAt, data.audio, wordsFromCharAlignment(alignment));
+        const toAlignments = request.granularity === "char" ? charsFromCharAlignment : wordsFromCharAlignment;
+        emitAudio(run, startedAt, data.audio, toAlignments(alignment));
       }
     });
 
@@ -278,6 +347,21 @@ ipcMain.handle("catalog:get", () => readModelCatalog());
 ipcMain.handle("synthesis:stop", () => {
   if (activeRun) activeRun.cancel();
   sendEvent({ type: "stopped" });
+  return { ok: true };
+});
+
+ipcMain.handle("synthesis:chunk", (_event, text) => {
+  if (activeRun) activeRun.sendChunk(text);
+  return { ok: true };
+});
+
+ipcMain.handle("synthesis:force", () => {
+  if (activeRun) activeRun.force();
+  return { ok: true };
+});
+
+ipcMain.handle("synthesis:end", () => {
+  if (activeRun) activeRun.end();
   return { ok: true };
 });
 
