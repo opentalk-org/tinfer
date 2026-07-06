@@ -1,6 +1,5 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("node:path");
-const fs = require("node:fs");
 const grpc = require("@grpc/grpc-js");
 const protoLoader = require("@grpc/proto-loader");
 const WebSocket = require("ws");
@@ -8,14 +7,6 @@ const WebSocket = require("ws");
 const SAMPLE_RATE = 24000;
 const OUTPUT_FORMAT = "pcm_24000";
 const CHUNK_SCHEDULE = [120, 160, 250, 290];
-const ROOT_DIR = path.resolve(__dirname, "../../..");
-const CONVERTED_MODELS_DIR = path.join(ROOT_DIR, "converted_models");
-
-const FALLBACK_CATALOG = [
-  { id: "agnieszka", voices: ["agnieszka-best"] },
-  { id: "magda", voices: ["magda_001"] },
-  { id: "olam", voices: ["ola"] },
-];
 
 const protoDefinition = protoLoader.loadSync(path.join(__dirname, "styletts.proto"), {
   keepCase: true,
@@ -50,29 +41,29 @@ function sendEvent(payload) {
   mainWindow.webContents.send("synthesis:event", payload);
 }
 
-function readModelCatalog() {
-  try {
-    return fs.readdirSync(CONVERTED_MODELS_DIR, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => {
-        const modelId = entry.name;
-        const voicesDir = path.join(CONVERTED_MODELS_DIR, modelId, "voices");
-        let voices = [];
-        try {
-          voices = fs.readdirSync(voicesDir)
-            .filter((name) => name.endsWith(".pth"))
-            .map((name) => path.basename(name, ".pth"))
-            .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-        } catch (_) {
-          voices = [];
-        }
-        return { id: modelId, voices };
-      })
-      .filter((model) => model.voices.length > 0)
-      .sort((a, b) => a.id.localeCompare(b.id));
-  } catch (_) {
-    return FALLBACK_CATALOG;
+function catalogFromLists(models, voices) {
+  const byModel = new Map(models.map((id) => [id, []]));
+  for (const voice of voices) {
+    if (byModel.has(voice.model_id)) byModel.get(voice.model_id).push(voice.voice_id);
   }
+  return [...byModel].map(([id, ids]) => ({ id, voices: ids.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })) }));
+}
+
+async function fetchHttpCatalog(host, port) {
+  const base = `http://${normalizeHostPort(host, port)}`;
+  const [modelsRes, voicesRes] = await Promise.all([fetch(`${base}/v1/models`), fetch(`${base}/v1/voices`)]);
+  if (!modelsRes.ok || !voicesRes.ok) throw new Error(`sync failed: models ${modelsRes.status}, voices ${voicesRes.status}`);
+  const { models } = await modelsRes.json();
+  const { voices } = await voicesRes.json();
+  return catalogFromLists(models, voices);
+}
+
+function fetchGrpcCatalog(address) {
+  const client = new styletts.StyleTTSService(address, grpc.credentials.createInsecure(), GRPC_CHANNEL_OPTIONS);
+  const call = (method, request) => new Promise((resolve, reject) =>
+    client[method](request, (error, response) => (error ? reject(error) : resolve(response))));
+  return Promise.all([call("ListModels", {}), call("ListVoices", {})])
+    .then(([models, voices]) => catalogFromLists(models.model_ids || [], voices.voices || []));
 }
 
 function normalizeHostPort(host, port) {
@@ -86,13 +77,14 @@ function normalizeHostPort(host, port) {
   return `${cleanHost}:${cleanPort}`;
 }
 
-function wsUrl(host, port, modelId, voiceId) {
+function wsUrl(host, port, modelId, voiceId, language) {
   const target = normalizeHostPort(host, port);
   const params = new URLSearchParams({
     model_id: modelId,
     output_format: OUTPUT_FORMAT,
     sync_alignment: "true",
   });
+  if (language) params.set("language_code", language);
   return `ws://${target}/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream-input?${params}`;
 }
 
@@ -190,7 +182,7 @@ function emitAudio(run, startedAt, audioBase64, alignments) {
 }
 
 function grpcConfig(request) {
-  return { model_id: request.modelId, voice_id: request.voiceId, sample_rate_hz: SAMPLE_RATE };
+  return { model_id: request.modelId, voice_id: request.voiceId, sample_rate_hz: SAMPLE_RATE, language: request.language || "" };
 }
 
 function grpcReadSide(run, startedAt, resolve) {
@@ -285,7 +277,7 @@ async function startGrpc(request) {
 async function startWebSocket(request) {
   const run = makeRun();
   const startedAt = performance.now();
-  const url = wsUrl(request.host, request.port, request.modelId, request.voiceId);
+  const url = wsUrl(request.host, request.port, request.modelId, request.voiceId, request.language);
 
   sendEvent({ type: "status", status: "Connecting to WebSocket" });
 
@@ -342,7 +334,10 @@ async function startWebSocket(request) {
   });
 }
 
-ipcMain.handle("catalog:get", () => readModelCatalog());
+ipcMain.handle("catalog:sync", (_event, { protocol, host, port }) => {
+  if (protocol === "websocket") return fetchHttpCatalog(host, port);
+  return fetchGrpcCatalog(normalizeHostPort(host, port));
+});
 
 ipcMain.handle("synthesis:stop", () => {
   if (activeRun) activeRun.cancel();

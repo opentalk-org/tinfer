@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("tinfer", {
-  getCatalog: () => ipcRenderer.invoke("catalog:get"),
+  syncCatalog: (target) => ipcRenderer.invoke("catalog:sync", target),
   startSynthesis: (request) => ipcRenderer.invoke("synthesis:start", request),
   stopSynthesis: () => ipcRenderer.invoke("synthesis:stop"),
   sendChunk: (text) => ipcRenderer.invoke("synthesis:chunk", text),

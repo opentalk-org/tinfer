@@ -3,9 +3,44 @@ syntax = "proto3";
 package styletts.v1;
 
 service StyleTTSService {
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
+  rpc ListVoices(ListVoicesRequest) returns (ListVoicesResponse);
   rpc Synthesize(SynthesizeRequest) returns (SynthesizeResponse);
   rpc SynthesizeStream(SynthesizeRequest) returns (stream SynthesizeResponse);
   rpc SynthesizeIncremental(stream IncrementalSynthesizeRequest) returns (stream SynthesizeResponse);
+}
+
+message HealthRequest {}
+
+enum HealthStatus {
+  HEALTH_STATUS_UNKNOWN = 0;
+  SERVING = 1;
+  NOT_SERVING = 2;
+}
+
+message HealthResponse {
+  bool ready = 1;
+  HealthStatus status = 2;
+}
+
+message ListModelsRequest {}
+
+message ListModelsResponse {
+  repeated string model_ids = 1;
+}
+
+message ListVoicesRequest {
+  string model_id = 1;
+}
+
+message VoiceInfo {
+  string model_id = 1;
+  string voice_id = 2;
+}
+
+message ListVoicesResponse {
+  repeated VoiceInfo voices = 1;
 }
 
 message SynthesizeRequest {
@@ -29,6 +64,7 @@ message SynthesisConfig {
   string model_id = 1;
   string voice_id = 2;
   int32 sample_rate_hz = 3;
+  string language = 4;
 }
 
 message SynthesizeResponse {

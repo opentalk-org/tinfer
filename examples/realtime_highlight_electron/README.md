@@ -17,7 +17,7 @@ npm start
 Defaults:
 
 - gRPC: `localhost:50051`
-- WebSocket: `localhost:8001`
+- WebSocket: `localhost:8002`
 - sample rate/output: `pcm_24000`
 
 The model/voice selectors are populated from `/workspace/converted_models`, with

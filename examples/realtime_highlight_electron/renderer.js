@@ -4,6 +4,8 @@ const hostEl = document.getElementById("host");
 const portEl = document.getElementById("port");
 const modelEl = document.getElementById("model");
 const voiceEl = document.getElementById("voice");
+const syncEl = document.getElementById("sync");
+const languageEl = document.getElementById("language");
 const granularityEl = document.getElementById("granularity");
 const alphaEl = document.getElementById("alpha");
 const betaEl = document.getElementById("beta");
@@ -402,7 +404,7 @@ async function enqueueAudio(payload) {
 }
 
 function populateCatalog(catalog) {
-  state.catalog = catalog.length ? catalog : [{ id: "magda", voices: ["magda_001"] }];
+  state.catalog = catalog;
   modelEl.textContent = "";
   for (const model of state.catalog) {
     const option = document.createElement("option");
@@ -410,20 +412,18 @@ function populateCatalog(catalog) {
     option.textContent = model.id;
     modelEl.appendChild(option);
   }
-  if (state.catalog.some((model) => model.id === "magda")) modelEl.value = "magda";
   populateVoices();
 }
 
 function populateVoices() {
-  const model = state.catalog.find((item) => item.id === modelEl.value) || state.catalog[0];
+  const model = state.catalog.find((item) => item.id === modelEl.value);
   voiceEl.textContent = "";
-  for (const voice of ["auto", ...model.voices]) {
+  for (const voice of ["auto", ...(model ? model.voices : [])]) {
     const option = document.createElement("option");
     option.value = voice;
     option.textContent = voice;
     voiceEl.appendChild(option);
   }
-  if (model.voices.includes("magda_001")) voiceEl.value = "magda_001";
 }
 
 function populateModes() {
@@ -454,8 +454,8 @@ function updateControls() {
 }
 
 function syncProtocolDefaults() {
-  if (protocolEl.value === "grpc" && portEl.value === "8001") portEl.value = "50051";
-  if (protocolEl.value === "websocket" && portEl.value === "50051") portEl.value = "8001";
+  if (protocolEl.value === "grpc" && portEl.value === "8002") portEl.value = "50051";
+  if (protocolEl.value === "websocket" && portEl.value === "50051") portEl.value = "8002";
   // gRPC only carries word-level timings, so char highlighting is WebSocket-only.
   granularityEl.disabled = protocolEl.value === "grpc";
   // Alpha/beta/speed ride in WebSocket voice_settings; the gRPC config has no field for them.
@@ -486,6 +486,7 @@ async function send() {
     port: portEl.value,
     modelId: modelEl.value,
     voiceId: voiceEl.value,
+    language: languageEl.value,
     granularity,
     alpha: Number(alphaEl.value),
     beta: Number(betaEl.value),
@@ -515,7 +516,22 @@ function sendChunk() {
   chunkEl.value = "";
 }
 
+async function sync() {
+  syncEl.disabled = true;
+  setStatus("Syncing");
+  try {
+    const catalog = await window.tinfer.syncCatalog({ protocol: protocolEl.value, host: hostEl.value, port: portEl.value });
+    populateCatalog(catalog);
+    setStatus(`Synced ${catalog.length} models`);
+  } catch (err) {
+    setStatus(err.message || "Sync failed", true);
+  } finally {
+    syncEl.disabled = false;
+  }
+}
+
 modelEl.addEventListener("change", populateVoices);
+syncEl.addEventListener("click", sync);
 protocolEl.addEventListener("change", () => {
   syncProtocolDefaults();
   populateModes();
@@ -569,6 +585,4 @@ window.tinfer.onSynthesisEvent(async (event) => {
   }
 });
 
-window.tinfer.getCatalog().then(populateCatalog).catch(() => {
-  populateCatalog([{ id: "magda", voices: ["magda_001"] }]);
-});
+populateVoices();
