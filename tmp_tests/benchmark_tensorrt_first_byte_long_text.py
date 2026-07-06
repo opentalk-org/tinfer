@@ -55,8 +55,7 @@ def build_params(first_chunk_chars: int) -> dict:
     return {
         "alignment_type": AlignmentType.NONE,
         "chunk_length_schedule": [first_chunk_chars] * 4,
-        "min_chunk_length_schedule": [max(1, int(first_chunk_chars * 0.62))] * 4,
-        "tts_params": {"diffusion_steps": 10, "embedding_scale": 1.0},
+        "tts_params": {"diffusion_steps": 5, "embedding_scale": 1.0},
     }
 
 
@@ -85,7 +84,7 @@ async def measure(async_tts: AsyncStreamingTTS, *, users: int, repeats: int, par
         wall_start = monotonic()
         latencies = await asyncio.gather(
             *(first_byte(async_tts, user_index=i, repeat_index=repeat, params=params) for i in range(users))
-        )no j
+        )
         wall_times.append(monotonic() - wall_start)
         all_latencies.extend(latencies)
         await asyncio.sleep(0.15)
@@ -131,7 +130,6 @@ async def run(args: argparse.Namespace) -> None:
         compile_models=False,
         default_alignment_type=AlignmentType.NONE,
         default_chunk_schedule=[args.first_chunk_chars] * 4,
-        default_min_chunk_schedule=[max(1, int(args.first_chunk_chars * 0.62))] * 4,
         default_timeout_ms=80.0,
     )
     tts = StreamingTTS(config)
@@ -140,7 +138,7 @@ async def run(args: argparse.Namespace) -> None:
         print("loading_model", MODEL_PATH, flush=True)
         tts.load_model(MODEL_ID, str(MODEL_PATH), voices_folder=str(VOICES_FOLDER))
         print("warmup_start", flush=True)
-        tts.warmup([MODEL_ID], [VOICE_ID], num_warmup_tasks=min(4, max(args.users)))
+        await tts.async_warmup([MODEL_ID], [VOICE_ID], num_warmup_tasks=min(4, max(args.users)))
         async_tts = AsyncStreamingTTS(tts)
         await first_byte(async_tts, user_index=0, repeat_index=-1, params=params)
         print("warmup_done", flush=True)
@@ -177,7 +175,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Benchmark TensorRT first-byte latency with long text.")
     parser.add_argument("--users", type=int, nargs="+", default=[1, 2, 4, 8, 16])
     parser.add_argument("--repeats", type=int, default=3)
-    parser.add_argument("--first-chunk-chars", type=int, default=420)
+    parser.add_argument("--first-chunk-chars", type=int, default=120)
     return parser.parse_args()
 
 

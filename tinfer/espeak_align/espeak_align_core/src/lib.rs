@@ -1,5 +1,5 @@
-use thiserror::Error;
 use crate::phonemizer_pool::Phonemizer;
+use thiserror::Error;
 
 mod align;
 mod char_match;

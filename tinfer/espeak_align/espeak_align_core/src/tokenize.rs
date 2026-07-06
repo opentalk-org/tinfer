@@ -1,5 +1,5 @@
-use crate::utf8::utf8_next;
 use crate::char_match;
+use crate::utf8::utf8_next;
 
 pub fn tokenize(text: &str) -> Vec<String> {
     let bytes = text.as_bytes();
@@ -124,4 +124,3 @@ pub fn tokenize(text: &str) -> Vec<String> {
 
     tokens
 }
-

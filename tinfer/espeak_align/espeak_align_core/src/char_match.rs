@@ -62,4 +62,3 @@ pub fn is_word_cp(cp: u32) -> bool {
     }
     true
 }
-

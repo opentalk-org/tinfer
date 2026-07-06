@@ -3,8 +3,8 @@ use crate::tokenize::tokenize;
 use crate::utf8::utf8_next;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::thread;
 
 const SPACE_CP: u32 = 0x20;
@@ -23,7 +23,11 @@ fn is_space_byte(c: u8) -> bool {
 }
 
 fn byte_to_char_index(text: &str, byte_index: usize) -> usize {
-    text[..byte_index.min(text.len())].chars().count()
+    let mut byte_index = byte_index.min(text.len());
+    while byte_index > 0 && !text.is_char_boundary(byte_index) {
+        byte_index -= 1;
+    }
+    text[..byte_index].chars().count()
 }
 
 pub fn add_spans(text: &str, tokens: &[String], phonemes: &[String]) -> Vec<AlignmentSpan> {
@@ -31,29 +35,7 @@ pub fn add_spans(text: &str, tokens: &[String], phonemes: &[String]) -> Vec<Alig
     let mut cursor = 0usize;
 
     for (idx, token) in tokens.iter().enumerate() {
-        if token.is_empty() {
-            let char_cursor = byte_to_char_index(text, cursor);
-            spans.push(AlignmentSpan {
-                token: token.clone(),
-                phonemes: phonemes.get(idx).cloned().unwrap_or_default(),
-                start: char_cursor,
-                end: char_cursor,
-            });
-            continue;
-        }
-
-        let search_start = cursor.min(text.len());
-        let Some(rel_start) = text[search_start..].find(token) else {
-            let char_cursor = byte_to_char_index(text, search_start);
-            spans.push(AlignmentSpan {
-                token: token.clone(),
-                phonemes: phonemes.get(idx).cloned().unwrap_or_default(),
-                start: char_cursor,
-                end: char_cursor,
-            });
-            continue;
-        };
-        let start_byte = search_start + rel_start;
+        let start_byte = cursor.min(text.len());
         let end_byte = (start_byte + token.len()).min(text.len());
         cursor = end_byte;
 
@@ -192,7 +174,15 @@ fn build_transitions(
             let to_phon = if let Some(v) = phoneme_cache.get(&ngram_text) {
                 v.clone()
             } else {
-                let ph = phonemizer.text_to_phonemes(&ngram_text).unwrap_or_default();
+                let ph = match phonemizer.text_to_phonemes(&ngram_text) {
+                    Ok(value) => value,
+                    Err(err) => {
+                        eprintln!(
+                            "ERROR espeak_align_ngram_phonemize_failed text={ngram_text:?} error={err}"
+                        );
+                        String::new()
+                    }
+                };
                 phoneme_cache.insert(ngram_text.clone(), ph.clone());
                 ph
             };
@@ -243,6 +233,25 @@ fn split_phoneme_words(s: &str) -> Vec<String> {
     s.split_whitespace().map(|w| w.to_owned()).collect()
 }
 
+fn join_phoneme_words(words: &[String], start: usize, end: usize) -> String {
+    if start >= end || start >= words.len() {
+        return String::new();
+    }
+    words[start..end.min(words.len())].join(" ")
+}
+
+fn phoneme_segment_mismatch_cost(candidate: &str, target: &str) -> f64 {
+    let candidate = candidate.trim();
+    let target = target.trim();
+    if candidate.is_empty() && target.is_empty() {
+        return 0.0;
+    }
+    if candidate.is_empty() || target.is_empty() {
+        return 25.0;
+    }
+    8.0 * (1.0 - levenshtein_ratio(candidate, target))
+}
+
 #[derive(Clone, Copy)]
 struct BeamKey {
     cost: f64,
@@ -255,7 +264,71 @@ struct Node {
     word_i: u32,
     phon_i: u32,
     prev: Option<usize>,
-    tr: Option<Transition>,
+    step: Option<PathStep>,
+}
+
+#[derive(Clone)]
+struct PathStep {
+    word_start: usize,
+    word_end: usize,
+    phon_start: usize,
+    phon_end: usize,
+}
+
+fn push_unique_len(out: &mut Vec<u32>, value: u32, max_value: u32) {
+    if value <= max_value && !out.contains(&value) {
+        out.push(value);
+    }
+}
+
+fn phoneme_consumption_candidates(tr: &Transition, remaining: u32, is_last_step: bool) -> Vec<u32> {
+    if tr._type == TransitionType::Silent {
+        return vec![0];
+    }
+
+    let mut out: Vec<u32> = Vec::new();
+    let base = tr.phon_len.max(0) as u32;
+    push_unique_len(&mut out, base.saturating_sub(1), remaining);
+    push_unique_len(&mut out, base, remaining);
+    push_unique_len(&mut out, base.saturating_add(1), remaining);
+    if base == 0 && remaining > 0 {
+        push_unique_len(&mut out, 1, remaining);
+    }
+    if is_last_step {
+        push_unique_len(&mut out, remaining, remaining);
+    }
+    if out.is_empty() {
+        out.push(0);
+    }
+    out
+}
+
+fn seed_complete_cover_path(
+    nodes: &mut Vec<Node>,
+    words_len: usize,
+    phon_words_len: usize,
+) -> usize {
+    let mut prev = 0usize;
+    let mut prev_phon = 0usize;
+    for word_idx in 0..words_len {
+        let next_phon = ((word_idx + 1) * phon_words_len + words_len / 2) / words_len;
+        let node = nodes.len();
+        nodes.push(Node {
+            cost: 1_000_000.0 + word_idx as f64,
+            word_i: (word_idx + 1) as u32,
+            phon_i: next_phon as u32,
+            prev: Some(prev),
+            step: Some(PathStep {
+                word_start: word_idx,
+                word_end: word_idx + 1,
+                phon_start: prev_phon,
+                phon_end: next_phon,
+            }),
+        });
+        prev = node;
+        prev_phon = next_phon;
+    }
+    prev
 }
 
 // Beam search over chunks with top-k beams. (instead of dp viterbi because to slow and scales O(n^2) in memory)
@@ -264,7 +337,7 @@ fn beam_search_chunk(
     chunk_phonemes: &str,
     transitions: &[[Vec<Transition>; 3]],
     beam_width: usize,
-) -> Vec<Transition> {
+) -> Vec<PathStep> {
     if words.is_empty() {
         return Vec::new();
     }
@@ -276,7 +349,7 @@ fn beam_search_chunk(
         word_i: 0,
         phon_i: 0,
         prev: None,
-        tr: None,
+        step: None,
     });
 
     let mut beams: Vec<BeamKey> = vec![BeamKey {
@@ -288,7 +361,11 @@ fn beam_search_chunk(
 
     let mut best_cost_for_state: HashMap<u64, f64> = HashMap::new();
     best_cost_for_state.insert(((0u64) << 32) | 0u64, 0.0);
-    let mut best_complete: Option<usize> = None;
+    let mut best_complete: Option<usize> = Some(seed_complete_cover_path(
+        &mut nodes,
+        words.len(),
+        remaining_phon_words.len(),
+    ));
 
     while !beams.is_empty() {
         beams.sort_by(|a, b| {
@@ -307,9 +384,7 @@ fn beam_search_chunk(
                 (n.cost, n.word_i, n.phon_i)
             };
 
-            if (word_i as usize) >= words.len()
-                && (phon_i as usize) >= remaining_phon_words.len()
-            {
+            if (word_i as usize) >= words.len() && (phon_i as usize) >= remaining_phon_words.len() {
                 if best_complete
                     .map(|bi| cost < nodes[bi].cost)
                     .unwrap_or(true)
@@ -328,38 +403,59 @@ fn beam_search_chunk(
             for gram_len in 1..=max_gram {
                 for tr in &transitions[wi][gram_len - 1] {
                     let new_word_i = word_i + gram_len as u32;
-                    let mut new_phon_i = phon_i;
-                    if tr.phon_len != 0 {
-                        new_phon_i += tr.phon_len as u32;
-                        if (new_phon_i as usize) > remaining_phon_words.len() {
-                            continue;
-                        }
-                    }
+                    let remaining = remaining_phon_words.len() as u32 - phon_i;
+                    let is_last_step = (new_word_i as usize) == words.len();
+                    for consume_len in phoneme_consumption_candidates(tr, remaining, is_last_step) {
+                        let new_phon_i = phon_i + consume_len;
 
-                    let new_cost = cost + tr.base_cost + 0.8 * ((tr.gram_len - 1) as f64);
-                    let state_key =
-                        ((new_word_i as u64) << 32) | (new_phon_i as u64);
-                    if let Some(best) = best_cost_for_state.get(&state_key) {
-                        if *best <= new_cost {
-                            continue;
+                        let target_segment = join_phoneme_words(
+                            &remaining_phon_words,
+                            phon_i as usize,
+                            new_phon_i as usize,
+                        );
+                        let target_cost = phoneme_segment_mismatch_cost(&tr.to, &target_segment);
+                        let len_delta = (consume_len as i32 - tr.phon_len).abs() as f64;
+                        let new_cost = cost
+                            + tr.base_cost
+                            + target_cost
+                            + len_delta
+                            + 0.8 * ((tr.gram_len - 1) as f64);
+                        let state_key = ((new_word_i as u64) << 32) | (new_phon_i as u64);
+                        if let Some(best) = best_cost_for_state.get(&state_key) {
+                            if *best <= new_cost {
+                                continue;
+                            }
                         }
-                    }
-                    best_cost_for_state.insert(state_key, new_cost);
+                        best_cost_for_state.insert(state_key, new_cost);
 
-                    let new_node = nodes.len();
-                    nodes.push(Node {
-                        cost: new_cost,
-                        word_i: new_word_i,
-                        phon_i: new_phon_i,
-                        prev: Some(node),
-                        tr: Some(tr.clone()),
-                    });
-                    new_beams.push(BeamKey {
-                        cost: new_cost,
-                        order: next_order,
-                        node: new_node,
-                    });
-                    next_order += 1;
+                        let new_node = nodes.len();
+                        nodes.push(Node {
+                            cost: new_cost,
+                            word_i: new_word_i,
+                            phon_i: new_phon_i,
+                            prev: Some(node),
+                            step: Some(PathStep {
+                                word_start: word_i as usize,
+                                word_end: new_word_i as usize,
+                                phon_start: phon_i as usize,
+                                phon_end: new_phon_i as usize,
+                            }),
+                        });
+                        if (new_word_i as usize) == words.len()
+                            && (new_phon_i as usize) == remaining_phon_words.len()
+                            && best_complete
+                                .map(|bi| new_cost < nodes[bi].cost)
+                                .unwrap_or(true)
+                        {
+                            best_complete = Some(new_node);
+                        }
+                        new_beams.push(BeamKey {
+                            cost: new_cost,
+                            order: next_order,
+                            node: new_node,
+                        });
+                        next_order += 1;
+                    }
                 }
             }
         }
@@ -369,13 +465,13 @@ fn beam_search_chunk(
     let Some(mut node) = best_complete else {
         return Vec::new();
     };
-    let mut out: Vec<Transition> = Vec::new();
+    let mut out: Vec<PathStep> = Vec::new();
     loop {
         let n = &nodes[node];
-        let Some(tr) = n.tr.clone() else {
+        let Some(step) = n.step.clone() else {
             break;
         };
-        out.push(tr);
+        out.push(step);
         let Some(prev) = n.prev else {
             break;
         };
@@ -383,6 +479,19 @@ fn beam_search_chunk(
     }
     out.reverse();
     out
+}
+
+fn strip_ascii_ws(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut i = 0usize;
+    let mut j = bytes.len();
+    while i < j && is_space_byte(bytes[i]) {
+        i += 1;
+    }
+    while j > i && is_space_byte(bytes[j - 1]) {
+        j -= 1;
+    }
+    s[i..j].to_owned()
 }
 
 fn count_excluding_space_char(s: &str) -> usize {
@@ -415,19 +524,6 @@ fn round_half_to_even(x: f64) -> i32 {
     }
 }
 
-fn strip_ascii_ws(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut i = 0usize;
-    let mut j = bytes.len();
-    while i < j && is_space_byte(bytes[i]) {
-        i += 1;
-    }
-    while j > i && is_space_byte(bytes[j - 1]) {
-        j -= 1;
-    }
-    s[i..j].to_owned()
-}
-
 fn rstrip_len_ascii_ws(s: &str) -> usize {
     let bytes = s.as_bytes();
     let mut j = bytes.len();
@@ -453,6 +549,11 @@ fn distribute_step_phonemes_over_words(words: &[String], phoneme_string: &str) -
     let phonemes = strip_ascii_ws(phoneme_string);
     if phonemes.is_empty() {
         return vec![String::new(); words.len()];
+    }
+
+    let phoneme_words = split_phoneme_words(&phonemes);
+    if phoneme_words.len() == words.len() {
+        return phoneme_words;
     }
 
     let mut total_chars = 0usize;
@@ -530,55 +631,36 @@ fn token_lead_tail(tok: &str) -> (String, String, String) {
 fn align_chunk(phonemizer: &dyn Phonemizer, chunk: &str) -> (Vec<String>, Vec<String>) {
     let words = tokenize(chunk);
     if words.is_empty() {
-        return (Vec::new(), Vec::new());
+        if chunk.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+        return (vec![chunk.to_owned()], vec![String::new()]);
     }
 
-    let chunk_phon = phonemizer.text_to_phonemes(chunk).unwrap_or_default();
+    let chunk_phon = match phonemizer.text_to_phonemes(chunk) {
+        Ok(value) => value,
+        Err(err) => {
+            eprintln!("ERROR espeak_align_chunk_phonemize_failed text={chunk:?} error={err}");
+            String::new()
+        }
+    };
     let mut phoneme_cache: HashMap<String, String> = HashMap::new();
     let trans = build_transitions(&words, phonemizer, &mut phoneme_cache);
     let path = beam_search_chunk(&words, &chunk_phon, &trans, BEAM_WIDTH);
 
-    if path.is_empty() {
-        let per_word_ph = distribute_step_phonemes_over_words(&words, &chunk_phon);
-        return (words, per_word_ph);
-    }
-
     let mut word_phonemes: Vec<String> = Vec::new();
-    let mut widx = 0usize;
-    for tr in &path {
-        let step_words = &words[widx..widx + (tr.gram_len as usize)];
-        widx += tr.gram_len as usize;
-        let per_word = if tr.to.is_empty() {
+    let raw_phoneme_words = split_phoneme_words(&chunk_phon);
+    for step in &path {
+        let step_words = &words[step.word_start..step.word_end];
+        let target_segment = join_phoneme_words(&raw_phoneme_words, step.phon_start, step.phon_end);
+        let per_word = if target_segment.is_empty() {
             vec![String::new(); step_words.len()]
         } else {
-            distribute_step_phonemes_over_words(step_words, &tr.to)
+            distribute_step_phonemes_over_words(step_words, &target_segment)
         };
         word_phonemes.extend(per_word);
     }
-    while word_phonemes.len() < words.len() {
-        word_phonemes.push(String::new());
-    }
-
-    let mut i = 0usize;
-    while i < words.len() {
-        if !word_phonemes[i].is_empty() {
-            let mut j = i + 1;
-            while j < words.len() && word_phonemes[j].is_empty() {
-                j += 1;
-            }
-            if j > i + 1 {
-                let segment_words = &words[i..j];
-                let segment_ph = word_phonemes[i].clone();
-                let redistributed = distribute_step_phonemes_over_words(segment_words, &segment_ph);
-                for k in 0..redistributed.len() {
-                    word_phonemes[i + k] = redistributed[k].clone();
-                }
-            }
-            i = j;
-        } else {
-            i += 1;
-        }
-    }
+    debug_assert_eq!(word_phonemes.len(), words.len());
 
     (words, word_phonemes)
 }
@@ -712,16 +794,18 @@ pub fn align_texts_batch_with_threads(
             for _ in 0..worker_threads {
                 let next = &next;
                 let chunk_results = &chunk_results;
-                s.spawn(|| loop {
-                    let ji = next.fetch_add(1, AtomicOrdering::Relaxed);
-                    if ji >= jobs.len() {
-                        break;
-                    }
-                    let (ti, ci) = jobs[ji];
-                    let chunk = &plans[ti].chunks[ci];
-                    let out = align_chunk(phonemizer, chunk);
-                    if let Ok(mut r) = chunk_results.lock() {
-                        r[ji] = Some(out);
+                s.spawn(|| {
+                    loop {
+                        let ji = next.fetch_add(1, AtomicOrdering::Relaxed);
+                        if ji >= jobs.len() {
+                            break;
+                        }
+                        let (ti, ci) = jobs[ji];
+                        let chunk = &plans[ti].chunks[ci];
+                        let out = align_chunk(phonemizer, chunk);
+                        if let Ok(mut r) = chunk_results.lock() {
+                            r[ji] = Some(out);
+                        }
                     }
                 });
             }
@@ -774,14 +858,16 @@ fn align_chunks_parallel(
                 let chunks = chunks;
                 let next = &next;
                 let results = &results;
-                s.spawn(move || loop {
-                    let idx = next.fetch_add(1, AtomicOrdering::Relaxed);
-                    if idx >= chunks.len() {
-                        break;
-                    }
-                    let out = align_chunk(phonemizer, &chunks[idx]);
-                    if let Ok(mut r) = results.lock() {
-                        r[idx] = Some(out);
+                s.spawn(move || {
+                    loop {
+                        let idx = next.fetch_add(1, AtomicOrdering::Relaxed);
+                        if idx >= chunks.len() {
+                            break;
+                        }
+                        let out = align_chunk(phonemizer, &chunks[idx]);
+                        if let Ok(mut r) = results.lock() {
+                            r[idx] = Some(out);
+                        }
                     }
                 });
             }

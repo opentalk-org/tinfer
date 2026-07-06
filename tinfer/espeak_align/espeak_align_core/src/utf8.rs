@@ -7,7 +7,8 @@ pub fn utf8_len(first: u8) -> usize {
         3
     } else if (first & 0xF8) == 0xF0 {
         4
-    } else { // should not happen
+    } else {
+        // should not happen
         1
     }
 }
@@ -19,7 +20,8 @@ pub fn utf8_next(bytes: &[u8], i: usize) -> (u32, usize) {
 
     let c = bytes[i];
     let len = utf8_len(c);
-    if i + len > bytes.len() { // invalid UTF-8 sequence
+    if i + len > bytes.len() {
+        // invalid UTF-8 sequence
         return (c as u32, i + 1);
     }
 
@@ -31,7 +33,8 @@ pub fn utf8_next(bytes: &[u8], i: usize) -> (u32, usize) {
                 | (((bytes[i + 1] & 0x3F) as u32) << 6)
                 | ((bytes[i + 2] & 0x3F) as u32)
         }
-        _ => { // 4 bytes
+        _ => {
+            // 4 bytes
             (((c & 0x07) as u32) << 18)
                 | (((bytes[i + 1] & 0x3F) as u32) << 12)
                 | (((bytes[i + 2] & 0x3F) as u32) << 6)
@@ -41,4 +44,3 @@ pub fn utf8_next(bytes: &[u8], i: usize) -> (u32, usize) {
 
     (cp, i + len)
 }
-

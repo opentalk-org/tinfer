@@ -25,7 +25,8 @@ fn main() {
     }
 
     if !host.is_empty() || !target.is_empty() {
-        println!("cargo:warning=Unknown target/host for espeak-ng linking (TARGET={target}, HOST={host}, CARGO_CFG_TARGET_OS={cargo_cfg_target_os}).");
+        println!(
+            "cargo:warning=Unknown target/host for espeak-ng linking (TARGET={target}, HOST={host}, CARGO_CFG_TARGET_OS={cargo_cfg_target_os})."
+        );
     }
 }
-

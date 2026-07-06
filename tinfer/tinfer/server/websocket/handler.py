@@ -184,6 +184,13 @@ class WebSocketHandler:
         params["target_sample_rate"] = sample_rate
         params["target_encoding"] = self.output_format
         params["alignment_type"] = AlignmentType.CHAR if self.sync_alignment else AlignmentType.NONE
+        tts_params = {
+            key: float(voice_settings[key])
+            for key in ("speed", "alpha", "beta")
+            if key in voice_settings and voice_settings[key] is not None
+        }
+        if tts_params:
+            params["tts_params"] = tts_params
         return params
 
     async def _stream_audio(self) -> None:

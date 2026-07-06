@@ -92,7 +92,6 @@ async def run(args: argparse.Namespace) -> None:
     params = {
         "alignment_type": AlignmentType.NONE,
         "chunk_length_schedule": [args.first_chunk_chars] * 4,
-        "min_chunk_length_schedule": [max(1, int(args.first_chunk_chars * 0.62))] * 4,
         "max_phoneme_tokens": args.max_phoneme_tokens,
         "tts_params": {"diffusion_steps": 10, "embedding_scale": 1.0},
     }
@@ -101,7 +100,6 @@ async def run(args: argparse.Namespace) -> None:
         compile_models=False,
         default_alignment_type=AlignmentType.NONE,
         default_chunk_schedule=[args.first_chunk_chars] * 4,
-        default_min_chunk_schedule=[max(1, int(args.first_chunk_chars * 0.62))] * 4,
     )
     tts = StreamingTTS(config)
     rows = []
