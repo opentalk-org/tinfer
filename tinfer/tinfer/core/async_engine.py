@@ -31,6 +31,12 @@ class AsyncStreamingTTS:
     def unload_model(self, model_id: str):
         self.engine.unload_model(model_id)
 
+    def get_model_ids(self) -> list[str]:
+        return self.engine.get_model_ids()
+
+    def get_voice_ids(self, model_id: str) -> list[str]:
+        return self.engine.get_voice_ids(model_id)
+
     def create_stream(self, model_id: str, voice_id: str, params: StreamParams | dict[str, Any]):
         return self.engine.create_stream(model_id, voice_id, params)
 

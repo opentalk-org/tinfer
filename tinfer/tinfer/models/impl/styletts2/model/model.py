@@ -123,6 +123,8 @@ class StyleTTS2(ChunkedModel):
         self._model_config: ModelConfig | None = None
         self._sampler = None
         self._phonemizer: StyleTTS2Phonemizer | None = None
+        self._phonemizers: dict[str, StyleTTS2Phonemizer] = {}
+        self._default_language: str = "pl"
         self._text_processing_pipeline = None
         self._voice_encoder: Any | None = None
         self._alignment_parser = StyleTTS2AlignmentParser()
@@ -141,12 +143,11 @@ class StyleTTS2(ChunkedModel):
         self.max_batch_size = config.get("max_batch_size", 10)
         
         load_style_encoder = config.get("load_style_encoder", True)
-        language = config.get("language", "pl")
-        
+
         self._model = Munch({key: self._model[key].to(self._device) for key in self._model})
         _ = [self._model[key].eval() for key in self._model]
-        
-        self._phonemizer = StyleTTS2Phonemizer(language=language)
+
+        self._phonemizer = self._get_phonemizer(self._default_language)
         self._text_processing_pipeline = config.get("text_processing_pipeline")
         
         if load_style_encoder:
@@ -460,6 +461,12 @@ class StyleTTS2(ChunkedModel):
         
         return prev_s_list
     
+    def _get_phonemizer(self, language: str | None) -> StyleTTS2Phonemizer:
+        lang = language or self._default_language
+        if lang not in self._phonemizers:
+            self._phonemizers[lang] = StyleTTS2Phonemizer(language=lang)
+        return self._phonemizers[lang]
+
     def _process_texts(self, texts: list[str], alignment_type: AlignmentType, styletts2_params_list: list[StyleTTS2Params]) -> tuple[list[list[int]], list[list[int]], list, list[str]]:
         all_tokens = []
         all_tokens_for_alignment = []
@@ -468,15 +475,16 @@ class StyleTTS2(ChunkedModel):
         
         for i, text in enumerate(texts):
             styletts2_params = styletts2_params_list[i]
-            
+            phonemizer = self._get_phonemizer(styletts2_params.language)
+
             if self._text_processing_pipeline is not None:
                 text = self._text_processing_pipeline.process(text)
 
             if not styletts2_params.phonemized:
-                processed_text, word_phoneme_data = self._phonemizer.process_text_with_original_spans(text)
-                tokens_without_bos = self._phonemizer.tokenize(processed_text)
+                processed_text, word_phoneme_data = phonemizer.process_text_with_original_spans(text)
+                tokens_without_bos = phonemizer.tokenize(processed_text)
             else:
-                tokens_without_bos = self._phonemizer.tokenize(text)
+                tokens_without_bos = phonemizer.tokenize(text)
                 word_phoneme_data = None
 
             styletts2_params.speed = baseline_speed_corrected_for_request(
@@ -859,13 +867,12 @@ class StyleTTS2(ChunkedModel):
         return results
 
     def _text_token_count(self, text: str, styletts2_params: StyleTTS2Params) -> int:
-        if self._phonemizer is None:
-            raise RuntimeError("Phonemizer not initialized")
+        phonemizer = self._get_phonemizer(styletts2_params.language)
         if styletts2_params.phonemized:
-            tokens = self._phonemizer.tokenize(text)
+            tokens = phonemizer.tokenize(text)
         else:
-            processed_text, _ = self._phonemizer.process_text_with_original_spans(text)
-            tokens = self._phonemizer.tokenize(processed_text)
+            processed_text, _ = phonemizer.process_text_with_original_spans(text)
+            tokens = phonemizer.tokenize(processed_text)
         return len(tokens) + 1
 
     def _split_text_to_token_windows(self, text: str, styletts2_params: StyleTTS2Params) -> list[str]:

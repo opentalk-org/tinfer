@@ -36,6 +36,12 @@ class WebSocketServer:
         self._shutdown_event = asyncio.Event()
         self._app = web.Application()
         self._app.router.add_get("/health", self._handle_health)
+        self._app.router.add_get("/health/live", self._handle_live)
+        self._app.router.add_get("/health/ready", self._handle_ready)
+        self._app.router.add_get("/livez", self._handle_live)
+        self._app.router.add_get("/readyz", self._handle_ready)
+        self._app.router.add_get("/v1/models", self._handle_list_models)
+        self._app.router.add_get("/v1/voices", self._handle_list_voices)
         self._app.router.add_get("/v1/text-to-speech/{voice_id}/stream-input", self._handle_websocket)
         self._runner = web.AppRunner(self._app)
         await self._runner.setup()
@@ -79,6 +85,36 @@ class WebSocketServer:
             },
             status=200 if ready else 503,
         )
+
+    async def _handle_live(self, request: web.Request) -> web.Response:
+        return web.json_response(
+            {"live": self.health.live, "status": self.health.status},
+            status=200 if self.health.live else 503,
+        )
+
+    async def _handle_ready(self, request: web.Request) -> web.Response:
+        return web.json_response(
+            {"ready": self.health.ready, "status": self.health.status},
+            status=200 if self.health.ready else 503,
+        )
+
+    async def _handle_list_models(self, request: web.Request) -> web.Response:
+        model_ids = self.tts.get_model_ids()
+        log.info("websocket_list_models", model_count=len(model_ids))
+        return web.json_response({"models": model_ids})
+
+    async def _handle_list_voices(self, request: web.Request) -> web.Response:
+        model_id = request.query.get("model_id")
+        model_ids = [model_id] if model_id else self.tts.get_model_ids()
+        voices = []
+        for mid in model_ids:
+            try:
+                voice_ids = self.tts.get_voice_ids(mid)
+            except ValueError as e:
+                return web.json_response({"error": str(e)}, status=404)
+            voices.extend({"model_id": mid, "voice_id": vid} for vid in voice_ids)
+        log.info("websocket_list_voices", model_count=len(model_ids), voice_count=len(voices))
+        return web.json_response({"voices": voices})
 
     async def _handle_websocket(self, request: web.Request) -> WebSocketResponse:
         if not await self.health.try_acquire_connection():

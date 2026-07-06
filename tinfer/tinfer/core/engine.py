@@ -174,6 +174,12 @@ class StreamingTTS:
         self.executor.unload_model(model_id)
         log.info("engine_model_unloaded", model_id=model_id)
 
+    def get_model_ids(self) -> list[str]:
+        return self.executor.get_model_ids()
+
+    def get_voice_ids(self, model_id: str) -> list[str]:
+        return self.executor.get_voice_ids(model_id)
+
     def run(self):
         self._stop_timeout = False
         self.timeout_thread = threading.Thread(target=self.run_timeout_loop, daemon=True)

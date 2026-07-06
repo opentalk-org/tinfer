@@ -17,6 +17,10 @@ class HealthState:
         return self.warmup_complete and not self.draining and not self.stopped
 
     @property
+    def live(self) -> bool:
+        return not self.stopped
+
+    @property
     def accepting_connections(self) -> bool:
         return self.ready
 

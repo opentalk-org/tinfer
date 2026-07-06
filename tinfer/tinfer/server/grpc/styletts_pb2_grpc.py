@@ -44,6 +44,16 @@ class StyleTTSServiceStub(object):
                 request_serializer=styletts__pb2.HealthRequest.SerializeToString,
                 response_deserializer=styletts__pb2.HealthResponse.FromString,
                 _registered_method=True)
+        self.ListModels = channel.unary_unary(
+                '/styletts.v1.StyleTTSService/ListModels',
+                request_serializer=styletts__pb2.ListModelsRequest.SerializeToString,
+                response_deserializer=styletts__pb2.ListModelsResponse.FromString,
+                _registered_method=True)
+        self.ListVoices = channel.unary_unary(
+                '/styletts.v1.StyleTTSService/ListVoices',
+                request_serializer=styletts__pb2.ListVoicesRequest.SerializeToString,
+                response_deserializer=styletts__pb2.ListVoicesResponse.FromString,
+                _registered_method=True)
         self.Synthesize = channel.unary_unary(
                 '/styletts.v1.StyleTTSService/Synthesize',
                 request_serializer=styletts__pb2.SynthesizeRequest.SerializeToString,
@@ -65,6 +75,18 @@ class StyleTTSServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
     def Health(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListModels(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListVoices(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -102,6 +124,16 @@ def add_StyleTTSServiceServicer_to_server(servicer, server):
                     servicer.Health,
                     request_deserializer=styletts__pb2.HealthRequest.FromString,
                     response_serializer=styletts__pb2.HealthResponse.SerializeToString,
+            ),
+            'ListModels': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListModels,
+                    request_deserializer=styletts__pb2.ListModelsRequest.FromString,
+                    response_serializer=styletts__pb2.ListModelsResponse.SerializeToString,
+            ),
+            'ListVoices': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListVoices,
+                    request_deserializer=styletts__pb2.ListVoicesRequest.FromString,
+                    response_serializer=styletts__pb2.ListVoicesResponse.SerializeToString,
             ),
             'Synthesize': grpc.unary_unary_rpc_method_handler(
                     servicer.Synthesize,
@@ -146,6 +178,60 @@ class StyleTTSService(object):
             '/styletts.v1.StyleTTSService/Health',
             styletts__pb2.HealthRequest.SerializeToString,
             styletts__pb2.HealthResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListModels(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/styletts.v1.StyleTTSService/ListModels',
+            styletts__pb2.ListModelsRequest.SerializeToString,
+            styletts__pb2.ListModelsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListVoices(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/styletts.v1.StyleTTSService/ListVoices',
+            styletts__pb2.ListVoicesRequest.SerializeToString,
+            styletts__pb2.ListVoicesResponse.FromString,
             options,
             channel_credentials,
             insecure,
