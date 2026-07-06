@@ -200,10 +200,6 @@ def export_decoder_dynamic_onnx(
     remove_decoder_weight_norm(decoder)
 
     f0_frames = opt_asr_frames * 2
-    # Derive the harmonic-source tensor from the decoder itself so the dummy input
-    # matches whichever vocoder is in use (istftnet: 22-channel spectrogram,
-    # hifigan: single-channel time-domain source). The sine-source generation runs
-    # in float32 internally, so compute har before any half conversion, then cast.
     f0_f32 = torch.rand(opt_batch_size, f0_frames, device=device, dtype=torch.float32) * 120.0 + 80.0
     with torch.no_grad():
         har = decoder.generator._preprocess_f0(f0_f32)
