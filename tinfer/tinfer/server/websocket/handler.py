@@ -189,6 +189,8 @@ class WebSocketHandler:
             for key in ("speed", "alpha", "beta")
             if key in voice_settings and voice_settings[key] is not None
         }
+        if self.language_code:
+            tts_params["language"] = self.language_code
         if tts_params:
             params["tts_params"] = tts_params
         return params

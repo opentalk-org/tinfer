@@ -5,6 +5,7 @@ from tinfer.process.shared_memory import SharedMemoryManager
 from tinfer.process.protocol import MessageType, IPCProtocol
 import torch
 import threading
+from pathlib import Path
 from typing import Any
 from collections import defaultdict
 import time
@@ -225,6 +226,15 @@ class ProcessExecutor(BaseExecutor):
 
     def get_model_ids(self) -> list[str]:
         return list(self._model_to_worker.keys())
+
+    def get_voice_ids(self, model_id: str) -> list[str]:
+        if model_id not in self._model_to_worker:
+            raise ValueError(f"Model {model_id} not found")
+        worker_id = self._model_to_worker[model_id]
+        voices_folder = self._load_args_per_worker[worker_id][model_id]["voices_folder"]
+        if voices_folder is None:
+            return []
+        return sorted(p.stem for p in Path(voices_folder).glob("*.pth"))
 
     def run(self) -> None:
         self._start_callback_thread()

@@ -16,14 +16,32 @@ log = get_logger(__name__)
 class GrpcHealthService:
     _SERVING_RESPONSE = b"\x08\x01"
     _NOT_SERVING_RESPONSE = b"\x08\x02"
+    _LIVENESS_SERVICES = frozenset({"", "liveness", "live"})
 
     def __init__(self, health: HealthState) -> None:
         self.health = health
 
+    @staticmethod
+    def _parse_service(request: bytes) -> str:
+        if not request or request[0] != 0x0A:
+            return ""
+        idx, length, shift = 1, 0, 0
+        while idx < len(request):
+            byte = request[idx]
+            idx += 1
+            length |= (byte & 0x7F) << shift
+            if not (byte & 0x80):
+                break
+            shift += 7
+        return request[idx:idx + length].decode("utf-8", "replace")
+
     def Check(self, request: bytes, context: grpc.ServicerContext) -> bytes:
-        if self.health.ready:
-            return self._SERVING_RESPONSE
-        return self._NOT_SERVING_RESPONSE
+        service = self._parse_service(request)
+        if service in self._LIVENESS_SERVICES:
+            serving = self.health.live
+        else:
+            serving = self.health.ready
+        return self._SERVING_RESPONSE if serving else self._NOT_SERVING_RESPONSE
 
     def register(self, server: grpc.aio.Server) -> None:
         rpc_method_handlers = {

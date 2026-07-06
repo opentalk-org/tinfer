@@ -15,8 +15,8 @@ class StyleTTS2VoiceEncoder(VoiceEncoder):
         self.mean = mean
         self.std = std
         self.to_mel = torchaudio.transforms.MelSpectrogram(
-            sample_rate=sample_rate,
             n_fft=2048,
+            win_length=1200,
             hop_length=300,
             n_mels=80,
         )
