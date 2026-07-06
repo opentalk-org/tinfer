@@ -89,6 +89,28 @@ def update_model_tensorrt_metadata(model_path: str | Path, metadata: dict) -> No
     torch.save(saved, model_path)
 
 
+def _derive_har_profile(model, device: str = "cuda") -> dict:
+    generator = model._model.decoder.generator
+
+    def probe(asr_frames: int) -> tuple[int, int]:
+        f0 = torch.rand(1, asr_frames * 2, device=device) * 120.0 + 80.0
+        with torch.no_grad():
+            har = generator._preprocess_f0(f0)
+        return int(har.shape[1]), int(har.shape[2])
+
+    channels_a, frames_a = probe(128)
+    channels_b, frames_b = probe(256)
+    if channels_a != channels_b:
+        raise RuntimeError("Inconsistent har channel count while probing decoder")
+    multiplier = (frames_b - frames_a) // (256 - 128)
+    offset = frames_a - 128 * multiplier
+    return {
+        "har_channels": channels_a,
+        "har_frame_multiplier": multiplier,
+        "har_frame_offset": offset,
+    }
+
+
 def _load_compile_dependencies():
     model_module = importlib.import_module("tinfer.models.impl.styletts2.model.model")
     export_module = importlib.import_module("tinfer.models.impl.styletts2.model.modules.tensorrt_export")
@@ -127,6 +149,12 @@ def compile_converted_model(
     model.load(str(model_path), device="cuda", compile_model=False, load_style_encoder=False)
 
     if "decoder" in components:
+        # Derive the harmonic-source (har) shape relationship from the loaded decoder so
+        # the TensorRT optimization profile matches whichever vocoder is in use
+        # (istftnet: 22-ch spectrogram, har_frames = asr*120+1; hifigan: 1-ch source,
+        # har_frames = asr*600). Probing keeps this correct across decoder configs.
+        har_profile = _derive_har_profile(model, device="cuda")
+        print(f"har profile: {har_profile}")
         spec = tensorrt_runtime.DynamicDecoderTRTEngineSpec()
         onnx_path = engine_dir / spec.onnx_name
         engine_path = engine_dir / spec.file_name
@@ -151,6 +179,7 @@ def compile_converted_model(
                 opt_asr_frames=opt_asr_frames,
                 max_asr_frames=max_asr_frames,
                 workspace_bytes=workspace_bytes,
+                **har_profile,
             )
         else:
             print(f"skip existing {engine_path}")

@@ -22,6 +22,10 @@ class StreamingTTSConfig:
     compile_models: bool = True
     runtime_engine: Literal["torch", "tensorrt"] | None = "tensorrt"
 
+    # Which converted_models subdirectories to load. None (or empty) loads every
+    # model found in TINFER_MODELS_DIR; a list restricts loading to those names.
+    models: list[str] | None = None
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> "StreamingTTSConfig":
         path = Path(path)

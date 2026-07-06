@@ -83,8 +83,8 @@ class StyleTTS2TensorRTAccelerator:
         if model is None or model_config is None:
             return
         decoder_type = getattr(model_config.decoder, "type", None) if hasattr(model_config, "decoder") else None
-        if decoder_type != "istftnet":
-            raise RuntimeError(f"TensorRT decoder mode supports istftnet decoder only, got {decoder_type!r}")
+        if decoder_type not in ("istftnet", "hifigan"):
+            raise RuntimeError(f"TensorRT decoder mode supports istftnet/hifigan decoders only, got {decoder_type!r}")
         decoder_config = trt_config["decoder"]
         self._engine_dir = str(trt_config["engine_dir"])
         self._max_batch = int(decoder_config["max_batch"])

@@ -53,6 +53,9 @@ def decoder_dynamic_profile_shapes(
     min_asr_frames: int,
     opt_asr_frames: int,
     max_asr_frames: int,
+    har_channels: int = 22,
+    har_frame_multiplier: int = 120,
+    har_frame_offset: int = 1,
 ) -> dict[str, tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]]]:
     def decoder_shapes(batch: int, asr_frames: int) -> dict[str, tuple[int, ...]]:
         f0_frames = asr_frames * 2
@@ -61,7 +64,7 @@ def decoder_dynamic_profile_shapes(
             "f0": (batch, f0_frames),
             "noise": (batch, f0_frames),
             "style": (batch, 128),
-            "har": (batch, 22, asr_frames * 120 + 1),
+            "har": (batch, har_channels, asr_frames * har_frame_multiplier + har_frame_offset),
         }
 
     min_shapes = decoder_shapes(min_batch, min_asr_frames)

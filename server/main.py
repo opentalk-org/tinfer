@@ -59,21 +59,33 @@ def load_models(warmup: bool = True):
     
     config = _load_tts_config()
     tts = StreamingTTS(config)
-    
+
     model_ids = []
     voice_ids = []
-    
-    for model_dir in converted_models_dir.iterdir():
+
+    selected = config.models or None
+    if selected is not None:
+        available = {p.name for p in converted_models_dir.iterdir() if p.is_dir()}
+        for name in selected:
+            if name not in available:
+                log.warning("model_requested_but_missing", model_id=name, path=str(converted_models_dir / name))
+        log.info("models_selected", selected=list(selected))
+
+    for model_dir in sorted(converted_models_dir.iterdir()):
         if not model_dir.is_dir():
             continue
-        
+
+        if selected is not None and model_dir.name not in selected:
+            log.info("model_not_selected", model_id=model_dir.name)
+            continue
+
         model_path = model_dir / "model.pth"
         voices_folder = model_dir / "voices"
-        
+
         if not model_path.exists():
             log.warning("model_skipped", model_id=model_dir.name, reason="model_path_missing", path=str(model_path))
             continue
-        
+
         model_id = model_dir.name
         voices_folder_str = str(voices_folder) if voices_folder.exists() else None
         

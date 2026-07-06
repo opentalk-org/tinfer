@@ -772,8 +772,12 @@ class StyleTTS2(ChunkedModel):
         results = []
         hop_length = self._model_config.preprocess.hop_length
         decoder_hop_length = hop_length
-        if getattr(self._model_config.decoder, "type", None) == "istftnet":
+        decoder_type_for_hop = getattr(self._model_config.decoder, "type", None)
+        if decoder_type_for_hop == "istftnet":
             decoder_hop_length = int(np.prod(self._model_config.decoder.upsample_rates) * self._model_config.decoder.gen_istft_hop_size * 2)
+        elif decoder_type_for_hop == "hifigan":
+            # backbone upsamples mel frames x2, generator upsamples by prod(upsample_rates)
+            decoder_hop_length = int(np.prod(self._model_config.decoder.upsample_rates) * 2)
         max_mel_frames = max(all_actual_lengths) if all_actual_lengths else 0
         out_cpu = out[:batch_size].detach().cpu().numpy()
         ref_s_batch_cpu = ref_s_batch[:batch_size].detach().cpu().numpy()

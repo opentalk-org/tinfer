@@ -198,16 +198,24 @@ def export_decoder_dynamic_onnx(
 
     decoder = decoder.eval().to(device)
     remove_decoder_weight_norm(decoder)
+
+    f0_frames = opt_asr_frames * 2
+    # Derive the harmonic-source tensor from the decoder itself so the dummy input
+    # matches whichever vocoder is in use (istftnet: 22-channel spectrogram,
+    # hifigan: single-channel time-domain source). The sine-source generation runs
+    # in float32 internally, so compute har before any half conversion, then cast.
+    f0_f32 = torch.rand(opt_batch_size, f0_frames, device=device, dtype=torch.float32) * 120.0 + 80.0
+    with torch.no_grad():
+        har = decoder.generator._preprocess_f0(f0_f32)
+
     if dtype == torch.float16:
         decoder = decoder.half()
 
-    f0_frames = opt_asr_frames * 2
-    har_frames = opt_asr_frames * 120 + 1
     asr = torch.randn(opt_batch_size, 512, opt_asr_frames, device=device, dtype=dtype)
     f0 = torch.rand(opt_batch_size, f0_frames, device=device, dtype=dtype) * 120.0 + 80.0
     noise = torch.randn(opt_batch_size, f0_frames, device=device, dtype=dtype)
     style = torch.randn(opt_batch_size, 128, device=device, dtype=dtype)
-    har = torch.randn(opt_batch_size, 22, har_frames, device=device, dtype=dtype)
+    har = har.to(dtype)
 
     wrapper = DecoderTRTExportModule(decoder).eval()
     old_export_flag = os.environ.get("TINFER_TRT_EXPORT")
@@ -342,6 +350,9 @@ def build_decoder_dynamic_engine_from_onnx(
     min_asr_frames: int = 128,
     opt_asr_frames: int = 256,
     max_asr_frames: int = 512,
+    har_channels: int = 22,
+    har_frame_multiplier: int = 120,
+    har_frame_offset: int = 1,
     workspace_bytes: int = 4 << 30,
 ) -> Path:
     profile_shapes = decoder_dynamic_profile_shapes(
@@ -351,6 +362,9 @@ def build_decoder_dynamic_engine_from_onnx(
         min_asr_frames=min_asr_frames,
         opt_asr_frames=opt_asr_frames,
         max_asr_frames=max_asr_frames,
+        har_channels=har_channels,
+        har_frame_multiplier=har_frame_multiplier,
+        har_frame_offset=har_frame_offset,
     )
     return _build_engine_from_onnx(
         onnx_path,

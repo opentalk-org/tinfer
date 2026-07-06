@@ -119,3 +119,7 @@ class Decoder(DecoderBackbone):
         x, F0_curve = super().forward(asr, F0_curve, N, s)
         x = self.generator(x, s, F0_curve)
         return x
+
+    def forward_with_har(self, asr, F0_curve, N, s, har):
+        x, _ = super().forward(asr, F0_curve, N, s)
+        return self.generator._forward_compiled(x, s, har)
