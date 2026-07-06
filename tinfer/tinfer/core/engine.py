@@ -23,7 +23,6 @@ log = get_logger(__name__)
 
 _STREAM_PARAM_KEYS = frozenset({
     "chunk_length_schedule",
-    "min_chunk_length_schedule",
     "min_chars_trigger",
     "timeout_trigger_ms",
     "alignment_type",
@@ -253,7 +252,6 @@ class StreamingTTS:
             "tts_params": tts_params,
             "nonce": str(uuid.uuid4()),
             "chunk_length_schedule": self.config.default_chunk_schedule.copy(),
-            "min_chunk_length_schedule": self.config.default_min_chunk_schedule.copy(),
             "min_chars_trigger": self.config.min_chars_trigger,
             "timeout_trigger_ms": self.config.default_timeout_ms,
             "alignment_type": self.config.default_alignment_type,
@@ -265,7 +263,7 @@ class StreamingTTS:
                 continue
             if key in params:
                 val = params[key]
-                if key in ("chunk_length_schedule", "min_chunk_length_schedule") and isinstance(val, list):
+                if key == "chunk_length_schedule" and isinstance(val, list):
                     val = list(val)
                 request_kwargs[key] = val
 
@@ -285,7 +283,6 @@ class StreamingTTS:
         request = self._requests[request_id]
         request.text_buffer = ""
         request.text_committed_pos = 0
-        request.speed_reference_text = None
         request.force_next_generation = False
         request.pending_chunks = 0
         request.nonce = str(uuid.uuid4())
@@ -339,7 +336,7 @@ class StreamingTTS:
                     target_sample_rate=target_sample_rate,
                     target_encoding=target_encoding,
                     first_audio_latency_started_at=request.first_text_at if current_chunk_index == 0 else None,
-                    source_text=request.speed_reference_text if request.speed_reference_text is not None else request.text_buffer,
+                    source_text=request.text_buffer,
                 )
                 to_send.append(item)
                 if request.pending_chunks == 0:

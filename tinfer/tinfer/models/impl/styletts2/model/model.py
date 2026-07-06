@@ -403,26 +403,27 @@ class StyleTTS2(ChunkedModel):
             
             if context.get("reset_voice", False):
                 context.pop("previous_style_vector", None)
-                context.pop("updated_voice", None)
                 context["reset_voice"] = False
             
             voice_id = context.get("voice_id")
             if voice_id == "auto":
                 voice_entry = self._voice_cache.pick_auto(texts[i])
-                base_voice_tensor = voice_entry.tensor
-                base_voice_np = base_voice_tensor.cpu().numpy() if isinstance(base_voice_tensor, torch.Tensor) else base_voice_tensor
-                context["base_voice"] = base_voice_np.copy() if isinstance(base_voice_np, np.ndarray) else base_voice_np
-                context["auto_voice_id"] = voice_entry.voice_id
-                context["auto_voice_source"] = voice_entry.source_file
+                if context.get("base_voice_id") != voice_entry.voice_id:
+                    base_voice_np = voice_entry.tensor.cpu().numpy() if isinstance(voice_entry.tensor, torch.Tensor) else voice_entry.tensor
+                    context["base_voice"] = base_voice_np.copy() if isinstance(base_voice_np, np.ndarray) else base_voice_np
+                    context["base_voice_id"] = voice_entry.voice_id
+                    context["auto_voice_id"] = voice_entry.voice_id
+                    context["auto_voice_source"] = voice_entry.source_file
                 continue
 
-            if voice_id is not None and "base_voice" not in context:
+            if voice_id is not None and context.get("base_voice_id") != voice_id:
                 if not self.has_voice(voice_id):
                     raise ValueError(f"Voice ID '{voice_id}' not found in cache. Available voices: {self.list_voices()}")
                 
                 base_voice_tensor = self.get_voice(voice_id)
                 base_voice_np = base_voice_tensor.cpu().numpy() if isinstance(base_voice_tensor, torch.Tensor) else base_voice_tensor
                 context["base_voice"] = base_voice_np.copy() if isinstance(base_voice_np, np.ndarray) else base_voice_np
+                context["base_voice_id"] = voice_id
     
     def _prepare_voice_tensors(self, contexts: list[dict[str, Any] | None], batch_size: int) -> torch.Tensor:
         ref_s_list = []
@@ -431,12 +432,8 @@ class StyleTTS2(ChunkedModel):
             
             if "base_voice" in context:
                 ref_s = context["base_voice"]
-            elif "style_vector" in context:
-                ref_s = context["style_vector"]
-            elif "updated_voice" in context:
-                ref_s = context["updated_voice"]
             else:
-                raise ValueError(f"Voice conditioning required for StyleTTS2 (request {i}). Provide voice_id, updated_voice, base_voice, or style_vector in context.")
+                raise ValueError(f"Voice conditioning required for StyleTTS2 (request {i}). Provide voice_id or base_voice in context.")
             
             ref_s = torch.from_numpy(ref_s).to(self._device)
             if ref_s.dim() == 1:
@@ -482,6 +479,10 @@ class StyleTTS2(ChunkedModel):
                 tokens_without_bos = self._phonemizer.tokenize(text)
                 word_phoneme_data = None
 
+            styletts2_params.speed = baseline_speed_corrected_for_request(
+                styletts2_params.speed,
+                len(tokens_without_bos),
+            )
             tokens_for_alignment = tokens_without_bos.copy()
             tokens = tokens_without_bos.copy()
             tokens.insert(0, 0)
@@ -828,6 +829,7 @@ class StyleTTS2(ChunkedModel):
                     final_alignments = phoneme_alignments
 
             if target_alignment_type in (AlignmentType.CHAR, AlignmentType.WORD):
+                assert "".join(item.item for item in final_alignments) == original_texts[b]
                 log.debug(
                     "alignment_processed",
                     text=original_texts[b],
@@ -835,16 +837,15 @@ class StyleTTS2(ChunkedModel):
                     alignments=_alignment_items_for_debug_log(final_alignments),
                 )
             
-            updated_style_vector = s_pred_cpu[b] if use_diffusion and s_pred_cpu is not None else ref_s_batch_cpu[b]
+            current_style_vector = s_pred_cpu[b] if use_diffusion and s_pred_cpu is not None else ref_s_batch_cpu[b]
             
             if b < len(contexts) and contexts[b] is not None:
-                contexts[b]["previous_style_vector"] = updated_style_vector.copy()
-                contexts[b]["updated_voice"] = updated_style_vector.copy()
+                contexts[b]["previous_style_vector"] = current_style_vector.copy()
             
             metadata = {
                 "text": original_texts[b],
                 "sample_rate": sample_rate,
-                "style_vector": updated_style_vector,
+                "style_vector": current_style_vector,
                 "alignment_type": alignment_type.value,
                 "word_alignments": final_alignments,
             }
@@ -1036,13 +1037,15 @@ class StyleTTS2(ChunkedModel):
             for i in range(batch_size):
                 valid_params = {f.name: params[i][f.name] for f in fields(StyleTTS2Params) if f.name in params[i]}
                 styletts2_params = StyleTTS2Params(**valid_params)
-                styletts2_params.speed = baseline_speed_corrected_for_request(
-                    styletts2_params.speed,
-                    texts[i],
-                    request_metadata[i]["source_text"] if "source_text" in request_metadata[i] else None,
-                    request_metadata[i]["chunk_index"],
-                )
                 styletts2_params_list.append(styletts2_params)
+                metadata = request_metadata[i] if i < len(request_metadata) else {}
+                log.debug(
+                    "styletts2_inference_params",
+                    request_id=metadata.get("request_id"),
+                    chunk_index=metadata.get("chunk_index"),
+                    alpha=styletts2_params.alpha,
+                    beta=styletts2_params.beta,
+                )
 
             if self._phonemizer is None:
                 raise RuntimeError("Phonemizer not initialized")

@@ -7,7 +7,6 @@ from tinfer.core.request import AlignmentType
 class StreamingTTSConfig:
 
     default_chunk_schedule: list[int] = field(default_factory=lambda: [80, 160, 250, 290])
-    default_min_chunk_schedule: list[int] = field(default_factory=lambda: [50, 80, 120, 150])
     default_alignment_type: AlignmentType = AlignmentType.WORD
     min_chars_trigger: int = 10
     default_timeout_ms: float = 80.0

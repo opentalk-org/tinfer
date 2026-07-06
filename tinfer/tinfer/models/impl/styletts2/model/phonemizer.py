@@ -55,7 +55,7 @@ class StyleTTS2Phonemizer:
         if not re.search(r"[\.\?!]$", text):
             text = f"{text}."
         text = re.sub(re.compile(r'[„“”«»"]'), '"', text)
-        text = re.sub(re.compile("[-—−‒‒–]"), "—", text)
+        text = re.sub(re.compile("[-—−‒–]"), "—", text)
         text = re.sub(re.compile(r"[\(\)\*\/\[\]]"), "", text)
         return " ".join(self.t_tokenizer.tokenize(text))
 

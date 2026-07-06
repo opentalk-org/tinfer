@@ -1,6 +1,6 @@
+use espeak_align_core;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use espeak_align_core as espeak_align_core;
 
 #[pyclass]
 struct Engine {
@@ -76,7 +76,10 @@ impl Engine {
 }
 
 #[pyfunction]
-fn split_by_punctuation(text: &str, punctuation: &str) -> PyResult<(Vec<String>, Vec<(i32, String)>)> {
+fn split_by_punctuation(
+    text: &str,
+    punctuation: &str,
+) -> PyResult<(Vec<String>, Vec<(i32, String)>)> {
     espeak_align_core::split_by_punctuation(text, punctuation)
         .map_err(|e| pyo3::exceptions::PyNotImplementedError::new_err(e.to_string()))
 }

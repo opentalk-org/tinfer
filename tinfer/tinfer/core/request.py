@@ -5,7 +5,6 @@ from typing import Any, TypedDict
 import queue
 from enum import Enum
 from time import monotonic
-import re
 
 import numpy as np
 from tinfer.utils.audio_encoder import AudioFormat
@@ -20,7 +19,6 @@ class AlignmentType(Enum):
 
 class StreamParams(TypedDict, total=False):
     chunk_length_schedule: list[int]
-    min_chunk_length_schedule: list[int]
     min_chars_trigger: int
     timeout_trigger_ms: float
     alignment_type: AlignmentType
@@ -98,13 +96,11 @@ class TTSRequest:
 
     text_buffer: str = ""
     text_committed_pos: int = 0
-    speed_reference_text: str | None = None
 
     chunker_state: dict[str, Any] = field(default_factory=dict)
     stream_state: dict[str, Any] = field(default_factory=dict)
 
     chunk_length_schedule: list[int] = field(default_factory=lambda: [120, 160, 250, 290])
-    min_chunk_length_schedule: list[int] = field(default_factory=lambda: [50, 80, 120, 150])
     min_chars_trigger: int = 10
     timeout_trigger_ms: float = 80.0
     last_commit_time: float | None = None
@@ -130,8 +126,6 @@ class TTSRequest:
         if self.first_text_at is None:
             self.first_text_at = monotonic()
         self.text_buffer += text
-        if self.speed_reference_text is None and baseline_speed_clean_length(self.text_buffer) >= 250:
-            self.speed_reference_text = self.text_buffer
 
     def get_pending_text(self) -> str:
         return self.text_buffer[self.text_committed_pos:]
@@ -170,8 +164,3 @@ class TTSRequest:
 
     def set_state(self, state: dict[str, Any]) -> None:
         self.stream_state = state
-
-
-def baseline_speed_clean_length(text: str) -> int:
-    normalized = re.sub(r"\s\s*", " ", text.lower())
-    return len(re.sub(r"[^a-ząęćłóśźżń ]", "", normalized))

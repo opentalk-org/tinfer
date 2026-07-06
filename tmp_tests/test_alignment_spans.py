@@ -102,7 +102,6 @@ class AlignmentSpanTests(unittest.TestCase):
             model_id="styletts2",
             voice_id="voice",
             chunk_length_schedule=[50],
-            min_chunk_length_schedule=[10],
             timeout_trigger_ms=0,
         )
         request.append_text(text)

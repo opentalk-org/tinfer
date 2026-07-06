@@ -1,5 +1,5 @@
-use crate::{AlignrustError, EngineConfig};
 use crate::espeak::EspeakPhonemizer;
+use crate::{AlignrustError, EngineConfig};
 use libc::{c_int, pid_t};
 use std::fs::File;
 use std::io::{Read, Write};
@@ -73,26 +73,27 @@ impl Phonemizer for ForkedEspeakPool {
             .len()
             .try_into()
             .map_err(|_| AlignrustError::Message("input too large".to_owned()))?;
-        io.write.write_all(&len.to_le_bytes()).map_err(|e| {
-            AlignrustError::Message(format!("worker write failed: {e}"))
-        })?;
-        io.write.write_all(bytes).map_err(|e| {
-            AlignrustError::Message(format!("worker write failed: {e}"))
-        })?;
-        io.write.flush().map_err(|e| {
-            AlignrustError::Message(format!("worker flush failed: {e}"))
-        })?;
+        io.write
+            .write_all(&len.to_le_bytes())
+            .map_err(|e| AlignrustError::Message(format!("worker write failed: {e}")))?;
+        io.write
+            .write_all(bytes)
+            .map_err(|e| AlignrustError::Message(format!("worker write failed: {e}")))?;
+        io.write
+            .flush()
+            .map_err(|e| AlignrustError::Message(format!("worker flush failed: {e}")))?;
 
         let mut len_buf = [0u8; 4];
-        io.read.read_exact(&mut len_buf).map_err(|e| {
-            AlignrustError::Message(format!("worker read failed: {e}"))
-        })?;
+        io.read
+            .read_exact(&mut len_buf)
+            .map_err(|e| AlignrustError::Message(format!("worker read failed: {e}")))?;
         let out_len = u32::from_le_bytes(len_buf) as usize;
         let mut out = vec![0u8; out_len];
-        io.read.read_exact(&mut out).map_err(|e| {
-            AlignrustError::Message(format!("worker read failed: {e}"))
-        })?;
-        String::from_utf8(out).map_err(|_| AlignrustError::Message("worker returned non-utf8".to_owned()))
+        io.read
+            .read_exact(&mut out)
+            .map_err(|e| AlignrustError::Message(format!("worker read failed: {e}")))?;
+        String::from_utf8(out)
+            .map_err(|_| AlignrustError::Message("worker returned non-utf8".to_owned()))
     }
 }
 
@@ -166,7 +167,13 @@ fn spawn_worker(cfg: &EngineConfig) -> Result<Worker, AlignrustError> {
                 Ok(s) => s,
                 Err(_) => "",
             };
-            let out = phon.text_to_phonemes(text).unwrap_or_default();
+            let out = match phon.text_to_phonemes(text) {
+                Ok(value) => value,
+                Err(err) => {
+                    eprintln!("ERROR espeak_worker_phonemize_failed text={text:?} error={err}");
+                    String::new()
+                }
+            };
             let out_bytes = out.as_bytes();
             let out_len: u32 = match out_bytes.len().try_into() {
                 Ok(v) => v,

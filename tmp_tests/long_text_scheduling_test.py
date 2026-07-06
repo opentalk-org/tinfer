@@ -34,7 +34,6 @@ def run_chunker_probe() -> None:
         model_id=MODEL_ID,
         voice_id=VOICE_ID,
         chunk_length_schedule=[80, 160, 250, 290],
-        min_chunk_length_schedule=[50, 80, 120, 150],
         timeout_trigger_ms=0,
         alignment_type=AlignmentType.NONE,
     )
@@ -63,7 +62,6 @@ def run_chunker_probe() -> None:
         model_id=MODEL_ID,
         voice_id=VOICE_ID,
         chunk_length_schedule=[80, 160, 250, 290],
-        min_chunk_length_schedule=[50, 80, 120, 150],
         timeout_trigger_ms=60_000,
         alignment_type=AlignmentType.NONE,
     )

@@ -1,6 +1,6 @@
 from pathlib import Path
 from dataclasses import dataclass
-import re
+import unicodedata
 
 import torch
 
@@ -46,18 +46,12 @@ class VoiceCache:
             self._cache[voice_id] = entry
 
     def pick_auto(self, text: str) -> VoiceEntry:
-        text = depol_text(text)
-        last_punct = text[-1]
-        if last_punct != "." and last_punct != "?":
-            last_punct = "."
+        last_punct = terminal_punctuation(text)
         lens = text_len(text)
-        candidates = [
-            entry
-            for entry in self._cache.values()
-            if entry.text and depol_text(entry.text).strip() and depol_text(entry.text).strip()[-1] == last_punct
-        ]
+        entries_with_text = [entry for entry in self._cache.values() if entry.text]
+        candidates = [entry for entry in entries_with_text if terminal_punctuation(entry.text or "") == last_punct]
         if not candidates:
-            candidates = [entry for entry in self._cache.values() if entry.text]
+            candidates = entries_with_text
         if not candidates:
             raise ValueError("voice_id='auto' requires voice metadata with text")
 
@@ -85,35 +79,46 @@ class VoiceCache:
         raise ValueError(f"Extracted voice data from {voice_path} must be a torch.Tensor or metadata dict, got {type(voice_data)}")
 
 
-def depol_text(text: str) -> str:
-    text = re.sub(r"[^a-z ąęśćółńżź\.,!\?]", "", text.lower()).strip()
-    text = re.sub(r"ą", "a", text)
-    text = re.sub(r"ę", "e", text)
-    text = re.sub(r"ś", "s", text)
-    text = re.sub(r"ć", "c", text)
-    text = re.sub(r"ó", "o", text)
-    text = re.sub(r"ł", "l", text)
-    text = re.sub(r"ń", "n", text)
-    text = re.sub(r"ż", "z", text)
-    text = re.sub(r"ź", "z", text)
-    return text
+def normalize_text(text: str) -> str:
+    return unicodedata.normalize("NFKC", text).casefold()
+
+
+def terminal_punctuation(text: str) -> str:
+    stripped = normalize_text(text).strip()
+    for char in reversed(stripped):
+        if char == "?":
+            return "?"
+        if char in ".!":
+            return "."
+        if not char.isspace():
+            return "."
+    return "."
 
 
 def cleanup(text: str) -> str:
-    text = re.sub(r"\s\s*", " ", text.lower())
-    return re.sub(r"[^a-ząęćłóśźżń ]", "", text)
+    normalized = normalize_text(text)
+    return "".join(char for char in normalized if not char.isspace())
 
 
 def text_len(text: str) -> VoiceLength:
-    chars = [char for char in cleanup(text)]
-    return VoiceLength(words=len(text.split(" ")), chars=len(chars))
+    normalized = normalize_text(text)
+    word_count = 0
+    in_word = False
+    for char in normalized:
+        if char.isalnum():
+            if not in_word:
+                word_count += 1
+                in_word = True
+        else:
+            in_word = False
+    return VoiceLength(words=word_count, chars=len(cleanup(normalized)))
 
 
 def voice_length(value: dict[str, int]) -> VoiceLength:
     return VoiceLength(words=int(value["words"]), chars=int(value["chars"]))
 
 
-def voice_distance(entry: VoiceEntry, lens: VoiceLength) -> int:
+def voice_distance(entry: VoiceEntry, lens: VoiceLength) -> tuple[int, int]:
     assert entry.text is not None
-    entry_len = entry.length if entry.length is not None else text_len(depol_text(entry.text))
-    return abs(entry_len.words - lens.words + entry_len.chars - lens.chars)
+    entry_len = entry.length if entry.length is not None else text_len(entry.text)
+    return abs(entry_len.words - lens.words), abs(entry_len.chars - lens.chars)

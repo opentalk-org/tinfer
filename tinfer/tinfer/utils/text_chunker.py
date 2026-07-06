@@ -1,29 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
 from time import monotonic
 
 import pysbd
 
 from tinfer.core.request import TTSRequest
 
-BASELINE_MIN_SENTENCE_SPLIT = 120
-
-
-@dataclass(frozen=True)
-class TextSpan:
-    start: int
-    end: int
-    text: str
-
-    def text_from(self, source: str) -> str:
-        return self.text
-
 
 class TextChunker:
-    def __init__(self, language: str = "pl", min_sentence_split: int = BASELINE_MIN_SENTENCE_SPLIT) -> None:
+    def __init__(self, language: str = "pl") -> None:
         self._segmenter = pysbd.Segmenter(language=language, clean=False)
-        self._min_sentence_split = min_sentence_split
 
     def get_chunks(self, request: TTSRequest, single_chunk: bool = False):
         now = monotonic()
@@ -32,114 +19,190 @@ class TextChunker:
         if not request.should_trigger_now(now):
             return []
 
-        current_chunk_index = request.chunker_state["chunk_index"] if "chunk_index" in request.chunker_state else 0
-        spans = self.split_text_if_needed(pending_text, request, request.text_committed_pos)
-        if not spans:
+        current_chunk_index = request.chunker_state.get("chunk_index", 0)
+        chunks = self.split_text_if_needed(pending_text, request, current_chunk_index)
+        chunks = self._enforce_min_chars_trigger(chunks, request.min_chars_trigger)
+        if not chunks:
             return []
 
         if single_chunk:
-            chunk_span = spans[0]
+            chunk = chunks[0]
+            text_span_start = request.text_committed_pos
+            text_span_end = request.text_committed_pos + len(chunk)
             request.chunker_state["chunk_index"] = current_chunk_index + 1
-            return [
-                (
-                    chunk_span.text_from(request.text_buffer),
-                    current_chunk_index,
-                    len(spans) == 1,
-                    (chunk_span.start, chunk_span.end),
-                )
-            ]
+            return [(chunk, current_chunk_index, len(chunks) == 1, (text_span_start, text_span_end))]
 
         results = []
-        for span in spans:
-            results.append(
-                (
-                    span.text_from(request.text_buffer),
-                    current_chunk_index,
-                    span == spans[-1],
-                    (span.start, span.end),
-                )
-            )
+        offset = 0
+        for i, chunk in enumerate(chunks):
+            text_span_start = request.text_committed_pos + offset
+            text_span_end = text_span_start + len(chunk)
+            results.append((chunk, current_chunk_index, i == len(chunks) - 1, (text_span_start, text_span_end)))
+            offset += len(chunk)
             current_chunk_index += 1
 
         request.chunker_state["chunk_index"] = current_chunk_index
         return results
 
-    def split_text_if_needed(self, text: str, request: TTSRequest, text_offset: int = 0) -> list[TextSpan]:
-        if "||" in text:
-            return self._hard_split_spans(text, text_offset)
-        sentence_spans = self._sentence_spans(text, text_offset)
-        return self._glue_to_length(sentence_spans, self._min_sentence_split)
+    def split_text_if_needed(self, text: str, request: TTSRequest, chunk_index: int) -> list[str]:
+        if len(text) <= self.get_max_chunk_size(request, chunk_index):
+            return [text]
+
+        sentence_chunks = self._sentence_chunks(text)
+        pieces: list[str] = []
+        for sentence in sentence_chunks:
+            pieces.extend(self._split_oversized(sentence, request, chunk_index + len(pieces)))
+        return self._pack_to_schedule(pieces, request, chunk_index)
+
+    def _enforce_min_chars_trigger(self, chunks: list[str], min_chars_trigger: int) -> list[str]:
+        if min_chars_trigger <= 0:
+            return chunks
+
+        result = []
+        pending = ""
+
+        for chunk in chunks:
+            if not chunk:
+                continue
+
+            if pending:
+                pending += chunk
+                if len(pending.strip()) >= min_chars_trigger:
+                    result.append(pending)
+                    pending = ""
+                continue
+
+            if len(chunk.strip()) >= min_chars_trigger:
+                result.append(chunk)
+            else:
+                pending = chunk
+
+        if pending:
+            if result:
+                result[-1] += pending
+            elif len(pending.strip()) >= min_chars_trigger:
+                result.append(pending)
+
+        return result
 
     def get_max_chunk_size(self, request: TTSRequest, chunk_index: int) -> int:
         if chunk_index >= len(request.chunk_length_schedule):
             return request.chunk_length_schedule[-1]
         return request.chunk_length_schedule[chunk_index]
 
-    def get_min_chunk_size(self, request: TTSRequest, chunk_index: int) -> int:
-        if chunk_index >= len(request.min_chunk_length_schedule):
-            return request.min_chunk_length_schedule[-1]
-        return request.min_chunk_length_schedule[chunk_index]
+    def _sentence_chunks(self, text: str) -> list[str]:
+        chunks: list[str] = []
+        cursor = 0
 
-    def _sentence_spans(self, text: str, text_offset: int) -> list[TextSpan]:
-        spans = []
-        for part_start, part_end in self._hard_split_ranges(text):
-            part = text[part_start:part_end]
-            cursor = 0
-            for sentence in self._segmenter.segment(part):
-                local_start = part.find(sentence, cursor)
-                if local_start < 0:
-                    raise ValueError(f"pysbd sentence not found in source text: {sentence}")
-                local_end = local_start + len(sentence)
-                spans.append(
-                    TextSpan(
-                        text_offset + part_start + local_start,
-                        text_offset + part_start + local_end,
-                        sentence,
-                    )
-                )
-                cursor = local_end
-        return [span for span in spans if span.text.strip()]
+        for sentence in self._segmenter.segment(text):
+            start = text.find(sentence, cursor)
+            if start < 0:
+                return [text]
+            if start > cursor:
+                chunks.append(text[cursor:start])
+            end = start + len(sentence)
+            chunks.append(text[start:end])
+            cursor = end
 
-    def _hard_split_ranges(self, text: str) -> list[tuple[int, int]]:
-        ranges = []
-        start = 0
-        while True:
-            delimiter = text.find("||", start)
-            if delimiter < 0:
-                ranges.append((start, len(text)))
-                return ranges
-            ranges.append((start, delimiter))
-            start = delimiter + 2
+        if cursor < len(text):
+            chunks.append(text[cursor:])
 
-    def _hard_split_spans(self, text: str, text_offset: int) -> list[TextSpan]:
-        spans = []
-        for part_start, part_end in self._hard_split_ranges(text):
-            trimmed = self._trim_span(text, part_start, part_end)
-            if trimmed.start == trimmed.end:
+        return [chunk for chunk in chunks if chunk]
+
+    def _split_oversized(self, text: str, request: TTSRequest, chunk_index: int) -> list[str]:
+        pending = [text]
+        for separator in ("\n\n", "\n", r"(?<=[.!?]) +", r"(?<=[,;]) +", " "):
+            next_pending: list[str] = []
+            changed = False
+            for part in pending:
+                max_size = self.get_max_chunk_size(request, chunk_index + len(next_pending))
+                if len(part) <= max_size:
+                    next_pending.append(part)
+                    continue
+                split_parts = self._split_keep_separator(part, separator)
+                if len(split_parts) == 1:
+                    next_pending.append(part)
+                else:
+                    changed = True
+                    next_pending.extend(split_parts)
+            pending = next_pending
+            if changed:
+                pending = self._pack_to_schedule(pending, request, chunk_index)
+
+        result: list[str] = []
+        for part in pending:
+            max_size = self.get_max_chunk_size(request, chunk_index + len(result))
+            if len(part) <= max_size:
+                result.append(part)
+            else:
+                result.extend(part[i : i + max_size] for i in range(0, len(part), max_size))
+        return [chunk for chunk in result if chunk]
+
+    def _pack_to_schedule(self, pieces: list[str], request: TTSRequest, chunk_index: int) -> list[str]:
+        chunks: list[str] = []
+        current = ""
+
+        for piece in pieces:
+            if not piece:
                 continue
-            part_text = text[trimmed.start : trimmed.end]
-            if len(part_text) > 300:
-                sentence_spans = self._sentence_spans(part_text, text_offset + trimmed.start)
-                spans.extend(self._glue_to_length(sentence_spans, self._min_sentence_split))
-            else:
-                spans.append(TextSpan(text_offset + trimmed.start, text_offset + trimmed.end, part_text.strip()))
-        return spans
 
-    def _trim_span(self, text: str, start: int, end: int) -> TextSpan:
-        local_start = start
-        local_end = end
-        while local_start < local_end and text[local_start].isspace():
-            local_start += 1
-        while local_end > local_start and text[local_end - 1].isspace():
-            local_end -= 1
-        return TextSpan(local_start, local_end, text[local_start:local_end])
-
-    def _glue_to_length(self, spans: list[TextSpan], min_char_len: int) -> list[TextSpan]:
-        glued = []
-        for span in spans:
-            if glued and len(glued[-1].text.strip()) < min_char_len:
-                previous = glued.pop()
-                glued.append(TextSpan(previous.start, span.end, f"{previous.text} {span.text}"))
+            current_index = chunk_index + len(chunks)
+            max_size = self.get_max_chunk_size(request, current_index)
+            if current and len(current) + len(piece) > max_size:
+                chunks.append(current)
+                current = piece
             else:
-                glued.append(span)
-        return glued
+                current += piece
+
+        if current:
+            chunks.append(current.rstrip())
+
+        return [chunk for chunk in chunks if chunk.strip()]
+
+    def _split_keep_separator(self, text: str, separator: str) -> list[str]:
+        if separator == " ":
+            return [part for part in re.findall(r"\S+\s*", text) if part]
+
+        if separator in ("\n\n", "\n"):
+            parts = text.split(separator)
+            result = []
+            for i, part in enumerate(parts):
+                if i < len(parts) - 1:
+                    part += separator
+                if part:
+                    result.append(part)
+            return result
+
+        parts = re.split(f"({separator})", text)
+        result = []
+        i = 0
+        while i < len(parts):
+            part = parts[i]
+            if not part:
+                i += 1
+                continue
+            if i + 1 < len(parts):
+                part += parts[i + 1]
+                i += 2
+            else:
+                i += 1
+            result.append(part)
+        return result
+
+    def find_sentence_boundary(self, text: str, start_pos: int) -> int:
+        if start_pos >= len(text):
+            return len(text)
+
+        match = re.search(r"[.!?]\s+", text[start_pos:])
+        if match:
+            return start_pos + match.start()
+        return len(text)
+
+    def find_punctuation_boundary(self, text: str, start_pos: int) -> int:
+        if start_pos >= len(text):
+            return len(text)
+
+        match = re.search(r"[.,;:!?]\s*", text[start_pos:])
+        if match:
+            return start_pos + match.start()
+        return len(text)
