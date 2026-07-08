@@ -13,3 +13,9 @@ default_batch_size: 16
 process_workers_per_gpu: 1
 compile_models: false
 runtime_engine: pytorch
+# Which converted_models to load. Comment out (or set to null) to load ALL models
+# found in TINFER_MODELS_DIR. Restricted list for now:
+models:
+  - libri
+  - magda
+  - vokan

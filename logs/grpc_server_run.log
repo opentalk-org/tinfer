@@ -1,0 +1,5 @@
+   Building tinfer @ file:///workspace/tinfer/tinfer
+      Built tinfer @ file:///workspace/tinfer/tinfer
+Uninstalled 1 package in 2ms
+Installed 1 package in 1ms
+/workspace/tinfer/.venv/bin/python3: No module named tinfer.server.main
