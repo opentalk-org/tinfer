@@ -1,5 +1,6 @@
 .env
 __pycache__/
+**/__pycache__/
 *.egg-info/
 *.pyc
 node_modules/
@@ -14,5 +15,14 @@ alignment_stress_outputs/
 alignment_artifacts/
 tmp_tests/trt_probe/
 tmp_tests/trt_engines/
+tinfer/tinfer/models/impl/styletts2/model/trt3/
 *.onnx
 *.engine
+*.plan
+*.weights
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.ref
+*.o

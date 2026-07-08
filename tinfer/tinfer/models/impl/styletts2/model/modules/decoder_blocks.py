@@ -22,7 +22,15 @@ class AdaIN1d(nn.Module):
         h = self.fc(s)
         h = h.view(h.size(0), h.size(1), 1)
         gamma, beta = torch.chunk(h, chunks=2, dim=1)
-        if os.getenv("TINFER_TRT_EXPORT") == "1":
+        if os.getenv("TINFER_TRT_EXPORT") == "1" and os.getenv("TINFER_ADAIN_NATIVE") == "1":
+            c = self.norm.num_features
+            normalized = F.instance_norm(
+                x,
+                weight=torch.ones(c, device=x.device, dtype=x.dtype),
+                bias=torch.zeros(c, device=x.device, dtype=x.dtype),
+                eps=self.norm.eps,
+            )
+        elif os.getenv("TINFER_TRT_EXPORT") == "1":
             mean = x.mean(dim=2, keepdim=True)
             centered = x - mean
             variance = (centered * centered).mean(dim=2, keepdim=True)

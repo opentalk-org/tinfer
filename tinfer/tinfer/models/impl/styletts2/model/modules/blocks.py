@@ -317,7 +317,19 @@ class AdaIN1d(nn.Module):
         h = self.fc(s)
         h = h.view(h.size(0), h.size(1), 1)
         gamma, beta = torch.chunk(h, chunks=2, dim=1)
-        return (1 + gamma) * self.norm(x) + beta
+        if os.getenv("TINFER_TRT_EXPORT") == "1":
+            # explicit unit weight/bias so the ONNX exporter emits InstanceNormalization
+            # (mapped to TRT's tuned INormalizationLayer); affine=False alone fails export.
+            c = self.norm.num_features
+            normalized = F.instance_norm(
+                x,
+                weight=torch.ones(c, device=x.device, dtype=x.dtype),
+                bias=torch.zeros(c, device=x.device, dtype=x.dtype),
+                eps=self.norm.eps,
+            )
+        else:
+            normalized = self.norm(x)
+        return (1 + gamma) * normalized + beta
 
 class UpSample1d(nn.Module):
     def __init__(self, layer_type):
@@ -327,8 +339,12 @@ class UpSample1d(nn.Module):
     def forward(self, x):
         if self.layer_type == 'none':
             return x
-        else:
-            return F.interpolate(x, scale_factor=2, mode='nearest')
+        if os.getenv("TINFER_TRT_EXPORT") == "1":
+            # exact nearest-2x upsample via expand+reshape; avoids the ONNX Resize node
+            # that trips a TensorRT Myelin resize-lowering bug when fused near an LSTM.
+            b, c, t = x.shape
+            return x.unsqueeze(-1).expand(b, c, t, 2).reshape(b, c, t * 2)
+        return F.interpolate(x, scale_factor=2, mode='nearest')
 
 class AdainResBlk1d(nn.Module):
     def __init__(self, dim_in, dim_out, style_dim=64, actv=nn.LeakyReLU(0.2),
