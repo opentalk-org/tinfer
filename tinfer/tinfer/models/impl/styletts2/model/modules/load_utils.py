@@ -124,7 +124,7 @@ def load_model_from_state(state_dict: dict, load_style_encoder: bool = True):
     
     for key in model.keys():
         if key in model_state_dict:
-            if key == "decoder" and "generator.stft.window" not in model_state_dict[key]:
+            if key == "decoder" and model_config.decoder.type == "istftnet" and "generator.stft.window" not in model_state_dict[key]:
                 # TODO: move this to model conversion
                 gen_istft_n_fft = 20
                 gen_istft_hop_size = 5

@@ -66,7 +66,8 @@ def export_promote_build(
         with torch.no_grad():
             torch.onnx.export(wrap, example_inputs, str(onnx_path), input_names=input_names,
                               output_names=output_names, opset_version=20, dynamo=False,
-                              do_constant_folding=True, dynamic_axes=dynamic_axes)
+                              do_constant_folding=not os.environ.get("TINFER_NO_CONSTFOLD"),
+                              dynamic_axes=dynamic_axes)
     finally:
         os.environ.pop("TINFER_TRT_EXPORT", None)
     mp = onnx.load(str(onnx_path))

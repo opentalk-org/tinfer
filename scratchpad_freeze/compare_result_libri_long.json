@@ -1,0 +1,16 @@
+{
+  "model": "libri",
+  "text": "The old lighthouse had stood on the rocky point for over a century, weathering storms that swallowed lesser buildings whole. Every evening its keeper climbed the spiral staircase, lit the great lamp, and watched the beam sweep across the restless water. Sailors far out at sea trusted that light more than any map or compass they carried. On the calmest nights, when the fog rolled in thick and silent, it was the only thing standing between them and the jagged rocks below.",
+  "words": 82,
+  "voice": "libri_f1",
+  "sr": 24000,
+  "dur_baseline_s": 17.779,
+  "dur_frozen_s": 17.779,
+  "peak_baseline": 0.3186,
+  "peak_frozen": 0.4734,
+  "rms_baseline": 0.02713,
+  "rms_frozen": 0.03107,
+  "waveform_correlation": 0.64,
+  "relative_rms_error": 0.9196,
+  "logmel_l1_distance": 0.6355
+}

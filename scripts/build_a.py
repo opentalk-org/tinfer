@@ -6,6 +6,7 @@ LSTMs are reimplemented without pack_padded_sequence (plain LSTM), which is exac
 for same-length batches (the benchmark case; production should length-bucket)."""
 from __future__ import annotations
 import argparse
+import os
 from pathlib import Path
 
 import numpy as np
@@ -22,7 +23,19 @@ from tinfer.models.impl.styletts2.model.trt3.core import WeightInputRunner, dump
 def fast_lstm(lstm, x):
     """Bidirectional LSTM with the input projection done as ONE batched GEMM over all
     timesteps (TRT's nn.LSTM does it per-timestep -> thousands of tiny GEMMs at batch1).
-    Only the recurrence loops. Matches torch.nn.LSTM (gate order i,f,g,o)."""
+    Only the recurrence loops. Matches torch.nn.LSTM (gate order i,f,g,o).
+
+    TINFER_NATIVE_LSTM=1 skips the Python unroll and calls the nn.LSTM module directly,
+    so ONNX exports one LSTM op instead of ~174 unrolled steps. That cuts the engine-A
+    graph from ~65k nodes to a few thousand (build minutes -> seconds), at the cost of
+    the static CUDA-graph-capturable unroll (TRT lowers LSTM to a dynamic loop)."""
+    if os.environ.get("TINFER_NATIVE_LSTM"):
+        # explicit batch-dependent h0/c0 so ONNX doesn't bake batch=1 into the initial
+        # states (which breaks dynamic-batch profiles). x is [B,T,C] (batch_first).
+        nd = (2 if lstm.bidirectional else 1) * lstm.num_layers
+        h0 = x.new_zeros(nd, x.shape[0], lstm.hidden_size)
+        c0 = x.new_zeros(nd, x.shape[0], lstm.hidden_size)
+        return lstm(x, (h0, c0))[0]
     H = lstm.hidden_size
     B, T, _ = x.shape
 
@@ -220,6 +233,13 @@ def main():
     }
     if args.cfg:
         prof["scale"] = ((1,), (1,), (1,))
+    if os.environ.get("TINFER_FIX_TOKENS"):
+        # benchmark mode: batch dynamic 1..16 but token count fixed at the captured T
+        # (150 chars). Shrinks the profile hugely -> fast build, valid across batches.
+        # opt batch must match the other inputs (all opt batch = 1) or TRT rejects the
+        # profile ("dims named B must be equal"). Only the token dim is pinned to T.
+        prof["tokens"] = ((1, T), (1, T), (16, T))
+        prof["mask"] = ((1, T), (1, T), (16, T))
     if args.fixed:
         # static shapes (min==opt==max) so TRT unrolls the LSTMs into a CUDA-graph-
         # capturable static graph instead of a non-capturable dynamic Myelin loop.

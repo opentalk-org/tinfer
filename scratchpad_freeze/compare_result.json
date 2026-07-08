@@ -1,0 +1,14 @@
+{
+  "text": "The quick brown fox jumps over the lazy dog, and then it ran across the wide green field.",
+  "voice": "libri_f1",
+  "sr": 24000,
+  "dur_baseline_s": 2.296,
+  "dur_frozen_s": 2.296,
+  "peak_baseline": 0.3023,
+  "peak_frozen": 0.2828,
+  "rms_baseline": 0.03365,
+  "rms_frozen": 0.0368,
+  "waveform_correlation": 0.8873,
+  "relative_rms_error": 0.5053,
+  "logmel_l1_distance": 0.4262
+}
