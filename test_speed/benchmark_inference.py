@@ -128,18 +128,20 @@ def synthesize_all(
     voice_ids: list[str],
     text_inputs: list[TextInput],
     output_dir: Path,
+    use_diffusion: bool,
 ) -> tuple[list[RequestMetric], list[PhonemeMetric]]:
     output_dir.mkdir(parents=True, exist_ok=True)
     request_metrics = []
     phoneme_metrics = []
     pairs = [(voice_id, text_input) for voice_id in voice_ids for text_input in text_inputs]
     for voice_id, text_input in tqdm(pairs, desc="Synthesize", unit="audio"):
-        if model._text_token_count(text_input.text, StyleTTS2Params()) > model._max_styletts_tokens:
+        style_params = StyleTTS2Params(use_diffusion=use_diffusion)
+        if model._text_token_count(text_input.text, style_params) > model._max_styletts_tokens:
             raise RuntimeError(f"Input exceeds one model window: {text_input.text_id}")
         result = model.generate(
             text_input.text,
             {"voice_id": voice_id},
-            {},
+            {"use_diffusion": use_diffusion},
             {"alignment_type": AlignmentType.PHONEME},
         )
         voice_dir = output_dir / voice_id

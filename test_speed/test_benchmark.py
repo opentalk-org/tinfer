@@ -10,6 +10,7 @@ import torch.nn as nn
 
 from tinfer.core.request import AlignmentItem
 from tinfer.models.impl.styletts2.alignment.alignment import StyleTTS2AlignmentParser
+from tinfer.models.impl.styletts2.model.inference_config import StyleTTS2Params
 from tinfer.models.impl.styletts2.voice.encoder import StyleTTS2VoiceEncoder
 
 from test_speed.benchmark_data import (
@@ -24,9 +25,40 @@ from test_speed.benchmark_inference import (
     archive_wav_names,
     extract_selected,
     measure_result,
+    synthesize_all,
 )
 from test_speed.benchmark_reporting import write_reports
 from test_speed.run_benchmark import configure_progress_output
+
+
+class RecordingModel:
+    _max_styletts_tokens = 512
+
+    def __init__(self) -> None:
+        self.params: list[dict[str, object]] = []
+
+    def _text_token_count(
+        self,
+        text: str,
+        params: StyleTTS2Params,
+    ) -> int:
+        return len(text)
+
+    def generate(
+        self,
+        text: str,
+        context: dict[str, object],
+        params: dict[str, object],
+        metadata: dict[str, object],
+    ) -> SimpleNamespace:
+        self.params.append(params)
+        return SimpleNamespace(
+            data=np.zeros(240, dtype=np.float32),
+            sample_rate=24000,
+            metadata={
+                "word_alignments": [AlignmentItem("n", 0, 1, 0, 25)]
+            },
+        )
 
 
 class DataTests(unittest.TestCase):
@@ -65,6 +97,20 @@ class DataTests(unittest.TestCase):
 
 
 class InferenceTests(unittest.TestCase):
+    def test_synthesis_forwards_diffusion_flag(self) -> None:
+        model = RecordingModel()
+
+        with tempfile.TemporaryDirectory() as directory:
+            synthesize_all(
+                model,
+                ["voice"],
+                [TextInput("short", "No")],
+                Path(directory),
+                False,
+            )
+
+        self.assertEqual(model.params, [{"use_diffusion": False}])
+
     def test_voice_encoder_preserves_attribute_model_access_after_move(self) -> None:
         encoder = StyleTTS2VoiceEncoder(
             model={

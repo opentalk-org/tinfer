@@ -17,6 +17,13 @@ class BenchmarkConfig:
 
 
 @dataclass(frozen=True)
+class SynthesisProfile:
+    name: str
+    results_dir: Path
+    use_diffusion: bool
+
+
+@dataclass(frozen=True)
 class TextInput:
     text_id: str
     text: str
