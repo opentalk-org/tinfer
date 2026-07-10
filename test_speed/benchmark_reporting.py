@@ -1,3 +1,4 @@
+from collections import defaultdict
 from dataclasses import asdict
 from pathlib import Path
 import csv
@@ -7,6 +8,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import numpy as np
 from tqdm import tqdm
 
 from test_speed.benchmark_data import (
@@ -76,6 +78,51 @@ def plot_scatter(
     plt.close(figure)
 
 
+def mean_rates_by_voice(metrics: list[RequestMetric]) -> list[float]:
+    grouped: dict[str, list[float]] = defaultdict(list)
+    for metric in metrics:
+        grouped[metric.voice_id].append(metric.phonemes_per_second)
+    return [
+        float(np.mean(grouped[voice_id]))
+        for voice_id in sorted(grouped)
+    ]
+
+
+def shared_histogram_edges(*groups: list[float]) -> np.ndarray:
+    values = np.asarray(
+        [value for group in groups for value in group],
+        dtype=np.float64,
+    )
+    if values.size == 0:
+        raise ValueError("Histogram values cannot be empty")
+    lower = float(np.floor(values.min()))
+    upper = max(float(np.ceil(values.max())), lower + 1.0)
+    return np.arange(lower, upper + 1.0, 1.0)
+
+
+def plot_histogram(
+    values: list[float],
+    edges: np.ndarray,
+    title: str,
+    population_label: str,
+    path: Path,
+) -> None:
+    if not values:
+        raise ValueError(f"Cannot plot empty histogram: {title}")
+    figure, axis = plt.subplots(figsize=(10, 6))
+    counts, _, _ = axis.hist(values, bins=edges, edgecolor="black", alpha=0.75)
+    assert int(counts.sum()) == len(values), "histogram population count mismatch"
+    axis.set(
+        title=title,
+        xlabel="Predicted phonemes/s",
+        ylabel=population_label,
+    )
+    axis.grid(axis="y", alpha=0.25)
+    figure.tight_layout()
+    figure.savefig(path, dpi=180)
+    plt.close(figure)
+
+
 def _write_summary_index(summary_dir: Path, voice_ids: list[str]) -> Path:
     lines = [
         "# Phoneme Duration Benchmark",
@@ -84,6 +131,8 @@ def _write_summary_index(summary_dir: Path, voice_ids: list[str]) -> Path:
         "",
         "- [Phoneme duration table](global_phoneme_durations.csv)",
         "- [Phonemes/s scatter](global_phonemes_per_second.png)",
+        "- [Phonemes/s by voice histogram](phonemes_per_second_by_voice.png)",
+        "- [Phonemes/s all runs histogram](phonemes_per_second_all_runs.png)",
         "",
         "## Highlighted voices",
         "",
@@ -108,6 +157,7 @@ def write_reports(
     requests: list[RequestMetric],
     phonemes: list[PhonemeMetric],
     highlighted_voice_ids: list[str],
+    histogram_edges: np.ndarray,
 ) -> Path:
     write_raw_metrics(results_dir, requests, phonemes)
     summary_dir = results_dir / "summary"
@@ -135,4 +185,18 @@ def write_reports(
             f"Predictor rate: {scope}",
             summary_dir / f"{scope}_phonemes_per_second.png",
         )
+    plot_histogram(
+        mean_rates_by_voice(requests),
+        histogram_edges,
+        "Mean predictor rate by voice",
+        "Number of voices",
+        summary_dir / "phonemes_per_second_by_voice.png",
+    )
+    plot_histogram(
+        [row.phonemes_per_second for row in requests],
+        histogram_edges,
+        "Predictor rate across all voice/text runs",
+        "Number of runs",
+        summary_dir / "phonemes_per_second_all_runs.png",
+    )
     return _write_summary_index(summary_dir, highlighted_voice_ids)

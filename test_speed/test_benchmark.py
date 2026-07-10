@@ -27,8 +27,16 @@ from test_speed.benchmark_inference import (
     measure_result,
     synthesize_all,
 )
-from test_speed.benchmark_reporting import write_reports
-from test_speed.run_benchmark import configure_progress_output
+from test_speed.benchmark_reporting import (
+    mean_rates_by_voice,
+    shared_histogram_edges,
+    write_reports,
+)
+from test_speed.run_benchmark import (
+    PROFILES,
+    configure_progress_output,
+    copy_profile_inputs,
+)
 
 
 class RecordingModel:
@@ -190,6 +198,23 @@ class InferenceTests(unittest.TestCase):
 
 
 class ReportingTests(unittest.TestCase):
+    def test_voice_histogram_values_average_each_voice(self) -> None:
+        requests = [
+            RequestMetric("a", "x", "x", 1, 1, 0.05, 20.0, "a.wav"),
+            RequestMetric("a", "y", "y", 1, 1, 0.025, 40.0, "b.wav"),
+            RequestMetric("b", "x", "x", 1, 1, 0.025, 40.0, "c.wav"),
+        ]
+
+        self.assertEqual(mean_rates_by_voice(requests), [30.0, 40.0])
+
+    def test_shared_histogram_edges_cover_both_profiles(self) -> None:
+        edges = shared_histogram_edges([10.2, 11.8], [9.1, 12.3])
+
+        np.testing.assert_array_equal(
+            edges,
+            np.asarray([9.0, 10.0, 11.0, 12.0, 13.0]),
+        )
+
     def test_progress_output_suppresses_model_debug_logs(self) -> None:
         configure_progress_output()
 
@@ -203,7 +228,13 @@ class ReportingTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            index_path = write_reports(root, requests, phonemes, ["v"])
+            index_path = write_reports(
+                root,
+                requests,
+                phonemes,
+                ["v"],
+                np.asarray([39.0, 40.0, 41.0]),
+            )
 
             self.assertTrue(
                 (root / "summary/global_phoneme_durations.csv").is_file()
@@ -212,7 +243,42 @@ class ReportingTests(unittest.TestCase):
                 (root / "summary/global_phonemes_per_second.png").is_file()
             )
             self.assertTrue((root / "summary/v_phoneme_durations.csv").is_file())
+            self.assertTrue(
+                (root / "summary/phonemes_per_second_by_voice.png").is_file()
+            )
+            self.assertTrue(
+                (root / "summary/phonemes_per_second_all_runs.png").is_file()
+            )
             self.assertEqual(index_path, root / "summary/README.md")
+
+
+class RunnerTests(unittest.TestCase):
+    def test_profiles_enable_and_disable_diffusion(self) -> None:
+        self.assertEqual(
+            [(profile.name, profile.use_diffusion) for profile in PROFILES],
+            [("diffusion", True), ("no_diffusion", False)],
+        )
+
+    def test_profile_inputs_are_copied_into_second_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            destination = root / "destination"
+            (source / "references").mkdir(parents=True)
+            (source / "embeddings").mkdir()
+            (source / "references/voice.wav").write_bytes(b"wave")
+            (source / "embeddings/voice.pth").write_bytes(b"style")
+
+            copy_profile_inputs(source, destination)
+
+            self.assertEqual(
+                (destination / "references/voice.wav").read_bytes(),
+                b"wave",
+            )
+            self.assertEqual(
+                (destination / "embeddings/voice.pth").read_bytes(),
+                b"style",
+            )
 
 
 if __name__ == "__main__":
