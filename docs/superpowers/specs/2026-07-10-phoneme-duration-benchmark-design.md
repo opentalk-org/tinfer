@@ -36,7 +36,7 @@ For every generated request, the raw result records:
 - predictor-derived phonemes per second;
 - generated WAV path.
 
-For every phoneme occurrence, a second raw table records its symbol and predictor-derived duration. The predictor frame duration is the model preprocessing hop length divided by sample rate. The beginning-of-sequence token is excluded because it is not a phoneme.
+For every phoneme occurrence, a second raw table records its symbol and predictor-derived duration. The predictor frame duration is the configured decoder hop length divided by sample rate; the Magda ISTFT decoder emits 600 samples, or 25 ms, per predictor frame. The beginning-of-sequence token is excluded because it is not a phoneme.
 
 Global phoneme statistics pool occurrences from all 20 voices. The per-voice statistics use each of four seeded-random voices. Each table contains one row per phoneme symbol with occurrence count and mean, minimum, maximum, p10, and p90 duration. The global scatter includes every generated request; each per-voice scatter includes all 16 requests for that voice. Scatter axes are input character length and predictor-derived phonemes per second.
 
