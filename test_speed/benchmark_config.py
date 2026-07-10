@@ -128,6 +128,21 @@ LIBRI_TARGET = BenchmarkTarget(
     runtime_engine="torch",
     language="en-us",
 )
+STYLETTS_FINETUNE_EPOCH10_TARGET = BenchmarkTarget(
+    name="styletts_finetune_epoch10",
+    model_path=Path("/workspace/converted_models/styletts_finetune_epoch10/model.pth"),
+    results_dir=ROOT / "test_speed/results_styletts_finetune_epoch10",
+    no_diffusion_results_dir=(
+        ROOT / "test_speed/results_styletts_finetune_epoch10_no_diffusion"
+    ),
+    seed=20260710,
+    voice_count=1,
+    highlighted_voice_count=1,
+    voice_source=TensorVoiceSource(LJSPEECH_VOICE),
+    passage=POLISH_PASSAGE,
+    runtime_engine="torch",
+    language="pl",
+)
 TARGETS = (
     MAGDA_TARGET,
     AGNIESZKA_TARGET,
@@ -135,4 +150,5 @@ TARGETS = (
     VOKAN_TARGET,
     LJSPEECH_TARGET,
     LIBRI_TARGET,
+    STYLETTS_FINETUNE_EPOCH10_TARGET,
 )

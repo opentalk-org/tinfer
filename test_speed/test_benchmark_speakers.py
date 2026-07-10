@@ -245,7 +245,7 @@ class RunnerTargetTests(unittest.TestCase):
 
         self.assertEqual(
             [target.name for target in targets],
-            ["magda", "agnieszka", "olam", "vokan", "ljspeech", "libri"],
+            ["magda", "agnieszka", "olam", "vokan", "ljspeech", "libri", "styletts_finetune_epoch10"],
         )
         self.assertEqual(
             [target.results_dir.name for target in targets],
@@ -256,6 +256,7 @@ class RunnerTargetTests(unittest.TestCase):
                 "results_vokan",
                 "results_ljspeech",
                 "results_libri",
+                "results_styletts_finetune_epoch10",
             ],
         )
 
@@ -272,6 +273,10 @@ class RunnerTargetTests(unittest.TestCase):
         self.assertEqual([target.name for target in targets], ["olam"])
         self.assertEqual(targets[0].results_dir.name, "results_olam")
         self.assertEqual(targets[0].voice_count, 1)
+
+        finetune = runner.select_targets("styletts_finetune_epoch10")[0]
+        self.assertEqual((finetune.voice_count, finetune.language), (1, "pl"))
+        self.assertEqual(finetune.runtime_engine, "torch")
 
     def test_english_targets_use_english_phonemization(self) -> None:
         runner = import_module("test_speed.run_benchmark")
