@@ -32,6 +32,7 @@ from test_speed.benchmark_reporting import (
     shared_histogram_edges,
     write_reports,
 )
+from test_speed.benchmark_style import StyleEmbeddingNorm
 from test_speed.run_benchmark import (
     PROFILES,
     configure_progress_output,
@@ -228,6 +229,7 @@ class ReportingTests(unittest.TestCase):
                 requests,
                 phonemes,
                 [ReferenceDuration("v", 1.0)],
+                [StyleEmbeddingNorm("v", 1.0, 2.0, 3.0)],
                 ["v"],
                 np.asarray([39.0, 40.0, 41.0]),
             )

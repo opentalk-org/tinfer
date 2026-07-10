@@ -13,4 +13,4 @@ mkdir -p "$WHEEL_DIR"
   uv run --with 'maturin[patchelf]' maturin build --release --out "$WHEEL_DIR"
 )
 uv pip install --python "$ROOT/.venv/bin/python" "$WHEEL_DIR"/espeak_align-*.whl
-uv run --package tinfer --extra inference --with matplotlib python -m test_speed.run_benchmark
+uv run --package tinfer --extra inference --with matplotlib python -m test_speed.run_benchmark "$@"

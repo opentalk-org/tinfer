@@ -18,6 +18,7 @@ from test_speed.benchmark_data import (
     SummaryRow,
     summarize_phonemes,
 )
+from test_speed.benchmark_style import StyleEmbeddingNorm, write_style_norm_plots
 
 
 def _write_dataclass_csv(path: Path, rows: list[object]) -> None:
@@ -187,7 +188,17 @@ def plot_histogram(
     plt.close(figure)
 
 
-def _write_summary_index(summary_dir: Path, voice_ids: list[str]) -> Path:
+def _write_summary_index(
+    summary_dir: Path,
+    voice_ids: list[str],
+    has_reference_durations: bool,
+) -> Path:
+    reference_lines = [
+        "- [Reference length vs phonemes/s, all runs]"
+        "(reference_duration_vs_phonemes_per_second_all_runs.png)",
+        "- [Reference length vs mean phonemes/s by voice]"
+        "(reference_duration_vs_mean_phonemes_per_second_by_voice.png)",
+    ] if has_reference_durations else []
     lines = [
         "# Phoneme Duration Benchmark",
         "",
@@ -195,14 +206,10 @@ def _write_summary_index(summary_dir: Path, voice_ids: list[str]) -> Path:
         "",
         "- [Phoneme duration table](global_phoneme_durations.csv)",
         "- [Phonemes/s scatter](global_phonemes_per_second.png)",
-        (
-            "- [Reference length vs phonemes/s, all runs]"
-            "(reference_duration_vs_phonemes_per_second_all_runs.png)"
-        ),
-        (
-            "- [Reference length vs mean phonemes/s by voice]"
-            "(reference_duration_vs_mean_phonemes_per_second_by_voice.png)"
-        ),
+        *reference_lines,
+        "- [Full style norm vs input tokens](style_embedding_full_norm_vs_input_tokens.png)",
+        "- [First 128 style norm vs input tokens](style_embedding_first_128_norm_vs_input_tokens.png)",
+        "- [Second 128 style norm vs input tokens](style_embedding_second_128_norm_vs_input_tokens.png)",
         "- [Phonemes/s by voice histogram](phonemes_per_second_by_voice.png)",
         "- [Phonemes/s all runs histogram](phonemes_per_second_all_runs.png)",
         "",
@@ -223,12 +230,12 @@ def _write_summary_index(summary_dir: Path, voice_ids: list[str]) -> Path:
     index_path.write_text("\n".join(lines), encoding="utf-8")
     return index_path
 
-
 def write_reports(
     results_dir: Path,
     requests: list[RequestMetric],
     phonemes: list[PhonemeMetric],
     references: list[ReferenceDuration],
+    style_norms: list[StyleEmbeddingNorm],
     highlighted_voice_ids: list[str],
     histogram_edges: np.ndarray,
 ) -> Path:
@@ -272,15 +279,21 @@ def write_reports(
         "Number of runs",
         summary_dir / "phonemes_per_second_all_runs.png",
     )
-    plot_reference_scatter(
-        reference_all_run_coordinates(requests, references),
-        "Reference length vs predictor rate: all runs",
-        summary_dir / "reference_duration_vs_phonemes_per_second_all_runs.png",
+    if references:
+        plot_reference_scatter(
+            reference_all_run_coordinates(requests, references),
+            "Reference length vs predictor rate: all runs",
+            summary_dir / "reference_duration_vs_phonemes_per_second_all_runs.png",
+        )
+        plot_reference_scatter(
+            reference_mean_voice_coordinates(requests, references),
+            "Reference length vs mean predictor rate by voice",
+            summary_dir
+            / "reference_duration_vs_mean_phonemes_per_second_by_voice.png",
+        )
+    write_style_norm_plots(requests, style_norms, summary_dir)
+    return _write_summary_index(
+        summary_dir,
+        highlighted_voice_ids,
+        bool(references),
     )
-    plot_reference_scatter(
-        reference_mean_voice_coordinates(requests, references),
-        "Reference length vs mean predictor rate by voice",
-        summary_dir
-        / "reference_duration_vs_mean_phonemes_per_second_by_voice.png",
-    )
-    return _write_summary_index(summary_dir, highlighted_voice_ids)

@@ -1,6 +1,8 @@
+from argparse import ArgumentParser
 from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import assert_never
 import json
 import logging
 import random
@@ -13,7 +15,6 @@ import tinfer.models.impl.styletts2.model.model as styletts2_model_module
 from tinfer.support.observability import setup_json_logs
 
 from test_speed.benchmark_data import (
-    BenchmarkConfig,
     PhonemeMetric,
     RequestMetric,
     SynthesisProfile,
@@ -21,31 +22,34 @@ from test_speed.benchmark_data import (
     select_names,
 )
 from test_speed.benchmark_corpus import POLISH_PASSAGE, build_phoneme_grid
+from test_speed.benchmark_config import (
+    MAGDA_TARGET,
+    TARGETS,
+    BenchmarkTarget,
+)
 from test_speed.benchmark_inference import (
-    archive_wav_names,
-    embed_references,
-    extract_selected,
     load_model,
-    measure_reference_durations,
     synthesize_all,
 )
 from test_speed.benchmark_reporting import shared_histogram_edges, write_reports
-
-
-ROOT = Path(__file__).resolve().parents[1]
-CONFIG = BenchmarkConfig(
-    archive_path=ROOT / "test_speed/archive.zip",
-    model_path=Path("/workspace/converted_models/magda/model.pth"),
-    results_dir=ROOT / "test_speed/results",
-    seed=20260710,
-    voice_count=20,
-    highlighted_voice_count=4,
+from test_speed.benchmark_speakers import (
+    ArchiveVoiceSource,
+    PreparedVoices,
+    SingleVectorVoiceSource,
+    VectorVoiceSource,
+    prepare_archive_voices,
+    prepare_single_vector_voice,
+    prepare_vector_voices,
 )
+from test_speed.benchmark_style import measure_style_norms
+
+
+CONFIG = MAGDA_TARGET
 PROFILES = [
     SynthesisProfile("diffusion", CONFIG.results_dir, True),
     SynthesisProfile(
         "no_diffusion",
-        ROOT / "test_speed/results_no_diffusion",
+        CONFIG.no_diffusion_results_dir,
         False,
     ),
 ]
@@ -97,19 +101,72 @@ def copy_profile_inputs(source_dir: Path, destination_dir: Path) -> None:
         )
 
 
+def select_targets(selection: str) -> list[BenchmarkTarget]:
+    if selection == "all":
+        return list(TARGETS)
+    matches = [target for target in TARGETS if target.name == selection]
+    if not matches:
+        raise ValueError(f"Unknown benchmark target: {selection}")
+    return matches
+
+
+def _profiles_for(target: BenchmarkTarget) -> list[SynthesisProfile]:
+    return [
+        SynthesisProfile("diffusion", target.results_dir, True),
+        SynthesisProfile(
+            "no_diffusion",
+            target.no_diffusion_results_dir,
+            False,
+        ),
+    ]
+
+
+def _prepare_voices(
+    target: BenchmarkTarget,
+    model: object,
+    primary_results_dir: Path,
+) -> PreparedVoices:
+    source = target.voice_source
+    if isinstance(source, ArchiveVoiceSource):
+        return prepare_archive_voices(
+            model,
+            source,
+            primary_results_dir / "references",
+            primary_results_dir / "embeddings",
+            target.voice_count,
+            target.seed,
+        )
+    if isinstance(source, VectorVoiceSource):
+        return prepare_vector_voices(
+            model,
+            source,
+            primary_results_dir / "embeddings",
+            target.voice_count,
+            target.seed,
+        )
+    if isinstance(source, SingleVectorVoiceSource):
+        return prepare_single_vector_voice(
+            model,
+            source,
+            primary_results_dir / "embeddings",
+        )
+    assert_never(source)
+
+
 def _write_manifest(
-    config: BenchmarkConfig,
+    config: BenchmarkTarget,
     profile: SynthesisProfile,
     selected_names: list[str],
     highlighted_voice_ids: list[str],
     text_inputs: list[TextInput],
 ) -> Path:
     manifest = {
+        "speaker": config.name,
         "profile": profile.name,
         "use_diffusion": profile.use_diffusion,
         "speed_correction": False,
         "seed": config.seed,
-        "archive_path": str(config.archive_path),
+        "voice_source": str(config.voice_source),
         "model_path": str(config.model_path),
         "selected_reference_wavs": selected_names,
         "highlighted_voice_ids": highlighted_voice_ids,
@@ -124,7 +181,7 @@ def _write_manifest(
 
 
 def _validate_profile_metrics(
-    config: BenchmarkConfig,
+    config: BenchmarkTarget,
     metrics: ProfileMetrics,
     text_inputs: list[TextInput],
 ) -> None:
@@ -137,53 +194,41 @@ def _validate_profile_metrics(
     assert set(requests_by_voice.values()) == {len(text_inputs)}
 
 
-def main() -> None:
-    configure_progress_output()
-    disable_speed_correction()
-    _seed_everything(CONFIG.seed)
-    for profile in PROFILES:
+def _run_target(config: BenchmarkTarget) -> None:
+    _seed_everything(config.seed)
+    profiles = _profiles_for(config)
+    for profile in profiles:
         _prepare_results(profile.results_dir)
-    available_names = archive_wav_names(CONFIG.archive_path)
-    selected_names = select_names(
-        available_names,
-        CONFIG.voice_count,
-        CONFIG.seed,
-    )
-    reference_paths = extract_selected(
-        CONFIG.archive_path,
-        selected_names,
-        PROFILES[0].results_dir / "references",
-    )
-    reference_durations = measure_reference_durations(reference_paths)
-    model = load_model(CONFIG.model_path, "cuda")
+    model = load_model(config.model_path, "cuda")
     text_inputs = build_phoneme_grid(
         model,
         POLISH_PASSAGE,
         point_count=48,
         max_tokens=511,
     )
-    voice_ids = embed_references(
+    prepared_voices = _prepare_voices(
+        config,
         model,
-        reference_paths,
-        PROFILES[0].results_dir / "embeddings",
+        profiles[0].results_dir,
     )
-    copy_profile_inputs(PROFILES[0].results_dir, PROFILES[1].results_dir)
+    style_norms = measure_style_norms(model, prepared_voices.voice_ids)
+    copy_profile_inputs(profiles[0].results_dir, profiles[1].results_dir)
     highlighted_voice_ids = select_names(
-        voice_ids,
-        CONFIG.highlighted_voice_count,
-        CONFIG.seed + 1,
+        prepared_voices.voice_ids,
+        config.highlighted_voice_count,
+        config.seed + 1,
     )
     profile_metrics = []
-    for profile in PROFILES:
+    for profile in profiles:
         requests, phonemes = synthesize_all(
             model,
-            voice_ids,
+            prepared_voices.voice_ids,
             text_inputs,
             profile.results_dir / "audio",
             profile.use_diffusion,
         )
         metrics = ProfileMetrics(profile, requests, phonemes)
-        _validate_profile_metrics(CONFIG, metrics, text_inputs)
+        _validate_profile_metrics(config, metrics, text_inputs)
         profile_metrics.append(metrics)
 
     histogram_edges = shared_histogram_edges(
@@ -198,19 +243,35 @@ def main() -> None:
             metrics.profile.results_dir,
             metrics.requests,
             metrics.phonemes,
-            reference_durations,
+            prepared_voices.reference_durations,
+            style_norms,
             highlighted_voice_ids,
             histogram_edges,
         )
         manifest_path = _write_manifest(
-            CONFIG,
+            config,
             metrics.profile,
-            selected_names,
+            prepared_voices.source_names,
             highlighted_voice_ids,
             text_inputs,
         )
         print(f"{metrics.profile.name} summary: {index_path}")
         print(f"{metrics.profile.name} manifest: {manifest_path}")
+
+
+def main() -> None:
+    parser = ArgumentParser()
+    parser.add_argument(
+        "target",
+        choices=("all", "magda", "agnieszka", "olam"),
+        default="all",
+        nargs="?",
+    )
+    arguments = parser.parse_args()
+    configure_progress_output()
+    disable_speed_correction()
+    for target in select_targets(arguments.target):
+        _run_target(target)
 
 
 if __name__ == "__main__":

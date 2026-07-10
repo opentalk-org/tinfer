@@ -7,16 +7,6 @@ import numpy as np
 
 
 @dataclass(frozen=True)
-class BenchmarkConfig:
-    archive_path: Path
-    model_path: Path
-    results_dir: Path
-    seed: int
-    voice_count: int
-    highlighted_voice_count: int
-
-
-@dataclass(frozen=True)
 class SynthesisProfile:
     name: str
     results_dir: Path
