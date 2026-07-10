@@ -8,3 +8,5 @@ results_vokan/
 results_vokan_no_diffusion/
 results_ljspeech/
 results_ljspeech_no_diffusion/
+results_styletts_finetune_epoch10/
+results_styletts_finetune_epoch10_no_diffusion/

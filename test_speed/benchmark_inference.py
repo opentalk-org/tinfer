@@ -18,6 +18,10 @@ from test_speed.benchmark_data import (
     RequestMetric,
     TextInput,
 )
+from test_speed.benchmark_corpus import (
+    configure_checkpoint_symbols,
+    phonemize_training_text,
+)
 
 
 def archive_wav_names(archive_path: Path) -> list[str]:
@@ -150,22 +154,34 @@ def synthesize_all(
     output_dir: Path,
     use_diffusion: bool,
     language: str,
+    use_training_phonemes: bool,
 ) -> tuple[list[RequestMetric], list[PhonemeMetric]]:
+    if use_training_phonemes:
+        configure_checkpoint_symbols(model, language)
     output_dir.mkdir(parents=True, exist_ok=True)
     request_metrics = []
     phoneme_metrics = []
     pairs = [(voice_id, text_input) for voice_id in voice_ids for text_input in text_inputs]
     for voice_id, text_input in tqdm(pairs, desc="Synthesize", unit="audio"):
+        model_text = (
+            phonemize_training_text(text_input.text, language)
+            if use_training_phonemes
+            else text_input.text
+        )
         style_params = StyleTTS2Params(
             use_diffusion=use_diffusion,
             language=language,
+            phonemized=use_training_phonemes,
         )
-        if model._text_token_count(text_input.text, style_params) > model._max_styletts_tokens:
+        if model._text_token_count(model_text, style_params) > model._max_styletts_tokens:
             raise RuntimeError(f"Input exceeds one model window: {text_input.text_id}")
+        generation_params = {"use_diffusion": use_diffusion, "language": language}
+        if use_training_phonemes:
+            generation_params["phonemized"] = True
         result = model.generate(
-            text_input.text,
+            model_text,
             {"voice_id": voice_id},
-            {"use_diffusion": use_diffusion, "language": language},
+            generation_params,
             {"alignment_type": AlignmentType.PHONEME},
         )
         voice_dir = output_dir / voice_id

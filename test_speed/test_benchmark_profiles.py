@@ -9,7 +9,9 @@ import soundfile as sf
 import tinfer.models.impl.styletts2.model.model as styletts2_model_module
 from tinfer.core.request import AlignmentItem
 from tinfer.models.impl.styletts2.model.inference_config import StyleTTS2Params
+from tinfer.models.impl.styletts2.model.phonemizer import StyleTTS2Phonemizer
 
+import test_speed.benchmark_corpus as corpus
 from test_speed.benchmark_data import ReferenceDuration, RequestMetric, TextInput
 from test_speed.benchmark_corpus import build_phoneme_grid
 from test_speed.benchmark_inference import measure_reference_durations, measure_result
@@ -20,6 +22,31 @@ from test_speed.benchmark_reporting import (
     shared_histogram_edges,
 )
 from test_speed.run_benchmark import disable_speed_correction
+
+
+class TrainingPhonemizerTests(unittest.TestCase):
+    def test_matches_backend_training_phonemes(self) -> None:
+        phonemize = getattr(corpus, "phonemize_training_text", None)
+        self.assertIsNotNone(phonemize)
+        assert phonemize is not None
+
+        result = phonemize("W tamtym momencie, kiedy wiedząc.", "pl")
+
+        self.assertEqual(result, "f tˈamtɨm mɔmˈɛɲtɕɛ, kʲˈɛdɨ vʲˈɛdʑɔnts.")
+
+    def test_checkpoint_symbols_replace_phonemizer_indices(self) -> None:
+        configure = getattr(corpus, "configure_checkpoint_symbols", None)
+        self.assertIsNotNone(configure)
+        assert configure is not None
+        phonemizer = StyleTTS2Phonemizer(language="pl")
+        model = SimpleNamespace(
+            _config={"symbols": ["$", "x", "ʲ"]},
+            _phonemizers={"pl": phonemizer},
+        )
+
+        configure(model, "pl")
+
+        self.assertEqual(phonemizer.word_index_dictionary, {"$": 0, "x": 1, "ʲ": 2})
 
 
 class WordTokenModel:
@@ -65,6 +92,7 @@ class PhonemeGridTests(unittest.TestCase):
             point_count=48,
             max_tokens=100,
             language="pl",
+            use_training_phonemes=False,
         )
         counts = [item.input_phoneme_tokens for item in grid]
 
@@ -82,6 +110,7 @@ class PhonemeGridTests(unittest.TestCase):
             point_count=48,
             max_tokens=500,
             language="pl",
+            use_training_phonemes=False,
         )
         counts = [item.input_phoneme_tokens for item in grid]
 
@@ -99,6 +128,7 @@ class PhonemeGridTests(unittest.TestCase):
             point_count=48,
             max_tokens=100,
             language="en-us",
+            use_training_phonemes=False,
         )
 
         self.assertEqual(set(model.languages), {"en-us"})

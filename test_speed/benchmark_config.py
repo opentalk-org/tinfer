@@ -34,6 +34,7 @@ class BenchmarkTarget:
     passage: str
     runtime_engine: str
     language: str
+    use_training_phonemes: bool
 
 
 MAGDA_TARGET = BenchmarkTarget(
@@ -48,6 +49,7 @@ MAGDA_TARGET = BenchmarkTarget(
     passage=POLISH_PASSAGE,
     runtime_engine="tensorrt",
     language="pl",
+    use_training_phonemes=False,
 )
 AGNIESZKA_TARGET = BenchmarkTarget(
     name="agnieszka",
@@ -68,6 +70,7 @@ AGNIESZKA_TARGET = BenchmarkTarget(
     passage=POLISH_PASSAGE,
     runtime_engine="tensorrt",
     language="pl",
+    use_training_phonemes=False,
 )
 OLAM_TARGET = BenchmarkTarget(
     name="olam",
@@ -83,6 +86,7 @@ OLAM_TARGET = BenchmarkTarget(
     passage=POLISH_PASSAGE,
     runtime_engine="tensorrt",
     language="pl",
+    use_training_phonemes=False,
 )
 LJSPEECH_VOICE = Path(
     "/workspace/converted_models/ljspeech/voices/ljspeech.pth"
@@ -99,6 +103,7 @@ VOKAN_TARGET = BenchmarkTarget(
     passage=ENGLISH_PASSAGE,
     runtime_engine="torch",
     language="en-us",
+    use_training_phonemes=False,
 )
 LJSPEECH_TARGET = BenchmarkTarget(
     name="ljspeech",
@@ -112,6 +117,7 @@ LJSPEECH_TARGET = BenchmarkTarget(
     passage=ENGLISH_PASSAGE,
     runtime_engine="torch",
     language="en-us",
+    use_training_phonemes=False,
 )
 LIBRI_TARGET = BenchmarkTarget(
     name="libri",
@@ -127,6 +133,7 @@ LIBRI_TARGET = BenchmarkTarget(
     passage=ENGLISH_PASSAGE,
     runtime_engine="torch",
     language="en-us",
+    use_training_phonemes=False,
 )
 STYLETTS_FINETUNE_EPOCH10_TARGET = BenchmarkTarget(
     name="styletts_finetune_epoch10",
@@ -136,12 +143,18 @@ STYLETTS_FINETUNE_EPOCH10_TARGET = BenchmarkTarget(
         ROOT / "test_speed/results_styletts_finetune_epoch10_no_diffusion"
     ),
     seed=20260710,
-    voice_count=1,
-    highlighted_voice_count=1,
-    voice_source=TensorVoiceSource(LJSPEECH_VOICE),
+    voice_count=10,
+    highlighted_voice_count=4,
+    voice_source=ArchiveVoiceSource(
+        Path(
+            "/workspace/converted_models/styletts_finetune_epoch10/"
+            "backend_references.zip"
+        )
+    ),
     passage=POLISH_PASSAGE,
     runtime_engine="torch",
     language="pl",
+    use_training_phonemes=True,
 )
 TARGETS = (
     MAGDA_TARGET,

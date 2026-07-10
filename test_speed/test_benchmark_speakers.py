@@ -264,6 +264,7 @@ class RunnerTargetTests(unittest.TestCase):
         script = Path("test_speed/run_benchmark.sh").read_text()
 
         self.assertIn('python -m test_speed.run_benchmark "$@"', script)
+        self.assertIn("--with phonemizer", script)
 
     def test_olam_selects_only_olam_outputs(self) -> None:
         runner = import_module("test_speed.run_benchmark")
@@ -275,8 +276,8 @@ class RunnerTargetTests(unittest.TestCase):
         self.assertEqual(targets[0].voice_count, 1)
 
         finetune = runner.select_targets("styletts_finetune_epoch10")[0]
-        self.assertEqual((finetune.voice_count, finetune.language), (1, "pl"))
-        self.assertEqual(finetune.runtime_engine, "torch")
+        self.assertEqual((finetune.voice_count, finetune.language), (10, "pl"))
+        self.assertEqual((finetune.voice_source.archive_path.name, finetune.use_training_phonemes), ("backend_references.zip", True))
 
     def test_english_targets_use_english_phonemization(self) -> None:
         runner = import_module("test_speed.run_benchmark")

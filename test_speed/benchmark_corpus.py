@@ -1,7 +1,9 @@
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Protocol
 
 import numpy as np
+from phonemizer.backend import EspeakBackend
 
 from tinfer.models.impl.styletts2.model.inference_config import StyleTTS2Params
 
@@ -69,10 +71,43 @@ class TokenCountingModel(Protocol):
     ) -> int: ...
 
 
+class SymbolPhonemizer(Protocol):
+    word_index_dictionary: dict[str, int]
+    index_to_symbol: dict[int, str]
+
+
+class CheckpointSymbolModel(Protocol):
+    _config: dict[str, object]
+    _phonemizers: dict[str, SymbolPhonemizer]
+
+
 @dataclass(frozen=True)
 class PrefixCandidate:
     text: str
     token_count: int
+
+
+@lru_cache(maxsize=None)
+def _training_backend(language: str) -> EspeakBackend:
+    return EspeakBackend(language, preserve_punctuation=True, with_stress=True)
+
+
+def phonemize_training_text(text: str, language: str) -> str:
+    phonemes = _training_backend(language).phonemize([text.strip()], strip=True)
+    assert len(phonemes) == 1, "Training phonemizer returned an invalid batch"
+    return str(phonemes[0]).strip()
+
+
+def configure_checkpoint_symbols(
+    model: CheckpointSymbolModel,
+    language: str,
+) -> None:
+    symbols = [str(symbol) for symbol in model._config["symbols"]]
+    phonemizer = model._phonemizers[language]
+    phonemizer.word_index_dictionary = {
+        symbol: index for index, symbol in enumerate(symbols)
+    }
+    phonemizer.index_to_symbol = dict(enumerate(symbols))
 
 
 def build_phoneme_grid(
@@ -81,15 +116,26 @@ def build_phoneme_grid(
     point_count: int,
     max_tokens: int,
     language: str,
+    use_training_phonemes: bool,
 ) -> list[TextInput]:
+    if use_training_phonemes:
+        configure_checkpoint_symbols(model, language)
     words = passage.split()
     candidates = []
     overflow_found = False
     for word_count in range(1, len(words) + 1):
         text = " ".join(words[:word_count])
+        model_text = (
+            phonemize_training_text(text, language)
+            if use_training_phonemes
+            else text
+        )
         token_count = model._text_token_count(
-            text,
-            StyleTTS2Params(language=language),
+            model_text,
+            StyleTTS2Params(
+                language=language,
+                phonemized=use_training_phonemes,
+            ),
         ) - 1
         if token_count > max_tokens:
             overflow_found = True

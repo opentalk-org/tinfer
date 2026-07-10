@@ -107,7 +107,7 @@ class InferenceTests(unittest.TestCase):
                 [TextInput("short", "No", 4)],
                 Path(directory),
                 False,
-                "en-us",
+                "en-us", False,
             )
 
         self.assertEqual(
