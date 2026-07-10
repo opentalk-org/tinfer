@@ -15,10 +15,8 @@ These can be set as **defaults** on StreamingTTSConfig (where applicable) and ov
 
 | Parameter (in `params`) | Type | Default source | Description |
 | ----------------------- | ---- | ----------------- | ----------- |
-| **chunk_length_schedule** | `list[int]` | `default_chunk_schedule` | Max character counts per chunk index. When pending text length exceeds the current value, generation is triggered. |
-| **min_chunk_length_schedule** | `list[int]` | `default_min_chunk_schedule` | Minimum chunk sizes used by the chunking algorithm. Used mostly for time generation trigger |
-| **min_chars_trigger** | `int` | `min_chars_trigger` | Generation does not run until pending text has at least this many characters. If text length is below this threshold, even `force_generate()` won't generate audio. (SETTING IT BELOW 10 can cause unexpected errors.) |
-| **timeout_trigger_ms** | `float` | `default_timeout_ms` | After this many milliseconds since the last commit (or first text), generation is triggered if there is enough pending text (above min_chunk_length_schedule). |
+| **chunk_length_schedule** | `list[int]` | `default_chunk_schedule` | Immediate-generation triggers and preferred split targets. The next entry supplies the current chunk's inclusive no-split limit. |
+| **timeout_trigger_ms** | `float` | `default_timeout_ms` | Maximum wait from the first pending text, or the most recently queued chunk, before generation. Additional text joins the active window without restarting it. |
 | **alignment_type** | **AlignmentType** | `default_alignment_type` | Alignment granularity for this stream (e.g. `AlignmentType.WORD`, `AlignmentType.CHAR`, `AlignmentType.NONE`). See [Alignments](/concepts/alignments). |
 | **target_sample_rate** | `int` or `None` | Per-request only | Desired output sample rate. Not in config; pass in `params` when creating a stream. |
 | **target_encoding** | **AudioFormat** or `str` or `None` | Per-request only | Desired output encoding (e.g. PCM, MP3). Not in config; pass in `params`. See [AudioFormat](/api/audio-format). |

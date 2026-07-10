@@ -1,14 +1,17 @@
-from dataclasses import dataclass, asdict, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-import yaml
 from typing import Literal
+
+import yaml
+
 from tinfer.core.request import AlignmentType
+
+
 @dataclass
 class StreamingTTSConfig:
 
     default_chunk_schedule: list[int] = field(default_factory=lambda: [80, 160, 250, 290])
     default_alignment_type: AlignmentType = AlignmentType.WORD
-    min_chars_trigger: int = 10
     default_timeout_ms: float = 80.0
     # default_dtype: str = "bfloat16" # some bugs with bfloat16
     executor_type: Literal["process"] = "process"

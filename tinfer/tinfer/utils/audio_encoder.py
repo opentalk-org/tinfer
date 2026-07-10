@@ -111,19 +111,18 @@ def parse_output_format(format_str: str) -> AudioFormat:
             return AudioFormat.ULAW_8000
         elif format_str.startswith("alaw"):
             return AudioFormat.ALAW_8000
-        elif format_str.startswith("opus"):
-            if "48000" in format_str:
-                if "32" in format_str:
-                    return AudioFormat.OPUS_48000_32
-                elif "64" in format_str:
-                    return AudioFormat.OPUS_48000_64
-                elif "96" in format_str:
-                    return AudioFormat.OPUS_48000_96
-                elif "128" in format_str:
-                    return AudioFormat.OPUS_48000_128
-                elif "192" in format_str:
-                    return AudioFormat.OPUS_48000_192
-        
+        elif format_str.startswith("opus") and "48000" in format_str:
+            if "32" in format_str:
+                return AudioFormat.OPUS_48000_32
+            elif "64" in format_str:
+                return AudioFormat.OPUS_48000_64
+            elif "96" in format_str:
+                return AudioFormat.OPUS_48000_96
+            elif "128" in format_str:
+                return AudioFormat.OPUS_48000_128
+            elif "192" in format_str:
+                return AudioFormat.OPUS_48000_192
+    
         return AudioFormat.MP3_44100_32
 
 

@@ -9,12 +9,12 @@ description: Configuration for the StreamingTTS engine. Controls chunk schedules
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| **default_chunk_schedule** | `list[int]` | `[120, 160, 250, 290]` | Max character counts per chunk index. When pending text length exceeds the current schedule value, generation is triggered. |
-| **default_min_chunk_schedule** | `list[int]` | `[50, 80, 120, 150]` | Minimum chunk sizes used by the chunker. |
-| **min_chars_trigger** | `int` | `10` | Generation does not run until pending text has at least this many characters. |
-| **default_timeout_ms** | `float` | `80.0` | After this many milliseconds since the last commit (or first text), generation is triggered if there is enough pending text. |
+| **default_chunk_schedule** | `list[int]` | `[80, 160, 250, 290]` | Immediate-generation triggers and preferred split targets. The next entry is the current chunk's inclusive no-split limit. |
+| **default_timeout_ms** | `float` | `80.0` | Maximum wait from the first pending text, or the most recently queued chunk, before generation. Additional text does not restart this timer. |
 
 These defaults can be overridden per stream by passing the same keys in the **params** dict to **create_stream** (e.g. **chunk_length_schedule**, **timeout_trigger_ms**). See [Parameters reference](/concepts/parameters) for the full mapping and [Streaming and triggers](/concepts/streaming).
+
+For `[120, 160, 250, 290]` at chunk index zero, 121 characters trigger generation immediately, but splitting is deferred through 160 characters. Text above 160 characters is split around the 120-character target. At the final entry, the no-split limit is extrapolated from the preceding increase; a one-entry schedule receives one-third headroom.
 
 ## Alignment and output
 

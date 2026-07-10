@@ -30,9 +30,28 @@ SENTS = [
  "We will meet at the corner cafe around half past seven tonight.",
 ]
 
+TIE = "͡"  # espeak combining double inverted breve
+
+class BootphonFaithfulPhonemizer(StyleTTS2Phonemizer):
+    """The LJSpeech checkpoint was trained on canonical StyleTTS2 phonemes
+    (bootphon `phonemizer`, espeak, NO tie chars). tinfer's engine inserts a
+    U+0361 tie into every diphthong/affricate; stripping it reproduces the
+    exact bootphon token stream the model expects."""
+    def process_text(self, text, phonemize=True, word_alignment=False):
+        out = super().process_text(text, phonemize=phonemize, word_alignment=word_alignment)
+        if isinstance(out, tuple):
+            return out[0].replace(TIE, ""), out[1]
+        return out.replace(TIE, "")
+    def process_text_with_original_spans(self, text):
+        processed, data = super().process_text_with_original_spans(text)
+        return processed.replace(TIE, ""), data
+
 m = StyleTTS2(device="cuda")
 m.load(MODEL, device="cuda", compile_model=False, load_style_encoder=True, runtime_engine="torch")
-m._phonemizer = StyleTTS2Phonemizer(language="en-us")
+_ph = BootphonFaithfulPhonemizer(language="en-us")
+m._default_language = "en-us"
+m._phonemizer = _ph
+m._phonemizers = {"en-us": _ph}
 m.load_voices_from_folder("/workspace/converted_models/ljspeech/voices")
 decoder = m._model.decoder
 adains = [mod for mod in decoder.modules() if isinstance(mod, AdaIN1d)]

@@ -5,7 +5,7 @@ from time import monotonic
 
 import pysbd
 
-from tinfer.core.request import TTSRequest
+from tinfer.core.request import PreparedTextChunk, TTSRequest
 
 
 class TextChunker:
@@ -13,39 +13,41 @@ class TextChunker:
         self._segmenter = pysbd.Segmenter(language=language, clean=False)
 
     def get_chunks(self, request: TTSRequest, single_chunk: bool = False):
-        now = monotonic()
-        pending_text = request.get_pending_text()
-
-        if not request.should_trigger_now(now):
-            return []
-
         current_chunk_index = request.chunker_state.get("chunk_index", 0)
-        chunks = self.split_text_if_needed(pending_text, request, current_chunk_index)
-        chunks = self._enforce_min_chars_trigger(chunks, request.min_chars_trigger)
-        if not chunks:
+        if single_chunk and request.prepared_chunks:
+            prepared = request.prepared_chunks.pop(0)
+            if not prepared.text.strip():
+                raise ValueError("text chunker produced an empty chunk")
+            request.chunker_state["chunk_index"] = current_chunk_index + 1
+            return [(prepared.text, current_chunk_index, not request.prepared_chunks, prepared.text_span)]
+
+        if not request.should_trigger_now(monotonic()):
             return []
+
+        pending_text = request.get_pending_text()
+        chunks = self.split_text_if_needed(pending_text, request, current_chunk_index)
+        if not chunks or any(not chunk.strip() for chunk in chunks):
+            raise ValueError("text chunker produced an empty chunk")
+        prepared_chunks = self._prepare_source_spans(pending_text, chunks, request.text_committed_pos)
 
         if single_chunk:
-            chunk = chunks[0]
-            text_span_start = request.text_committed_pos
-            text_span_end = request.text_committed_pos + len(chunk)
+            prepared = prepared_chunks[0]
+            request.prepared_chunks.extend(prepared_chunks[1:])
             request.chunker_state["chunk_index"] = current_chunk_index + 1
-            return [(chunk, current_chunk_index, len(chunks) == 1, (text_span_start, text_span_end))]
+            return [(prepared.text, current_chunk_index, not request.prepared_chunks, prepared.text_span)]
 
         results = []
-        offset = 0
-        for i, chunk in enumerate(chunks):
-            text_span_start = request.text_committed_pos + offset
-            text_span_end = text_span_start + len(chunk)
-            results.append((chunk, current_chunk_index, i == len(chunks) - 1, (text_span_start, text_span_end)))
-            offset += len(chunk)
+        for i, prepared in enumerate(prepared_chunks):
+            results.append(
+                (prepared.text, current_chunk_index, i == len(prepared_chunks) - 1, prepared.text_span)
+            )
             current_chunk_index += 1
 
         request.chunker_state["chunk_index"] = current_chunk_index
         return results
 
     def split_text_if_needed(self, text: str, request: TTSRequest, chunk_index: int) -> list[str]:
-        if len(text) <= self.get_max_chunk_size(request, chunk_index):
+        if len(text) <= request.get_chunk_limits(chunk_index).no_split_limit:
             return [text]
 
         sentence_chunks = self._sentence_chunks(text)
@@ -54,41 +56,46 @@ class TextChunker:
             pieces.extend(self._split_oversized(sentence, request, chunk_index + len(pieces)))
         return self._pack_to_schedule(pieces, request, chunk_index)
 
-    def _enforce_min_chars_trigger(self, chunks: list[str], min_chars_trigger: int) -> list[str]:
-        if min_chars_trigger <= 0:
-            return chunks
+    def _prepare_source_spans(
+        self,
+        text: str,
+        chunks: list[str],
+        text_offset: int,
+    ) -> list[PreparedTextChunk]:
+        prepared: list[PreparedTextChunk] = []
+        cursor = 0
 
-        result = []
-        pending = ""
+        for raw_chunk in chunks:
+            chunk = raw_chunk.strip()
+            start = text.find(chunk, cursor)
+            if start < 0:
+                raise ValueError("text chunker output does not match source text")
+            end = start + len(chunk)
+            if prepared:
+                previous = prepared[-1]
+                prepared[-1] = PreparedTextChunk(
+                    text=previous.text,
+                    text_span=(previous.text_span[0], text_offset + start),
+                )
+            prepared.append(
+                PreparedTextChunk(
+                    text=chunk,
+                    text_span=(text_offset + start, text_offset + end),
+                )
+            )
+            cursor = end
 
-        for chunk in chunks:
-            if not chunk:
-                continue
+        if not prepared:
+            raise ValueError("text chunker produced an empty chunk")
+        last = prepared[-1]
+        prepared[-1] = PreparedTextChunk(
+            text=last.text,
+            text_span=(last.text_span[0], text_offset + len(text)),
+        )
+        return prepared
 
-            if pending:
-                pending += chunk
-                if len(pending.strip()) >= min_chars_trigger:
-                    result.append(pending)
-                    pending = ""
-                continue
-
-            if len(chunk.strip()) >= min_chars_trigger:
-                result.append(chunk)
-            else:
-                pending = chunk
-
-        if pending:
-            if result:
-                result[-1] += pending
-            elif len(pending.strip()) >= min_chars_trigger:
-                result.append(pending)
-
-        return result
-
-    def get_max_chunk_size(self, request: TTSRequest, chunk_index: int) -> int:
-        if chunk_index >= len(request.chunk_length_schedule):
-            return request.chunk_length_schedule[-1]
-        return request.chunk_length_schedule[chunk_index]
+    def get_target_chunk_size(self, request: TTSRequest, chunk_index: int) -> int:
+        return request.get_chunk_limits(chunk_index).trigger
 
     def _sentence_chunks(self, text: str) -> list[str]:
         chunks: list[str] = []
@@ -115,7 +122,7 @@ class TextChunker:
             next_pending: list[str] = []
             changed = False
             for part in pending:
-                max_size = self.get_max_chunk_size(request, chunk_index + len(next_pending))
+                max_size = self.get_target_chunk_size(request, chunk_index + len(next_pending))
                 if len(part) <= max_size:
                     next_pending.append(part)
                     continue
@@ -131,12 +138,26 @@ class TextChunker:
 
         result: list[str] = []
         for part in pending:
-            max_size = self.get_max_chunk_size(request, chunk_index + len(result))
+            max_size = self.get_target_chunk_size(request, chunk_index + len(result))
             if len(part) <= max_size:
                 result.append(part)
             else:
-                result.extend(part[i : i + max_size] for i in range(0, len(part), max_size))
+                result.extend(self._split_by_derived_limits(part, request, chunk_index + len(result)))
         return [chunk for chunk in result if chunk]
+
+    def _split_by_derived_limits(self, text: str, request: TTSRequest, chunk_index: int) -> list[str]:
+        chunks: list[str] = []
+        remaining = text
+
+        while remaining:
+            limits = request.get_chunk_limits(chunk_index + len(chunks))
+            if len(remaining) <= limits.no_split_limit:
+                chunks.append(remaining)
+                break
+            chunks.append(remaining[:limits.trigger])
+            remaining = remaining[limits.trigger:]
+
+        return chunks
 
     def _pack_to_schedule(self, pieces: list[str], request: TTSRequest, chunk_index: int) -> list[str]:
         chunks: list[str] = []
@@ -147,7 +168,7 @@ class TextChunker:
                 continue
 
             current_index = chunk_index + len(chunks)
-            max_size = self.get_max_chunk_size(request, current_index)
+            max_size = self.get_target_chunk_size(request, current_index)
             if current and len(current) + len(piece) > max_size:
                 chunks.append(current)
                 current = piece
@@ -156,6 +177,12 @@ class TextChunker:
 
         if current:
             chunks.append(current.rstrip())
+
+        if len(chunks) > 1:
+            previous_index = chunk_index + len(chunks) - 2
+            no_split_limit = request.get_chunk_limits(previous_index).no_split_limit
+            if len(chunks[-2]) + len(chunks[-1]) <= no_split_limit:
+                chunks[-2] += chunks.pop()
 
         return [chunk for chunk in chunks if chunk.strip()]
 

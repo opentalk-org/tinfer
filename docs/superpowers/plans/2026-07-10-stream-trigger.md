@@ -27,7 +27,8 @@
 
 **Interfaces:**
 - Produces: `TTSRequest.generation_window_started_at: float | None`
-- Produces: `TTSRequest.prepared_chunks: list[str]`
+- Produces: `PreparedTextChunk(text: str, text_span: tuple[int, int])`
+- Produces: `TTSRequest.prepared_chunks: list[PreparedTextChunk]`
 - Produces: `TTSRequest.append_text(text: str) -> bool`, returning whether a generation window started
 - Consumes: `StreamingTTS.schedule_timeout(request: TTSRequest)` from Task 3
 
@@ -58,7 +59,7 @@ Delete `_enforce_min_chars_trigger()` and its call. The chunk schedule remains t
 
 - [ ] **Step 2: Cache and drain split snapshots**
 
-When `single_chunk=True` and splitting returns multiple chunks, retain every chunk after the first in `request.prepared_chunks`. On later calls, pop a prepared chunk before calling `should_trigger_now()` so it queues immediately after the preceding result.
+When `single_chunk=True` and splitting returns multiple chunks, retain every chunk after the first in `request.prepared_chunks`. Store trimmed synthesis text separately from its exact original source span so whitespace advances buffer/alignment positions without exceeding the synthesis schedule. On later calls, pop a prepared chunk before calling `should_trigger_now()` so it queues immediately after the preceding result.
 
 - [ ] **Step 3: Fail clearly on impossible internal empty chunks**
 
@@ -124,7 +125,7 @@ Run `python3 -m compileall -q tinfer/tinfer` and expect exit status 0.
 
 - [ ] **Step 2: Scan the removed API**
 
-Run `rg -n "min_chars_trigger" tinfer server docs examples` and expect no results.
+Run `rg -n "min_chars_trigger" tinfer server docs/astro examples` and expect no results.
 
 - [ ] **Step 3: Run direct scheduler probes**
 

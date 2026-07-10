@@ -1,29 +1,34 @@
+import asyncio
+import heapq
+import threading
+import uuid
+from time import monotonic
 from typing import Any
 
-from tinfer.core.request import TTSRequest, TTSRequestIPC, StreamParams
-from tinfer.config.engine_config import StreamingTTSConfig
-from tinfer.core.stream import TTSStream
-from tinfer.utils.text_chunker import TextChunker
-import uuid
-import yaml
-import threading
-from tinfer.executor.process_executor import ProcessExecutor
-import queue
-import time
-from tinfer.core.request import AudioChunk, AudioChunkIPC
-from time import monotonic
 import numpy as np
-from tinfer.core.request import Alignment, AlignmentItem
-from tinfer.utils.audio_encoder import AudioFormat, parse_output_format
+import yaml
+
+from tinfer.config.engine_config import StreamingTTSConfig
+from tinfer.core.request import (
+    Alignment,
+    AlignmentItem,
+    AudioChunk,
+    AudioChunkIPC,
+    StreamParams,
+    TTSRequest,
+    TTSRequestIPC,
+)
+from tinfer.core.stream import TTSStream
+from tinfer.executor.process_executor import ProcessExecutor
 from tinfer.support.errors import InferenceError
-import asyncio
 from tinfer.support.observability import get_logger
+from tinfer.utils.audio_encoder import AudioFormat, parse_output_format
+from tinfer.utils.text_chunker import TextChunker
 
 log = get_logger(__name__)
 
 _STREAM_PARAM_KEYS = frozenset({
     "chunk_length_schedule",
-    "min_chars_trigger",
     "timeout_trigger_ms",
     "alignment_type",
     "target_sample_rate",
@@ -39,7 +44,10 @@ class StreamingTTS:
         self._requests: dict[str, TTSRequest] = {}
 
         self.timeout_thread = None
-        self.timeout_queue = queue.Queue()
+        self._timeout_events: list[tuple[float, int, str, float]] = []
+        self._timeout_sequence = 0
+        self._timeout_condition = threading.Condition()
+        self._scheduler_lock = threading.RLock()
         self._stop_timeout = False
 
         self.executor = ProcessExecutor(
@@ -102,7 +110,7 @@ class StreamingTTS:
         merged_items: list[AlignmentItem] = []
         alignment_type = None
 
-        char_offset = 0
+        text_end = 0
         time_offset_ms = 0
 
         for c in chunks:
@@ -114,15 +122,14 @@ class StreamingTTS:
                         merged_items.append(
                             AlignmentItem(
                                 item=it.item,
-                                char_start=it.char_start + char_offset,
-                                char_end=it.char_end + char_offset,
+                                char_start=it.char_start + c.text_span[0],
+                                char_end=it.char_end + c.text_span[0],
                                 start_ms=it.start_ms + time_offset_ms,
                                 end_ms=it.end_ms + time_offset_ms,
                             )
                         )
 
-            span_len = max(0, int(c.text_span[1]) - int(c.text_span[0]))
-            char_offset += span_len
+            text_end = max(text_end, int(c.text_span[1]))
 
             raw_len = int(c.audio.shape[-1]) if hasattr(c.audio, "shape") and len(c.audio.shape) > 0 else int(len(c.audio))
             num_samples = raw_len // 2 if hasattr(c.audio, "dtype") and c.audio.dtype == np.uint8 else raw_len
@@ -138,7 +145,7 @@ class StreamingTTS:
             audio=audio,
             sample_rate=sample_rate,
             chunk_index=0,
-            text_span=(0, char_offset),
+            text_span=(0, text_end),
             alignments=merged_alignment,
         )
 
@@ -185,21 +192,45 @@ class StreamingTTS:
         self.timeout_thread = threading.Thread(target=self.run_timeout_loop, daemon=True)
         self.timeout_thread.start()
 
-    def run_timeout_loop(self):
-        while not self._stop_timeout:
-            t, request_id = self.timeout_queue.get()
-            now = time.monotonic()
+    def schedule_timeout(self, request: TTSRequest) -> None:
+        assert request.generation_window_started_at is not None, "cannot schedule a timeout without a generation window"
+        started_at = request.generation_window_started_at
+        deadline = started_at + request.timeout_trigger_ms / 1000.0
+        with self._timeout_condition:
+            self._timeout_sequence += 1
+            heapq.heappush(
+                self._timeout_events,
+                (deadline, self._timeout_sequence, request.request_id, started_at),
+            )
+            self._timeout_condition.notify()
 
-            if request_id in self._requests:
-                request = self._requests[request_id]
-                timeout_trigger_ms = request.timeout_trigger_ms
-                wait_time = max(0.0, t + timeout_trigger_ms / 1000.0 - now)
-                if wait_time > 0:
-                    time.sleep(wait_time)
-                
+    def run_timeout_loop(self):
+        while True:
+            with self._timeout_condition:
+                while not self._stop_timeout:
+                    if not self._timeout_events:
+                        self._timeout_condition.wait()
+                        continue
+                    deadline, _sequence, request_id, started_at = self._timeout_events[0]
+                    wait_time = deadline - monotonic()
+                    if wait_time > 0:
+                        self._timeout_condition.wait(timeout=wait_time)
+                        continue
+                    heapq.heappop(self._timeout_events)
+                    break
+                if self._stop_timeout:
+                    return
+
+            request = self._requests.get(request_id)
+            if request is not None and request.generation_window_started_at == started_at:
                 self.signal_input()
 
     def process_results(self, results: list[AudioChunkIPC]):
+        with self._scheduler_lock:
+            self._process_results_locked(results)
+            self._signal_input_locked()
+
+    def _process_results_locked(self, results: list[AudioChunkIPC]):
         for result in results:
             request_id = result.request_id
             if request_id not in self._requests:
@@ -242,8 +273,6 @@ class StreamingTTS:
                 request.collected_time = 0.0
                 request.start_time = None
 
-        self.signal_input()
-
     def create_stream(self, model_id: str, voice_id: str, params: StreamParams | dict[str, Any]) -> TTSStream:
         request_id = str(uuid.uuid4())
         params = dict(params)
@@ -258,7 +287,6 @@ class StreamingTTS:
             "tts_params": tts_params,
             "nonce": str(uuid.uuid4()),
             "chunk_length_schedule": self.config.default_chunk_schedule.copy(),
-            "min_chars_trigger": self.config.min_chars_trigger,
             "timeout_trigger_ms": self.config.default_timeout_ms,
             "alignment_type": self.config.default_alignment_type,
             "target_sample_rate": target_sample_rate,
@@ -281,6 +309,10 @@ class StreamingTTS:
         return stream
 
     def _cancel_request(self, request_id: str):
+        with self._scheduler_lock:
+            self._cancel_request_locked(request_id)
+
+    def _cancel_request_locked(self, request_id: str):
         if request_id not in self._requests:
             return
 
@@ -289,14 +321,35 @@ class StreamingTTS:
         request = self._requests[request_id]
         request.text_buffer = ""
         request.text_committed_pos = 0
+        request.generation_window_started_at = None
+        request.prepared_chunks.clear()
         request.force_next_generation = False
         request.pending_chunks = 0
         request.nonce = str(uuid.uuid4())
         request.audio_queue.queue.clear()
         log.info("stream_cancelled", request_id=request_id)
 
+    def add_text(self, request: TTSRequest, text: str) -> None:
+        if not text.strip():
+            return
+        with self._scheduler_lock:
+            starts_generation_window = request.append_text(text)
+            if starts_generation_window:
+                self.schedule_timeout(request)
+            self._signal_input_locked()
+
+    def force_generate(self, request: TTSRequest) -> None:
+        with self._scheduler_lock:
+            if not request.get_pending_text().strip():
+                return
+            request.force_next_generation = True
+            self._signal_input_locked()
+
     def signal_input(self):
-        now = monotonic()
+        with self._scheduler_lock:
+            self._signal_input_locked()
+
+    def _signal_input_locked(self):
         to_send = []
         requests_snapshot = list(self._requests.values())
         for request in requests_snapshot:
@@ -361,8 +414,13 @@ class StreamingTTS:
                     is_final=is_final,
                 )
 
-                if not is_final and len(request.get_pending_text()) > 0:
-                    self.timeout_queue.put((now, request.request_id))
+                pending_text = request.get_pending_text()
+                if pending_text.strip():
+                    request.generation_window_started_at = monotonic()
+                    if not request.prepared_chunks:
+                        self.schedule_timeout(request)
+                else:
+                    request.generation_window_started_at = None
 
         if to_send:
             log.info("engine_dispatch", request_count=len(to_send), active_streams=len(self._requests))
@@ -410,7 +468,9 @@ class StreamingTTS:
             raise RuntimeError("warmup() cannot run inside an active event loop; use async_warmup() instead")
 
     def stop(self):
-        self._stop_timeout = True
+        with self._timeout_condition:
+            self._stop_timeout = True
+            self._timeout_condition.notify_all()
         if self.timeout_thread and self.timeout_thread.is_alive():
             self.timeout_thread.join(timeout=1.0)
         if self.executor:

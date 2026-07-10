@@ -49,7 +49,6 @@ class WebSocketHandler:
         self.inactivity_task: Optional[asyncio.Task] = None
         self._text_added_event = asyncio.Event()
         self._stream_task: Optional[asyncio.Task] = None
-        self._close_requested = False
         self._streaming_started = False
         self._first_audio_timer = FirstAudioLatencyTimer()
 
@@ -143,11 +142,7 @@ class WebSocketHandler:
         flush = data.get("flush", False)
 
         if not text.strip():
-            if self.stream and try_trigger_generation:
-                self.stream.force_generate()
-                self._text_added_event.set()
-            elif self.stream and not try_trigger_generation:
-                self._close_requested = True
+            if self.stream and (try_trigger_generation or flush):
                 self.stream.force_generate()
                 self._text_added_event.set()
             self._reset_inactivity_timer()
@@ -221,14 +216,7 @@ class WebSocketHandler:
                         payload["first_audio_latency_ms"] = first_audio_latency_ms
                     log.info("websocket_audio_chunk_sent", **payload)
                 if sent_any and not self.closed and not self.ws.closed:
-                    should_exit = await self._send_final_if_needed()
-                    if should_exit:
-                        if self.stream:
-                            try:
-                                self.stream.close()
-                            except Exception:
-                                pass
-                        break
+                    self._reset_inactivity_timer()
                 if self.closed or self.ws.closed:
                     break
                 try:
@@ -302,17 +290,6 @@ class WebSocketHandler:
             log.exception("websocket_send_error_failed")
         finally:
             self.closed = True
-
-    async def _send_final_if_needed(self) -> bool:
-        if self.closed or self.ws.closed:
-            return False
-        if not self._close_requested:
-            return False
-        try:
-            await self.ws.send_str(json.dumps({"isFinal": True}))
-        except Exception:
-            pass
-        return True
 
     def _start_inactivity_timer(self) -> None:
         self._reset_inactivity_timer()

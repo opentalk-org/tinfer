@@ -3,7 +3,7 @@ title: Streaming and triggers
 description: "How streaming synthesis works: creating a stream, adding text, when generation runs, and how to consume chunks synchronously or asynchronously."
 ---
 
-With streaming, you create a **stream** for one synthesis request, feed text over time, and consume audio chunks as they are produced. Generation can start when enough text has been added, after a timeout, when the buffer exceeds a length threshold, or when you call `force_generate()`.
+With streaming, you create a **stream** for one synthesis request, feed text over time, and consume audio chunks as they are produced. Generation can start after a timeout, when the buffer exceeds a length threshold, or when you call `force_generate()`.
 
 ## Creating a stream
 
@@ -16,18 +16,18 @@ Each stream is bound to one request (one `model_id`, one `voice_id`). The `param
 
 ## Adding text and triggering generation
 
-- **`stream.add_text(text)`** — Appends `text` to the stream’s buffer and signals the engine to consider generation. It does not block.
+- **`stream.add_text(text)`** — Appends non-whitespace `text` to the stream’s buffer and signals the engine to consider generation. Whitespace-only additions are silently ignored. It does not block.
 - **`stream.force_generate()`** — Marks that the next engine tick should generate from the current pending text, regardless of length or timeout. Useful when you have finished feeding a fragment and want immediate synthesis.
 
-Generation runs when all of the following hold:
+Generation requires at least one non-whitespace pending character and one of:
 
-1. Pending text length is at least **`min_chars_trigger`** (config or per-stream).
-2. At least one of:
-   - **`force_generate()`** was called (then the flag is consumed and generation runs), or
-   - **Timeout:** time since last commit (or first text) is at least **`timeout_trigger_ms`**, or
-   - **Length:** pending text length exceeds the current **chunk length schedule** value for this stream.
+- **`force_generate()`** was called, or
+- **Timeout:** at least **`timeout_trigger_ms`** has passed since the first pending text or the most recently queued chunk, or
+- **Length:** pending text length exceeds the current **chunk length schedule** value for this stream.
 
-So you can either push text and rely on automatic triggering (timeout or length), or push text and call `force_generate()` when you want to flush the buffer immediately.
+The schedule value triggers immediate generation and remains the preferred split target, but the next schedule entry is the inclusive no-split limit. With `[120, 160, 250, 290]` at chunk index zero, 1–120 characters wait for timeout or force, 121–160 generate immediately as one chunk, and 161 or more generate immediately with splitting around 120. The final no-split limit is extrapolated from the last schedule increase.
+
+Additional text does not restart an active timeout window. Queueing a chunk starts a new window. If one pending-text snapshot is split into multiple chunks, its remaining chunks generate immediately as the preceding chunks finish; text added after that snapshot follows the normal timeout and length triggers.
 
 ## Consuming chunks
 

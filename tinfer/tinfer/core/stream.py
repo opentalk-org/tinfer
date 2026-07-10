@@ -1,7 +1,8 @@
-from tinfer.core.request import TTSRequest
-from typing import Any
 import asyncio
 import queue
+
+from tinfer.core.request import TTSRequest
+
 
 class TTSStream:
     def __init__(self, request: TTSRequest, engine):
@@ -9,15 +10,12 @@ class TTSStream:
         self._engine = engine
 
     def add_text(self, text: str):
-        self._request.append_text(text)
-        self._signal_input()
-
-    def _signal_input(self):
-        self._engine.signal_input()
+        if not text.strip():
+            return
+        self._engine.add_text(self._request, text)
 
     def force_generate(self):
-        self._request.force_next_generation = True
-        self._signal_input()
+        self._engine.force_generate(self._request)
 
     def cancel(self):
         self._engine._cancel_request(self._request.request_id)

@@ -1,12 +1,12 @@
-import uuid
-
-from dataclasses import dataclass, field
-from typing import Any, TypedDict
 import queue
+from dataclasses import dataclass, field
 from enum import Enum
 from time import monotonic
+from typing import Any, TypedDict
+import uuid
 
 import numpy as np
+
 from tinfer.utils.audio_encoder import AudioFormat
 
 
@@ -19,7 +19,6 @@ class AlignmentType(Enum):
 
 class StreamParams(TypedDict, total=False):
     chunk_length_schedule: list[int]
-    min_chars_trigger: int
     timeout_trigger_ms: float
     alignment_type: AlignmentType
     target_sample_rate: int | None
@@ -86,6 +85,19 @@ class TTSRequestIPC:
     first_audio_latency_started_at: float | None = None
     source_text: str | None = None
 
+
+@dataclass(frozen=True)
+class PreparedTextChunk:
+    text: str
+    text_span: tuple[int, int]
+
+
+@dataclass(frozen=True)
+class ChunkLimits:
+    trigger: int
+    no_split_limit: int
+
+
 @dataclass
 class TTSRequest:
     request_id: str
@@ -101,9 +113,9 @@ class TTSRequest:
     stream_state: dict[str, Any] = field(default_factory=dict)
 
     chunk_length_schedule: list[int] = field(default_factory=lambda: [120, 160, 250, 290])
-    min_chars_trigger: int = 10
     timeout_trigger_ms: float = 80.0
-    last_commit_time: float | None = None
+    generation_window_started_at: float | None = None
+    prepared_chunks: list[PreparedTextChunk] = field(default_factory=list)
     created_at: float = field(default_factory=monotonic)
     first_text_at: float | None = None
     first_audio_at: float | None = None
@@ -122,39 +134,68 @@ class TTSRequest:
     target_sample_rate: int | None = None
     target_encoding: AudioFormat | None = None
 
-    def append_text(self, text: str) -> None:
+    def __post_init__(self) -> None:
+        if not self.chunk_length_schedule:
+            raise ValueError("chunk length schedule must not be empty")
+        invalid_values = (
+            not isinstance(value, int) or isinstance(value, bool) or value <= 0
+            for value in self.chunk_length_schedule
+        )
+        if any(invalid_values):
+            raise ValueError("chunk length schedule values must be positive integers")
+        schedule_pairs = zip(self.chunk_length_schedule, self.chunk_length_schedule[1:])
+        if any(left > right for left, right in schedule_pairs):
+            raise ValueError("chunk length schedule must be non-decreasing")
+
+    def append_text(self, text: str) -> bool:
+        if not text.strip():
+            return False
+
+        starts_generation_window = not self.get_pending_text().strip()
+        now = monotonic()
         if self.first_text_at is None:
-            self.first_text_at = monotonic()
+            self.first_text_at = now
+        if starts_generation_window:
+            self.generation_window_started_at = now
         self.text_buffer += text
+        return starts_generation_window
 
     def get_pending_text(self) -> str:
         return self.text_buffer[self.text_committed_pos:]
     
     def commit_text(self, length_chars: int) -> None:
         self.text_committed_pos += length_chars
+
+    def get_chunk_limits(self, chunk_index: int) -> ChunkLimits:
+        schedule_index = min(chunk_index, len(self.chunk_length_schedule) - 1)
+        trigger = self.chunk_length_schedule[schedule_index]
+
+        if schedule_index + 1 < len(self.chunk_length_schedule):
+            no_split_limit = self.chunk_length_schedule[schedule_index + 1]
+        elif len(self.chunk_length_schedule) > 1:
+            previous = self.chunk_length_schedule[-2]
+            no_split_limit = trigger + max(1, trigger - previous)
+        else:
+            no_split_limit = trigger + max(1, trigger // 3)
+
+        return ChunkLimits(trigger=trigger, no_split_limit=no_split_limit)
     
     def should_trigger_now(self, now: float) -> bool:
         pending_text = self.get_pending_text()
-        if len(pending_text) < self.min_chars_trigger:
+        if not pending_text.strip():
             return False
 
         if self.force_next_generation:
             self.force_next_generation = False
             return True
         
-        reference_time = self.last_commit_time
-        if reference_time is None:
-            reference_time = self.first_text_at
-        if reference_time is None:
-            reference_time = self.created_at
-        
-        elapsed_ms = (now - reference_time) * 1000.0
+        assert self.generation_window_started_at is not None, "pending text requires a generation window"
+        elapsed_ms = (now - self.generation_window_started_at) * 1000.0
         if elapsed_ms >= self.timeout_trigger_ms:
             return True
 
         chunk_index = self.chunker_state["chunk_index"] if "chunk_index" in self.chunker_state else 0
-        schedule_index = min(chunk_index, len(self.chunk_length_schedule) - 1)
-        if len(pending_text) > self.chunk_length_schedule[schedule_index]:
+        if len(pending_text) > self.get_chunk_limits(chunk_index).trigger:
             return True
         
         return False

@@ -51,7 +51,7 @@ The first message must contain configuration. The server creates a stream from i
 **Later messages (text)**  
 After config, send text messages:
 
-- `text` — Chunk to append. Empty string can signal completion and flush remaining audio.
+- `text` — Chunk to append. Empty and whitespace-only strings are silently ignored.
 - `try_trigger_generation` (optional) — If true, trigger generation for the current buffer.
 - `flush` (optional) — If true, trigger generation.
 
