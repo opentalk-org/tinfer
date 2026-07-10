@@ -1,13 +1,16 @@
 from pathlib import Path
 from types import SimpleNamespace
+import logging
 import tempfile
 import unittest
 import zipfile
 
 import numpy as np
+import torch.nn as nn
 
 from tinfer.core.request import AlignmentItem
 from tinfer.models.impl.styletts2.alignment.alignment import StyleTTS2AlignmentParser
+from tinfer.models.impl.styletts2.voice.encoder import StyleTTS2VoiceEncoder
 
 from test_speed.benchmark_data import (
     POLISH_INPUTS,
@@ -22,6 +25,8 @@ from test_speed.benchmark_inference import (
     extract_selected,
     measure_result,
 )
+from test_speed.benchmark_reporting import write_reports
+from test_speed.run_benchmark import configure_progress_output
 
 
 class DataTests(unittest.TestCase):
@@ -60,6 +65,21 @@ class DataTests(unittest.TestCase):
 
 
 class InferenceTests(unittest.TestCase):
+    def test_voice_encoder_preserves_attribute_model_access_after_move(self) -> None:
+        encoder = StyleTTS2VoiceEncoder(
+            model={
+                "style_encoder": nn.Linear(1, 1),
+                "predictor_encoder": nn.Linear(1, 1),
+            },
+            device="cpu",
+            sample_rate=24000,
+        )
+
+        encoder.to("cpu")
+
+        self.assertIsInstance(encoder.model.style_encoder, nn.Linear)
+        self.assertIsInstance(encoder.model.predictor_encoder, nn.Linear)
+
     def test_phoneme_alignment_excludes_beginning_of_sequence_duration(self) -> None:
         predictor_alignment = np.asarray(
             [
@@ -121,6 +141,32 @@ class InferenceTests(unittest.TestCase):
 
             self.assertEqual(extracted, [root / "out/voice.wav"])
             self.assertEqual(extracted[0].read_bytes(), b"RIFFdata")
+
+
+class ReportingTests(unittest.TestCase):
+    def test_progress_output_suppresses_model_debug_logs(self) -> None:
+        configure_progress_output()
+
+        self.assertEqual(logging.getLogger().level, logging.WARNING)
+
+    def test_report_writes_global_and_voice_artifacts(self) -> None:
+        requests = [
+            RequestMetric("v", "short", "No", 2, 1, 0.025, 40.0, "a.wav")
+        ]
+        phonemes = [PhonemeMetric("a", 0.025, "v", "short")]
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            index_path = write_reports(root, requests, phonemes, ["v"])
+
+            self.assertTrue(
+                (root / "summary/global_phoneme_durations.csv").is_file()
+            )
+            self.assertTrue(
+                (root / "summary/global_phonemes_per_second.png").is_file()
+            )
+            self.assertTrue((root / "summary/v_phoneme_durations.csv").is_file())
+            self.assertEqual(index_path, root / "summary/README.md")
 
 
 if __name__ == "__main__":

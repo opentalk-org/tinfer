@@ -30,8 +30,8 @@ class StyleTTS2VoiceEncoder(VoiceEncoder):
 
     def to(self, device: str) -> None:
         self.device = device
-        self.model = {key: self.model[key].to(device) for key in self.model}
-        _ = Munch({key: self.model[key].eval() for key in self.model})
+        self.model = Munch({key: self.model[key].to(device) for key in self.model})
+        _ = [self.model[key].eval() for key in self.model]
 
     def compute_style_from_waveform(
         self,
