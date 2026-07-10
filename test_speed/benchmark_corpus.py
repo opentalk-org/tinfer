@@ -80,13 +80,17 @@ def build_phoneme_grid(
     passage: str,
     point_count: int,
     max_tokens: int,
+    language: str,
 ) -> list[TextInput]:
     words = passage.split()
     candidates = []
     overflow_found = False
     for word_count in range(1, len(words) + 1):
         text = " ".join(words[:word_count])
-        token_count = model._text_token_count(text, StyleTTS2Params()) - 1
+        token_count = model._text_token_count(
+            text,
+            StyleTTS2Params(language=language),
+        ) - 1
         if token_count > max_tokens:
             overflow_found = True
             break

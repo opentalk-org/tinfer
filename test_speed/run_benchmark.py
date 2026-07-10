@@ -217,6 +217,7 @@ def _run_target(config: BenchmarkTarget) -> None:
         config.passage,
         point_count=48,
         max_tokens=511,
+        language=config.language,
     )
     prepared_voices = _prepare_voices(
         config,
@@ -238,6 +239,7 @@ def _run_target(config: BenchmarkTarget) -> None:
             text_inputs,
             profile.results_dir / "audio",
             profile.use_diffusion,
+            config.language,
         )
         metrics = ProfileMetrics(profile, requests, phonemes)
         _validate_profile_metrics(config, metrics, text_inputs)

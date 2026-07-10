@@ -31,6 +31,7 @@ class BenchmarkTarget:
     )
     passage: str
     runtime_engine: str
+    language: str
 
 
 MAGDA_TARGET = BenchmarkTarget(
@@ -44,6 +45,7 @@ MAGDA_TARGET = BenchmarkTarget(
     voice_source=ArchiveVoiceSource(ROOT / "test_speed/archive.zip"),
     passage=POLISH_PASSAGE,
     runtime_engine="tensorrt",
+    language="pl",
 )
 AGNIESZKA_TARGET = BenchmarkTarget(
     name="agnieszka",
@@ -63,6 +65,7 @@ AGNIESZKA_TARGET = BenchmarkTarget(
     ),
     passage=POLISH_PASSAGE,
     runtime_engine="tensorrt",
+    language="pl",
 )
 OLAM_TARGET = BenchmarkTarget(
     name="olam",
@@ -77,6 +80,7 @@ OLAM_TARGET = BenchmarkTarget(
     ),
     passage=POLISH_PASSAGE,
     runtime_engine="tensorrt",
+    language="pl",
 )
 LJSPEECH_VOICE = Path(
     "/workspace/converted_models/ljspeech/voices/ljspeech.pth"
@@ -92,6 +96,7 @@ VOKAN_TARGET = BenchmarkTarget(
     voice_source=TensorVoiceSource(LJSPEECH_VOICE),
     passage=ENGLISH_PASSAGE,
     runtime_engine="torch",
+    language="en-us",
 )
 LJSPEECH_TARGET = BenchmarkTarget(
     name="ljspeech",
@@ -104,6 +109,7 @@ LJSPEECH_TARGET = BenchmarkTarget(
     voice_source=TensorVoiceSource(LJSPEECH_VOICE),
     passage=ENGLISH_PASSAGE,
     runtime_engine="torch",
+    language="en-us",
 )
 TARGETS = (
     MAGDA_TARGET,

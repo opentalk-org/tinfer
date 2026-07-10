@@ -42,6 +42,19 @@ class GappedWordTokenModel:
         return token_count + 1
 
 
+class LanguageRecordingTokenModel:
+    def __init__(self) -> None:
+        self.languages: list[str | None] = []
+
+    def _text_token_count(
+        self,
+        text: str,
+        params: StyleTTS2Params,
+    ) -> int:
+        self.languages.append(params.language)
+        return len(text.split()) * 2 + 1
+
+
 class PhonemeGridTests(unittest.TestCase):
     def test_grid_has_48_increasing_points_and_maximum_prefix(self) -> None:
         passage = " ".join(f"word{i}" for i in range(80))
@@ -51,6 +64,7 @@ class PhonemeGridTests(unittest.TestCase):
             passage,
             point_count=48,
             max_tokens=100,
+            language="pl",
         )
         counts = [item.input_phoneme_tokens for item in grid]
 
@@ -67,12 +81,27 @@ class PhonemeGridTests(unittest.TestCase):
             passage,
             point_count=48,
             max_tokens=500,
+            language="pl",
         )
         counts = [item.input_phoneme_tokens for item in grid]
 
         self.assertEqual(len(grid), 48)
         self.assertEqual(counts, sorted(set(counts)))
         self.assertEqual(counts[-1], 493)
+
+    def test_grid_counts_with_target_language(self) -> None:
+        model = LanguageRecordingTokenModel()
+        passage = " ".join(f"word{i}" for i in range(80))
+
+        build_phoneme_grid(
+            model,
+            passage,
+            point_count=48,
+            max_tokens=100,
+            language="en-us",
+        )
+
+        self.assertEqual(set(model.languages), {"en-us"})
 
 
 class PhonemeMetricTests(unittest.TestCase):

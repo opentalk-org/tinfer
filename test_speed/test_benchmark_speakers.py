@@ -272,6 +272,7 @@ class RunnerTargetTests(unittest.TestCase):
         )
         self.assertTrue(all(target.passage.startswith("Early") for target in targets))
         self.assertEqual([target.runtime_engine for target in targets], ["torch", "torch"])
+        self.assertEqual([target.language for target in targets], ["en-us", "en-us"])
         self.assertIn("runtime_engine", signature(inference.load_model).parameters)
 
 

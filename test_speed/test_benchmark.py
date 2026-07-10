@@ -107,9 +107,13 @@ class InferenceTests(unittest.TestCase):
                 [TextInput("short", "No", 4)],
                 Path(directory),
                 False,
+                "en-us",
             )
 
-        self.assertEqual(model.params, [{"use_diffusion": False}])
+        self.assertEqual(
+            model.params,
+            [{"use_diffusion": False, "language": "en-us"}],
+        )
 
     def test_voice_encoder_preserves_attribute_model_access_after_move(self) -> None:
         encoder = StyleTTS2VoiceEncoder(
