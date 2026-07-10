@@ -86,6 +86,7 @@ def measure_result(
         text_id=text_input.text_id,
         text=text_input.text,
         text_length=len(text_input.text),
+        input_phoneme_tokens=text_input.input_phoneme_tokens,
         phoneme_count=len(phonemes),
         predicted_seconds=predicted_seconds,
         phonemes_per_second=len(phonemes) / predicted_seconds,

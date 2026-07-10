@@ -14,7 +14,6 @@ from tinfer.models.impl.styletts2.model.inference_config import StyleTTS2Params
 from tinfer.models.impl.styletts2.voice.encoder import StyleTTS2VoiceEncoder
 
 from test_speed.benchmark_data import (
-    POLISH_INPUTS,
     PhonemeMetric,
     RequestMetric,
     TextInput,
@@ -95,15 +94,6 @@ class DataTests(unittest.TestCase):
         self.assertAlmostEqual(rows[0].minimum_seconds, 0.025)
         self.assertAlmostEqual(rows[0].maximum_seconds, 0.075)
 
-    def test_corpus_spans_two_to_three_hundred_characters(self) -> None:
-        lengths = [len(item.text) for item in POLISH_INPUTS]
-
-        self.assertEqual(len(POLISH_INPUTS), 16)
-        self.assertEqual(lengths[0], 2)
-        self.assertEqual(lengths[-1], 300)
-        self.assertEqual(lengths, sorted(lengths))
-
-
 class InferenceTests(unittest.TestCase):
     def test_synthesis_forwards_diffusion_flag(self) -> None:
         model = RecordingModel()
@@ -112,7 +102,7 @@ class InferenceTests(unittest.TestCase):
             synthesize_all(
                 model,
                 ["voice"],
-                [TextInput("short", "No")],
+                [TextInput("short", "No", 4)],
                 Path(directory),
                 False,
             )
@@ -160,7 +150,7 @@ class InferenceTests(unittest.TestCase):
         request, phonemes = measure_result(
             result,
             "v",
-            TextInput("short", "No"),
+            TextInput("short", "No", 4),
             Path("a.wav"),
         )
 
@@ -177,7 +167,7 @@ class InferenceTests(unittest.TestCase):
             measure_result(
                 result,
                 "v",
-                TextInput("short", "No"),
+                TextInput("short", "No", 4),
                 Path("a.wav"),
             )
 
@@ -200,9 +190,9 @@ class InferenceTests(unittest.TestCase):
 class ReportingTests(unittest.TestCase):
     def test_voice_histogram_values_average_each_voice(self) -> None:
         requests = [
-            RequestMetric("a", "x", "x", 1, 1, 0.05, 20.0, "a.wav"),
-            RequestMetric("a", "y", "y", 1, 1, 0.025, 40.0, "b.wav"),
-            RequestMetric("b", "x", "x", 1, 1, 0.025, 40.0, "c.wav"),
+            RequestMetric("a", "x", "x", 1, 7, 1, 0.05, 20.0, "a.wav"),
+            RequestMetric("a", "y", "y", 1, 9, 1, 0.025, 40.0, "b.wav"),
+            RequestMetric("b", "x", "x", 1, 7, 1, 0.025, 40.0, "c.wav"),
         ]
 
         self.assertEqual(mean_rates_by_voice(requests), [30.0, 40.0])
@@ -226,7 +216,7 @@ class ReportingTests(unittest.TestCase):
 
     def test_report_writes_global_and_voice_artifacts(self) -> None:
         requests = [
-            RequestMetric("v", "short", "No", 2, 1, 0.025, 40.0, "a.wav")
+            RequestMetric("v", "short", "No", 2, 4, 1, 0.025, 40.0, "a.wav")
         ]
         phonemes = [PhonemeMetric("a", 0.025, "v", "short")]
 

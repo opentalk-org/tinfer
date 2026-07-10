@@ -62,20 +62,30 @@ def plot_scatter(
     if not metrics:
         raise ValueError(f"Cannot plot empty request metrics: {title}")
     figure, axis = plt.subplots(figsize=(10, 6))
+    x_values, y_values = scatter_coordinates(metrics)
     axis.scatter(
-        [row.text_length for row in metrics],
-        [row.phonemes_per_second for row in metrics],
+        x_values,
+        y_values,
         alpha=0.65,
     )
     axis.set(
         title=title,
-        xlabel="Input text length (characters)",
+        xlabel="Input phoneme tokens",
         ylabel="Predicted phonemes/s",
     )
     axis.grid(alpha=0.25)
     figure.tight_layout()
     figure.savefig(path, dpi=180)
     plt.close(figure)
+
+
+def scatter_coordinates(
+    metrics: list[RequestMetric],
+) -> tuple[list[int], list[float]]:
+    return (
+        [row.input_phoneme_tokens for row in metrics],
+        [row.phonemes_per_second for row in metrics],
+    )
 
 
 def mean_rates_by_voice(metrics: list[RequestMetric]) -> list[float]:

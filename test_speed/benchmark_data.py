@@ -27,6 +27,7 @@ class SynthesisProfile:
 class TextInput:
     text_id: str
     text: str
+    input_phoneme_tokens: int
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,7 @@ class RequestMetric:
     text_id: str
     text: str
     text_length: int
+    input_phoneme_tokens: int
     phoneme_count: int
     predicted_seconds: float
     phonemes_per_second: float
@@ -71,26 +73,6 @@ class SummaryRow:
             p10_seconds=float(np.percentile(durations, 10)),
             p90_seconds=float(np.percentile(durations, 90)),
         )
-
-
-POLISH_INPUTS = [
-    TextInput("length_002", "No"),
-    TextInput("length_011", "Pada deszcz"),
-    TextInput("length_022", "Dzisiaj świeci słońce."),
-    TextInput("length_034", "Mały kot spokojnie zasnął na fotelu."),
-    TextInput("length_046", "Po południu spotkamy się przy starej fontannie."),
-    TextInput("length_060", "W sobotę odwiedzimy targ, kupimy świeże jabłka i pachnący chleb."),
-    TextInput("length_076", "Pociąg do Krakowa odjechał punktualnie, choć na peronie czekało wielu ludzi."),
-    TextInput("length_091", "Marta otworzyła okno, wpuściła do pokoju chłodne powietrze i wróciła do czytania książki."),
-    TextInput("length_108", "Nad jeziorem panowała cisza, tylko trzciny szumiały lekko, a pojedyncza łódź przesuwała się ku drugiemu brzegowi."),
-    TextInput("length_127", "Kiedy skończył się letni deszcz, dzieci wybiegły na podwórko, przeskakiwały przez kałuże i szukały kolorowej tęczy nad dachami."),
-    TextInput("length_146", "W niewielkiej piekarni od rana pachniało cynamonem, masłem i świeżym ciastem, dlatego przechodnie chętnie zaglądali po bułki na śniadanie."),
-    TextInput("length_165", "Podczas niedzielnego spaceru znaleźliśmy w lesie polanę pełną fioletowych kwiatów, usiedliśmy pod sosną i słuchaliśmy dzięcioła pracującego wysoko w koronie."),
-    TextInput("length_187", "Wieczorem sąsiedzi przynieśli krzesła do ogrodu, zapalili małe lampiony i długo rozmawiali o podróżach, planach na jesień oraz zmianach, które zaszły ostatnio w miasteczku."),
-    TextInput("length_218", "Bibliotekarka ułożyła nowe książki na wystawie, przygotowała dla uczniów zagadki i zaznaczyła na mapie miejsca opisane w powieściach, aby kolejne spotkanie klubu czytelniczego było ciekawe, żywe i pełne odkryć."),
-    TextInput("length_255", "O świcie rybacy wypłynęli z małego portu, sprawdzili sieci i skierowali łodzie ku spokojnej zatoce, podczas gdy na nabrzeżu budziły się kawiarnie, dostawcy rozwozili pieczywo, a pierwsi turyści fotografowali mewy krążące nad latarnią."),
-    TextInput("length_300", "Rankiem mieszkańcy kamienicy spotkali się na dziedzińcu, aby posadzić zioła, naprawić drewnianą ławkę i zawiesić kolorowe lampki. Każdy przyniósł potrzebne narzędzia, a dzieci napełniały konewki wodą. Po kilku godzinach wspólnej pracy ogród wyglądał pięknie i zachęcał do odpoczynku, także po zmroku."),
-]
 
 
 def select_names(names: list[str], count: int, seed: int) -> list[str]:

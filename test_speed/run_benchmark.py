@@ -13,13 +13,14 @@ import tinfer.models.impl.styletts2.model.model as styletts2_model_module
 from tinfer.support.observability import setup_json_logs
 
 from test_speed.benchmark_data import (
-    POLISH_INPUTS,
     BenchmarkConfig,
     PhonemeMetric,
     RequestMetric,
     SynthesisProfile,
+    TextInput,
     select_names,
 )
+from test_speed.benchmark_corpus import POLISH_PASSAGE, build_phoneme_grid
 from test_speed.benchmark_inference import (
     archive_wav_names,
     embed_references,
@@ -100,6 +101,7 @@ def _write_manifest(
     profile: SynthesisProfile,
     selected_names: list[str],
     highlighted_voice_ids: list[str],
+    text_inputs: list[TextInput],
 ) -> Path:
     manifest = {
         "profile": profile.name,
@@ -110,7 +112,7 @@ def _write_manifest(
         "model_path": str(config.model_path),
         "selected_reference_wavs": selected_names,
         "highlighted_voice_ids": highlighted_voice_ids,
-        "texts": [asdict(text_input) for text_input in POLISH_INPUTS],
+        "texts": [asdict(text_input) for text_input in text_inputs],
     }
     path = profile.results_dir / "manifest.json"
     path.write_text(
@@ -123,14 +125,15 @@ def _write_manifest(
 def _validate_profile_metrics(
     config: BenchmarkConfig,
     metrics: ProfileMetrics,
+    text_inputs: list[TextInput],
 ) -> None:
-    expected_requests = config.voice_count * len(POLISH_INPUTS)
+    expected_requests = config.voice_count * len(text_inputs)
     assert len(metrics.requests) == expected_requests, (
         f"{metrics.profile.name} produced {len(metrics.requests)} requests"
     )
     requests_by_voice = Counter(row.voice_id for row in metrics.requests)
     assert len(requests_by_voice) == config.voice_count
-    assert set(requests_by_voice.values()) == {len(POLISH_INPUTS)}
+    assert set(requests_by_voice.values()) == {len(text_inputs)}
 
 
 def main() -> None:
@@ -151,6 +154,12 @@ def main() -> None:
         PROFILES[0].results_dir / "references",
     )
     model = load_model(CONFIG.model_path, "cuda")
+    text_inputs = build_phoneme_grid(
+        model,
+        POLISH_PASSAGE,
+        point_count=48,
+        max_tokens=511,
+    )
     voice_ids = embed_references(
         model,
         reference_paths,
@@ -167,12 +176,12 @@ def main() -> None:
         requests, phonemes = synthesize_all(
             model,
             voice_ids,
-            POLISH_INPUTS,
+            text_inputs,
             profile.results_dir / "audio",
             profile.use_diffusion,
         )
         metrics = ProfileMetrics(profile, requests, phonemes)
-        _validate_profile_metrics(CONFIG, metrics)
+        _validate_profile_metrics(CONFIG, metrics, text_inputs)
         profile_metrics.append(metrics)
 
     histogram_edges = shared_histogram_edges(
@@ -195,6 +204,7 @@ def main() -> None:
             metrics.profile,
             selected_names,
             highlighted_voice_ids,
+            text_inputs,
         )
         print(f"{metrics.profile.name} summary: {index_path}")
         print(f"{metrics.profile.name} manifest: {manifest_path}")
