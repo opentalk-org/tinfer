@@ -15,6 +15,7 @@ from tinfer.models.impl.styletts2.voice.encoder import StyleTTS2VoiceEncoder
 
 from test_speed.benchmark_data import (
     PhonemeMetric,
+    ReferenceDuration,
     RequestMetric,
     TextInput,
     select_names,
@@ -226,6 +227,7 @@ class ReportingTests(unittest.TestCase):
                 root,
                 requests,
                 phonemes,
+                [ReferenceDuration("v", 1.0)],
                 ["v"],
                 np.asarray([39.0, 40.0, 41.0]),
             )
@@ -242,6 +244,18 @@ class ReportingTests(unittest.TestCase):
             )
             self.assertTrue(
                 (root / "summary/phonemes_per_second_all_runs.png").is_file()
+            )
+            self.assertTrue(
+                (
+                    root
+                    / "summary/reference_duration_vs_phonemes_per_second_all_runs.png"
+                ).is_file()
+            )
+            self.assertTrue(
+                (
+                    root
+                    / "summary/reference_duration_vs_mean_phonemes_per_second_by_voice.png"
+                ).is_file()
             )
             self.assertEqual(index_path, root / "summary/README.md")
 

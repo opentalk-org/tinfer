@@ -31,6 +31,12 @@ class TextInput:
 
 
 @dataclass(frozen=True)
+class ReferenceDuration:
+    voice_id: str
+    duration_seconds: float
+
+
+@dataclass(frozen=True)
 class RequestMetric:
     voice_id: str
     text_id: str

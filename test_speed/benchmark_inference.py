@@ -12,7 +12,12 @@ from tinfer.models.base.model import IntermediateRepresentation
 from tinfer.models.impl.styletts2.model.inference_config import StyleTTS2Params
 from tinfer.models.impl.styletts2.model.model import StyleTTS2
 
-from test_speed.benchmark_data import PhonemeMetric, RequestMetric, TextInput
+from test_speed.benchmark_data import (
+    PhonemeMetric,
+    ReferenceDuration,
+    RequestMetric,
+    TextInput,
+)
 
 
 def archive_wav_names(archive_path: Path) -> list[str]:
@@ -53,6 +58,15 @@ def extract_selected(
                 shutil.copyfileobj(source, target)
             paths.append(destination)
     return paths
+
+
+def measure_reference_durations(
+    reference_paths: list[Path],
+) -> list[ReferenceDuration]:
+    return [
+        ReferenceDuration(path.stem, sf.info(path).duration)
+        for path in reference_paths
+    ]
 
 
 def measure_result(

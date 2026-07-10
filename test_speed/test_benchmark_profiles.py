@@ -1,17 +1,21 @@
 from pathlib import Path
 from types import SimpleNamespace
+import tempfile
 import unittest
 
 import numpy as np
+import soundfile as sf
 
 import tinfer.models.impl.styletts2.model.model as styletts2_model_module
 from tinfer.core.request import AlignmentItem
 from tinfer.models.impl.styletts2.model.inference_config import StyleTTS2Params
 
-from test_speed.benchmark_data import RequestMetric, TextInput
+from test_speed.benchmark_data import ReferenceDuration, RequestMetric, TextInput
 from test_speed.benchmark_corpus import build_phoneme_grid
-from test_speed.benchmark_inference import measure_result
+from test_speed.benchmark_inference import measure_reference_durations, measure_result
 from test_speed.benchmark_reporting import (
+    reference_all_run_coordinates,
+    reference_mean_voice_coordinates,
     scatter_coordinates,
     shared_histogram_edges,
 )
@@ -95,6 +99,35 @@ class PhonemeMetricTests(unittest.TestCase):
         ]
 
         self.assertEqual(scatter_coordinates(metrics), ([7], [20.0]))
+
+
+class ReferenceDurationPlotTests(unittest.TestCase):
+    def test_reference_duration_is_measured_from_wav(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "voice.wav"
+            sf.write(path, np.zeros(12_000, dtype=np.float32), 24_000)
+
+            references = measure_reference_durations([path])
+
+        self.assertEqual(references[0].voice_id, "voice")
+        self.assertAlmostEqual(references[0].duration_seconds, 0.5)
+
+    def test_reference_scatter_has_all_runs_and_voice_means(self) -> None:
+        references = [ReferenceDuration("a", 2.0), ReferenceDuration("b", 4.0)]
+        metrics = [
+            RequestMetric("a", "x", "x", 1, 7, 1, 0.05, 20.0, "a.wav"),
+            RequestMetric("a", "y", "y", 1, 9, 1, 0.025, 40.0, "b.wav"),
+            RequestMetric("b", "x", "x", 1, 7, 1, 0.05, 30.0, "c.wav"),
+        ]
+
+        self.assertEqual(
+            reference_all_run_coordinates(metrics, references),
+            ([2.0, 2.0, 4.0], [20.0, 40.0, 30.0]),
+        )
+        self.assertEqual(
+            reference_mean_voice_coordinates(metrics, references),
+            ([2.0, 4.0], [30.0, 30.0]),
+        )
 
 
 class SpeedCorrectionTests(unittest.TestCase):

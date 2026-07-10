@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 from test_speed.benchmark_data import (
     PhonemeMetric,
+    ReferenceDuration,
     RequestMetric,
     SummaryRow,
     summarize_phonemes,
@@ -88,6 +89,53 @@ def scatter_coordinates(
     )
 
 
+def reference_all_run_coordinates(
+    metrics: list[RequestMetric],
+    references: list[ReferenceDuration],
+) -> tuple[list[float], list[float]]:
+    durations = {item.voice_id: item.duration_seconds for item in references}
+    return (
+        [durations[row.voice_id] for row in metrics],
+        [row.phonemes_per_second for row in metrics],
+    )
+
+
+def reference_mean_voice_coordinates(
+    metrics: list[RequestMetric],
+    references: list[ReferenceDuration],
+) -> tuple[list[float], list[float]]:
+    durations = {item.voice_id: item.duration_seconds for item in references}
+    grouped: dict[str, list[float]] = defaultdict(list)
+    for metric in metrics:
+        grouped[metric.voice_id].append(metric.phonemes_per_second)
+    voice_ids = sorted(grouped)
+    return (
+        [durations[voice_id] for voice_id in voice_ids],
+        [float(np.mean(grouped[voice_id])) for voice_id in voice_ids],
+    )
+
+
+def plot_reference_scatter(
+    coordinates: tuple[list[float], list[float]],
+    title: str,
+    path: Path,
+) -> None:
+    x_values, y_values = coordinates
+    if not x_values:
+        raise ValueError(f"Cannot plot empty reference metrics: {title}")
+    figure, axis = plt.subplots(figsize=(10, 6))
+    axis.scatter(x_values, y_values, alpha=0.65)
+    axis.set(
+        title=title,
+        xlabel="Reference length (seconds)",
+        ylabel="Predicted phonemes/s",
+    )
+    axis.grid(alpha=0.25)
+    figure.tight_layout()
+    figure.savefig(path, dpi=180)
+    plt.close(figure)
+
+
 def mean_rates_by_voice(metrics: list[RequestMetric]) -> list[float]:
     grouped: dict[str, list[float]] = defaultdict(list)
     for metric in metrics:
@@ -147,6 +195,14 @@ def _write_summary_index(summary_dir: Path, voice_ids: list[str]) -> Path:
         "",
         "- [Phoneme duration table](global_phoneme_durations.csv)",
         "- [Phonemes/s scatter](global_phonemes_per_second.png)",
+        (
+            "- [Reference length vs phonemes/s, all runs]"
+            "(reference_duration_vs_phonemes_per_second_all_runs.png)"
+        ),
+        (
+            "- [Reference length vs mean phonemes/s by voice]"
+            "(reference_duration_vs_mean_phonemes_per_second_by_voice.png)"
+        ),
         "- [Phonemes/s by voice histogram](phonemes_per_second_by_voice.png)",
         "- [Phonemes/s all runs histogram](phonemes_per_second_all_runs.png)",
         "",
@@ -172,6 +228,7 @@ def write_reports(
     results_dir: Path,
     requests: list[RequestMetric],
     phonemes: list[PhonemeMetric],
+    references: list[ReferenceDuration],
     highlighted_voice_ids: list[str],
     histogram_edges: np.ndarray,
 ) -> Path:
@@ -214,5 +271,16 @@ def write_reports(
         "Predictor rate across all voice/text runs",
         "Number of runs",
         summary_dir / "phonemes_per_second_all_runs.png",
+    )
+    plot_reference_scatter(
+        reference_all_run_coordinates(requests, references),
+        "Reference length vs predictor rate: all runs",
+        summary_dir / "reference_duration_vs_phonemes_per_second_all_runs.png",
+    )
+    plot_reference_scatter(
+        reference_mean_voice_coordinates(requests, references),
+        "Reference length vs mean predictor rate by voice",
+        summary_dir
+        / "reference_duration_vs_mean_phonemes_per_second_by_voice.png",
     )
     return _write_summary_index(summary_dir, highlighted_voice_ids)

@@ -26,6 +26,7 @@ from test_speed.benchmark_inference import (
     embed_references,
     extract_selected,
     load_model,
+    measure_reference_durations,
     synthesize_all,
 )
 from test_speed.benchmark_reporting import shared_histogram_edges, write_reports
@@ -153,6 +154,7 @@ def main() -> None:
         selected_names,
         PROFILES[0].results_dir / "references",
     )
+    reference_durations = measure_reference_durations(reference_paths)
     model = load_model(CONFIG.model_path, "cuda")
     text_inputs = build_phoneme_grid(
         model,
@@ -196,6 +198,7 @@ def main() -> None:
             metrics.profile.results_dir,
             metrics.requests,
             metrics.phonemes,
+            reference_durations,
             highlighted_voice_ids,
             histogram_edges,
         )
