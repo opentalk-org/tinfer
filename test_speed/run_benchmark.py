@@ -21,7 +21,7 @@ from test_speed.benchmark_data import (
     TextInput,
     select_names,
 )
-from test_speed.benchmark_corpus import POLISH_PASSAGE, build_phoneme_grid
+from test_speed.benchmark_corpus import build_phoneme_grid
 from test_speed.benchmark_config import (
     MAGDA_TARGET,
     TARGETS,
@@ -36,9 +36,11 @@ from test_speed.benchmark_speakers import (
     ArchiveVoiceSource,
     PreparedVoices,
     SingleVectorVoiceSource,
+    TensorVoiceSource,
     VectorVoiceSource,
     prepare_archive_voices,
     prepare_single_vector_voice,
+    prepare_tensor_voice,
     prepare_vector_voices,
 )
 from test_speed.benchmark_style import measure_style_norms
@@ -150,6 +152,12 @@ def _prepare_voices(
             source,
             primary_results_dir / "embeddings",
         )
+    if isinstance(source, TensorVoiceSource):
+        return prepare_tensor_voice(
+            model,
+            source,
+            primary_results_dir / "embeddings",
+        )
     assert_never(source)
 
 
@@ -199,10 +207,14 @@ def _run_target(config: BenchmarkTarget) -> None:
     profiles = _profiles_for(config)
     for profile in profiles:
         _prepare_results(profile.results_dir)
-    model = load_model(config.model_path, "cuda")
+    model = load_model(
+        config.model_path,
+        "cuda",
+        config.runtime_engine,
+    )
     text_inputs = build_phoneme_grid(
         model,
-        POLISH_PASSAGE,
+        config.passage,
         point_count=48,
         max_tokens=511,
     )
@@ -263,7 +275,7 @@ def main() -> None:
     parser = ArgumentParser()
     parser.add_argument(
         "target",
-        choices=("all", "magda", "agnieszka", "olam"),
+        choices=("all", "magda", "agnieszka", "olam", "vokan", "ljspeech"),
         default="all",
         nargs="?",
     )

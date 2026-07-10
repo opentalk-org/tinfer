@@ -52,6 +52,11 @@ class SingleVectorVoiceSource:
 
 
 @dataclass(frozen=True)
+class TensorVoiceSource:
+    voice_path: Path
+
+
+@dataclass(frozen=True)
 class PreparedVoices:
     voice_ids: list[str]
     reference_durations: list[ReferenceDuration]
@@ -143,6 +148,23 @@ def prepare_single_vector_voice(
         weights_only=True,
     )
     model.load_voice_from_vector(voice_id, voice_data["tensor"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source.voice_path, output_dir / source.voice_path.name)
+    return PreparedVoices([voice_id], [], [source.voice_path.name])
+
+
+def prepare_tensor_voice(
+    model: VectorVoiceModel,
+    source: TensorVoiceSource,
+    output_dir: Path,
+) -> PreparedVoices:
+    voice_id = source.voice_path.stem
+    voice_vector = torch.load(
+        source.voice_path,
+        map_location="cpu",
+        weights_only=True,
+    )
+    model.load_voice_from_vector(voice_id, voice_vector)
     output_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source.voice_path, output_dir / source.voice_path.name)
     return PreparedVoices([voice_id], [], [source.voice_path.name])

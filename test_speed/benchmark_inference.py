@@ -109,7 +109,11 @@ def measure_result(
     return request, phonemes
 
 
-def load_model(model_path: Path, device: str) -> StyleTTS2:
+def load_model(
+    model_path: Path,
+    device: str,
+    runtime_engine: str,
+) -> StyleTTS2:
     if not model_path.is_file():
         raise FileNotFoundError(f"Model file not found: {model_path}")
     model = StyleTTS2(device=device)
@@ -118,6 +122,7 @@ def load_model(model_path: Path, device: str) -> StyleTTS2:
         device=device,
         compile_model=False,
         load_style_encoder=True,
+        runtime_engine=runtime_engine,
     )
     return model
 

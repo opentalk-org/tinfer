@@ -4,3 +4,7 @@ results_agnieszka/
 results_agnieszka_no_diffusion/
 results_olam/
 results_olam_no_diffusion/
+results_vokan/
+results_vokan_no_diffusion/
+results_ljspeech/
+results_ljspeech_no_diffusion/

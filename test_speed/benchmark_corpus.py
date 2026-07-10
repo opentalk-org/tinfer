@@ -31,6 +31,34 @@ POLISH_PASSAGE = (
     "Po południu na rynku rozpoczął się koncert, sprzedawcy ustawili stoiska, "
     "muzycy stroili instrumenty, a rodziny zajmowały miejsca przy scenie."
 )
+ENGLISH_PASSAGE = (
+    "Early in the morning, the residents gathered in the courtyard to plant "
+    "herbs, repair the wooden bench, and hang small colored lights. Everyone "
+    "brought useful tools while the children filled watering cans beside the "
+    "gate. After several hours of shared work, the garden looked welcoming "
+    "and offered a quiet place to rest. Across the street, warm bread and "
+    "cinnamon rolls filled the bakery with a rich smell, so passing neighbors "
+    "stopped for breakfast. Later, the librarian arranged books in the front "
+    "window, prepared puzzles for students, and marked every location from the "
+    "week's stories on a large map. Near the lake, reeds moved gently in the "
+    "wind as a narrow boat crossed toward the opposite shore. When the summer "
+    "rain ended, children ran outside, jumped over puddles, and searched for "
+    "a bright rainbow above the roofs. During an afternoon walk, a family "
+    "found a meadow full of purple flowers, sat beneath an old pine tree, and "
+    "listened to a woodpecker high in the branches. At sunset, neighbors "
+    "carried chairs into the garden, lit lanterns, and talked about journeys, "
+    "autumn plans, and recent changes around town. Before dawn, fishing boats "
+    "left the harbor and moved toward the calm bay while cafes opened along "
+    "the waterfront, delivery vans brought fresh food, and the first visitors "
+    "photographed seabirds circling the lighthouse. In the afternoon, a "
+    "concert began in the central square. Vendors arranged their stalls, "
+    "musicians tuned their instruments, and families found places near the "
+    "stage. The program continued through the evening with songs, stories, "
+    "and short performances from local schools. Volunteers served tea, helped "
+    "older guests find seats, and collected empty cups after each interval. "
+    "When the final music ended, everyone worked together to fold the tables, "
+    "carry equipment indoors, and leave the square clean for the next morning."
+)
 
 
 class TokenCountingModel(Protocol):
