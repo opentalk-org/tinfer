@@ -19,7 +19,15 @@ It produces two profiles:
 
 Setting `alpha` or `beta` does not disable diffusion in this model. Those parameters only blend a sampled style with the reference style after diffusion has already run. The no-diffusion profile therefore uses the explicit `use_diffusion` inference parameter, which skips diffusion and conditions the predictor and decoder directly on the embedded reference style.
 
-Both profiles use the same seed, 20 selected reference WAVs, four highlighted voices, 16 Polish texts, embeddings, and reporting calculations. The command extracts and embeds references once, copies the serialized references and embeddings into the no-diffusion folder, then reuses the loaded voice vectors for both synthesis profiles. Each result folder is therefore self-contained.
+Both profiles use the same seed, 20 selected reference WAVs, four highlighted voices, 48 Polish texts, embeddings, and reporting calculations. The command extracts and embeds references once, copies the serialized references and embeddings into the no-diffusion folder, then reuses the loaded voice vectors for both synthesis profiles. Each result folder is therefore self-contained.
+
+## Phoneme-Token Input Grid
+
+The benchmark replaces the character-length corpus with 48 deterministic, natural Polish inputs derived from word-boundary prefixes of one curated Polish passage. After model loading, it uses the model phonemizer and tokenizer to create an increasing grid across the usable context range. The measured input count is the number of model phoneme tokens excluding the beginning-of-sequence token.
+
+Each target selects the longest word-boundary prefix that fits without exceeding it. Counts must be unique and strictly increasing. The final input is the longest natural word-boundary prefix that fits at or below 511 phoneme tokens, reserving one token for BOS inside the model's 512-token window. The synthesis layer continues to reject any internal window split.
+
+Request metrics gain `input_phoneme_tokens`. Scatter plots use this value on the x-axis instead of source text characters. Manifests record all 48 source texts and their measured token counts.
 
 ## Histograms
 
@@ -42,8 +50,8 @@ The runner performs selection, model loading, and embedding once. It synthesizes
 
 ## Failure Behavior
 
-The runner fails if either profile does not contain exactly 20 voices and 320 requests, if per-voice grouping does not yield 16 requests per voice, or if histogram counts do not sum to their expected population. Existing failures for missing inputs, internal text splitting, missing predictor alignments, and invalid durations remain unchanged.
+The runner fails if either profile does not contain exactly 20 voices and 960 requests, if per-voice grouping does not yield 48 requests per voice, if the input grid is not strictly increasing or exceeds 511 tokens, or if histogram counts do not sum to their expected population. Existing failures for missing inputs, internal text splitting, missing predictor alignments, and invalid durations remain unchanged.
 
 ## Verification
 
-Unit tests verify that synthesis forwards both `use_diffusion=True` and `use_diffusion=False`, the speed-correction monkeypatch preserves the requested speed, per-voice averaging produces one value per voice, 0.25-wide shared bins cover both profiles, and both histogram files are emitted. The full command must produce 640 non-empty WAV files across the two folders, 20 embeddings in each profile, and two histograms plus the existing five scatters and five tables per profile.
+Unit tests verify that synthesis forwards both `use_diffusion=True` and `use_diffusion=False`, the speed-correction monkeypatch preserves the requested speed, the 48-point grid is increasing and reaches the maximum natural prefix at or below 511 tokens, request metrics preserve input token counts, per-voice averaging produces one value per voice, 0.25-wide shared bins cover both profiles, and both histogram files are emitted. The full command must produce 1,920 non-empty WAV files across the two folders, 20 embeddings in each profile, and two histograms plus the existing five scatters and five tables per profile.
