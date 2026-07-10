@@ -28,6 +28,10 @@ class StyleTTS2AlignmentParser(AlignmentParser):
         if pred_aln_trg.shape[0] == 0 or pred_aln_trg.shape[1] == 0:
             return []
 
+        assert pred_aln_trg.shape[0] == len(tokens) + 1, (
+            "predictor alignment must contain one beginning-of-sequence row"
+        )
+        pred_aln_trg = pred_aln_trg[1:]
         num_tokens = pred_aln_trg.shape[0]
         ms_per_mel_frame = 1000 / 40
 
