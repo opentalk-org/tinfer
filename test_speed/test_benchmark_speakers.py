@@ -122,6 +122,21 @@ class AgnieszkaVoiceTests(OptionalFeatureTest):
             self.assertEqual(prepared.reference_durations, [])
             self.assertEqual(model.loaded["ljspeech"].shape, (1, 256))
 
+    def test_tensor_voice_directory_loads_all_selected_voices(self) -> None:
+        module = self.require_module("test_speed.benchmark_speakers")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            voices_dir = root / "voices"
+            voices_dir.mkdir()
+            for name in ("libri_f1", "libri_f2", "libri_m1"):
+                torch.save(torch.ones(1, 256), voices_dir / f"{name}.pth")
+            model = RecordingVoiceModel()
+            prepared = module.prepare_tensor_voices(
+                model, module.TensorVoiceDirectorySource(voices_dir), root / "out", 3, 1
+            )
+            self.assertEqual(set(prepared.voice_ids), set(model.loaded))
+            self.assertEqual(set(prepared.voice_ids), {"libri_f1", "libri_f2", "libri_m1"})
+
 
 class StyleNormTests(OptionalFeatureTest):
     def test_norms_cover_full_and_both_vector_halves(self) -> None:
@@ -230,7 +245,7 @@ class RunnerTargetTests(unittest.TestCase):
 
         self.assertEqual(
             [target.name for target in targets],
-            ["magda", "agnieszka", "olam", "vokan", "ljspeech"],
+            ["magda", "agnieszka", "olam", "vokan", "ljspeech", "libri"],
         )
         self.assertEqual(
             [target.results_dir.name for target in targets],
@@ -240,6 +255,7 @@ class RunnerTargetTests(unittest.TestCase):
                 "results_olam",
                 "results_vokan",
                 "results_ljspeech",
+                "results_libri",
             ],
         )
 
@@ -257,22 +273,19 @@ class RunnerTargetTests(unittest.TestCase):
         self.assertEqual(targets[0].results_dir.name, "results_olam")
         self.assertEqual(targets[0].voice_count, 1)
 
-    def test_english_targets_use_ljspeech_vector_and_english_text(self) -> None:
+    def test_english_targets_use_english_phonemization(self) -> None:
         runner = import_module("test_speed.run_benchmark")
         inference = import_module("test_speed.benchmark_inference")
 
-        targets = runner.select_targets("vokan") + runner.select_targets(
-            "ljspeech"
-        )
+        targets = [
+            runner.select_targets(name)[0]
+            for name in ("vokan", "ljspeech", "libri")
+        ]
 
-        self.assertEqual([target.name for target in targets], ["vokan", "ljspeech"])
-        self.assertEqual([target.voice_count for target in targets], [1, 1])
-        self.assertTrue(
-            all(target.voice_source.voice_path.name == "ljspeech.pth" for target in targets)
-        )
+        self.assertEqual([target.voice_count for target in targets], [1, 1, 3])
         self.assertTrue(all(target.passage.startswith("Early") for target in targets))
-        self.assertEqual([target.runtime_engine for target in targets], ["torch", "torch"])
-        self.assertEqual([target.language for target in targets], ["en-us", "en-us"])
+        self.assertEqual([target.runtime_engine for target in targets], ["torch"] * 3)
+        self.assertEqual([target.language for target in targets], ["en-us"] * 3)
         self.assertIn("runtime_engine", signature(inference.load_model).parameters)
 
 

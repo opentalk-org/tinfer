@@ -4,6 +4,7 @@ from pathlib import Path
 from test_speed.benchmark_speakers import (
     ArchiveVoiceSource,
     SingleVectorVoiceSource,
+    TensorVoiceDirectorySource,
     TensorVoiceSource,
     VectorVoiceSource,
 )
@@ -27,6 +28,7 @@ class BenchmarkTarget:
         ArchiveVoiceSource
         | VectorVoiceSource
         | SingleVectorVoiceSource
+        | TensorVoiceDirectorySource
         | TensorVoiceSource
     )
     passage: str
@@ -111,10 +113,26 @@ LJSPEECH_TARGET = BenchmarkTarget(
     runtime_engine="torch",
     language="en-us",
 )
+LIBRI_TARGET = BenchmarkTarget(
+    name="libri",
+    model_path=Path("/workspace/converted_models/libri/model.pth"),
+    results_dir=ROOT / "test_speed/results_libri",
+    no_diffusion_results_dir=ROOT / "test_speed/results_libri_no_diffusion",
+    seed=20260710,
+    voice_count=3,
+    highlighted_voice_count=3,
+    voice_source=TensorVoiceDirectorySource(
+        Path("/workspace/converted_models/libri/voices")
+    ),
+    passage=ENGLISH_PASSAGE,
+    runtime_engine="torch",
+    language="en-us",
+)
 TARGETS = (
     MAGDA_TARGET,
     AGNIESZKA_TARGET,
     OLAM_TARGET,
     VOKAN_TARGET,
     LJSPEECH_TARGET,
+    LIBRI_TARGET,
 )

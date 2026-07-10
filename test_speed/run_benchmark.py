@@ -36,26 +36,23 @@ from test_speed.benchmark_speakers import (
     ArchiveVoiceSource,
     PreparedVoices,
     SingleVectorVoiceSource,
+    TensorVoiceDirectorySource,
     TensorVoiceSource,
     VectorVoiceSource,
     prepare_archive_voices,
     prepare_single_vector_voice,
     prepare_tensor_voice,
+    prepare_tensor_voices,
     prepare_vector_voices,
 )
 from test_speed.benchmark_style import measure_style_norms
 
 
-CONFIG = MAGDA_TARGET
-PROFILES = [
-    SynthesisProfile("diffusion", CONFIG.results_dir, True),
-    SynthesisProfile(
-        "no_diffusion",
-        CONFIG.no_diffusion_results_dir,
-        False,
-    ),
-]
 HISTOGRAM_BIN_WIDTH = 0.25
+PROFILES = [
+    SynthesisProfile("diffusion", MAGDA_TARGET.results_dir, True),
+    SynthesisProfile("no_diffusion", MAGDA_TARGET.no_diffusion_results_dir, False),
+]
 
 
 @dataclass(frozen=True)
@@ -157,6 +154,14 @@ def _prepare_voices(
             model,
             source,
             primary_results_dir / "embeddings",
+        )
+    if isinstance(source, TensorVoiceDirectorySource):
+        return prepare_tensor_voices(
+            model,
+            source,
+            primary_results_dir / "embeddings",
+            target.voice_count,
+            target.seed,
         )
     assert_never(source)
 
@@ -277,7 +282,7 @@ def main() -> None:
     parser = ArgumentParser()
     parser.add_argument(
         "target",
-        choices=("all", "magda", "agnieszka", "olam", "vokan", "ljspeech"),
+        choices=("all", *(target.name for target in TARGETS)),
         default="all",
         nargs="?",
     )
