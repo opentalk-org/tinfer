@@ -208,11 +208,15 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(mean_rates_by_voice(requests), [30.0, 40.0])
 
     def test_shared_histogram_edges_cover_both_profiles(self) -> None:
-        edges = shared_histogram_edges([10.2, 11.8], [9.1, 12.3])
+        edges = shared_histogram_edges(
+            [10.2, 11.8],
+            [9.1, 12.3],
+            bin_width=0.25,
+        )
 
         np.testing.assert_array_equal(
             edges,
-            np.asarray([9.0, 10.0, 11.0, 12.0, 13.0]),
+            np.arange(9.0, 12.75, 0.25),
         )
 
     def test_progress_output_suppresses_model_debug_logs(self) -> None:

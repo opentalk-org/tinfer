@@ -9,6 +9,7 @@ import shutil
 import numpy as np
 import torch
 
+import tinfer.models.impl.styletts2.model.model as styletts2_model_module
 from tinfer.support.observability import setup_json_logs
 
 from test_speed.benchmark_data import (
@@ -46,6 +47,7 @@ PROFILES = [
         False,
     ),
 ]
+HISTOGRAM_BIN_WIDTH = 0.25
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,16 @@ class ProfileMetrics:
     profile: SynthesisProfile
     requests: list[RequestMetric]
     phonemes: list[PhonemeMetric]
+
+
+def preserve_requested_speed(speed: float, _token_count: int) -> float:
+    return speed
+
+
+def disable_speed_correction() -> None:
+    styletts2_model_module.baseline_speed_corrected_for_request = (
+        preserve_requested_speed
+    )
 
 
 def configure_progress_output() -> None:
@@ -92,6 +104,7 @@ def _write_manifest(
     manifest = {
         "profile": profile.name,
         "use_diffusion": profile.use_diffusion,
+        "speed_correction": False,
         "seed": config.seed,
         "archive_path": str(config.archive_path),
         "model_path": str(config.model_path),
@@ -122,6 +135,7 @@ def _validate_profile_metrics(
 
 def main() -> None:
     configure_progress_output()
+    disable_speed_correction()
     _seed_everything(CONFIG.seed)
     for profile in PROFILES:
         _prepare_results(profile.results_dir)
@@ -165,7 +179,8 @@ def main() -> None:
         *[
             [row.phonemes_per_second for row in metrics.requests]
             for metrics in profile_metrics
-        ]
+        ],
+        bin_width=HISTOGRAM_BIN_WIDTH,
     )
     for metrics in profile_metrics:
         index_path = write_reports(

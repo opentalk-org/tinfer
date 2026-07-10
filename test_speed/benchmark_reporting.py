@@ -88,16 +88,22 @@ def mean_rates_by_voice(metrics: list[RequestMetric]) -> list[float]:
     ]
 
 
-def shared_histogram_edges(*groups: list[float]) -> np.ndarray:
+def shared_histogram_edges(
+    *groups: list[float],
+    bin_width: float,
+) -> np.ndarray:
+    if bin_width <= 0:
+        raise ValueError("Histogram bin width must be positive")
     values = np.asarray(
         [value for group in groups for value in group],
         dtype=np.float64,
     )
     if values.size == 0:
         raise ValueError("Histogram values cannot be empty")
-    lower = float(np.floor(values.min()))
-    upper = max(float(np.ceil(values.max())), lower + 1.0)
-    return np.arange(lower, upper + 1.0, 1.0)
+    lower = float(np.floor(values.min() / bin_width) * bin_width)
+    upper = float(np.ceil(values.max() / bin_width) * bin_width)
+    upper = max(upper, lower + bin_width)
+    return np.arange(lower, upper + bin_width, bin_width)
 
 
 def plot_histogram(
