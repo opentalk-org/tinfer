@@ -26,3 +26,4 @@ tinfer/tinfer/models/impl/styletts2/model/trt3/
 *.safetensors
 *.ref
 *.o
+*.wav
