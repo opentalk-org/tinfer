@@ -1,0 +1,1 @@
+"""Reusable duration benchmark package."""

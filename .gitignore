@@ -4,7 +4,6 @@ __pycache__/
 *.egg-info/
 *.pyc
 node_modules/
-
 .direnv
 converted_models
 result
