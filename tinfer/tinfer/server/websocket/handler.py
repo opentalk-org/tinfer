@@ -1,338 +1,185 @@
 from __future__ import annotations
+
 import asyncio
+from dataclasses import replace
 import json
-import base64
-import numpy as np
-from typing import Any, Optional
+from typing import Any
 
+from aiohttp import WSMsgType
 from aiohttp.web_ws import WebSocketResponse
-from tinfer.core.async_engine import AsyncStreamingTTS
-from tinfer.core.request import AudioChunk, AlignmentType
-from tinfer.support.latency import FirstAudioLatencyTimer
-from tinfer.support.observability import get_logger, start_span
-from tinfer.utils.alignment_formatter import AlignmentFormatter
-from tinfer.utils.audio_encoder import encode_audio_to_base64, parse_output_format, get_sample_rate
 
-log = get_logger(__name__)
+from tinfer.core.request import AlignmentType
+from tinfer.server.websocket.model_resolver import ModelResolver
+from tinfer.server.websocket.query_parser import (
+    map_stream_params,
+    parse_query,
+    validate_language,
+)
+from tinfer.server.websocket.speech_parser import parse_speech_request
+from tinfer.server.websocket.stream_context import StreamContext
+from tinfer.server.websocket.schemas import GenerationConfig, Transport, VoiceSettings
+
+INITIAL_IGNORED_FIELDS = {
+    "xi-api-key",
+    "authorization",
+    "pronunciation_dictionary_locators",
+}
+CLIENT_MESSAGE_FIELDS = {
+    "text",
+    "try_trigger_generation",
+    "voice_settings",
+    "generator_config",
+    "flush",
+}
 
 
 class WebSocketHandler:
     def __init__(
         self,
         ws: WebSocketResponse,
-        tts: AsyncStreamingTTS,
+        tts,
         voice_id: str,
         query_params: dict[str, str],
+        models: ModelResolver,
     ) -> None:
         self.ws = ws
         self.tts = tts
         self.voice_id = voice_id
         self.query_params = query_params
-
-        self.stream: Optional[Any] = None
-        self.config_received = False
-        self.closed = False
-        self.alignment_formatter = AlignmentFormatter()
-
-        self.model_id = query_params.get("model_id", "styletts2")
-        self.output_format_str = query_params.get("output_format", "mp3_44100_32")
-        self.output_format = parse_output_format(self.output_format_str)
-        self.language_code = query_params.get("language_code")
-        self.sync_alignment = query_params.get("sync_alignment", "false").lower() == "true"
-        self.auto_mode = query_params.get("auto_mode", "false").lower() == "true"
-        self.inactivity_timeout = int(query_params.get("inactivity_timeout", "20"))
-        self.enable_logging = query_params.get("enable_logging", "true").lower() == "true"
-        self.enable_ssml_parsing = query_params.get("enable_ssml_parsing", "false").lower() == "true"
-
-        self.voice_settings: dict[str, Any] = {}
-        self.chunk_length_schedule: list[int] = [120, 160, 250, 290]
-        self.inactivity_task: Optional[asyncio.Task] = None
-        self._text_added_event = asyncio.Event()
-        self._stream_task: Optional[asyncio.Task] = None
-        self._streaming_started = False
-        self._first_audio_timer = FirstAudioLatencyTimer()
+        self.models = models
+        self.context: StreamContext | None = None
+        self._send_lock = asyncio.Lock()
+        self._initialized = False
+        self._voice_settings: VoiceSettings | None = None
+        self._generation_config: GenerationConfig | None = None
 
     async def handle(self) -> None:
-        self._start_inactivity_timer()
-
-        async for msg in self.ws:
-            if self.closed or self.ws.closed:
-                break
-            if msg.type == 1:
-                try:
-                    data = json.loads(msg.data)
-                    with start_span(
-                        "websocket.message",
-                        __name__,
-                        attributes={
-                            "messaging.operation": "receive",
-                            "message.size": len(msg.data),
-                            "tinfer.model_id": self.model_id,
-                            "tinfer.voice_id": self.voice_id,
-                            "tinfer.config_received": self.config_received,
-                        },
-                    ):
-                        log.info(
-                            "websocket_message_received",
-                            message_size=len(msg.data),
-                            config_received=self.config_received,
-                        )
-                        await self._process_message(data)
-                except json.JSONDecodeError:
-                    log.warning("websocket_invalid_json")
-                    await self._send_error("Invalid JSON message")
+        try:
+            async for message in self.ws:
+                if message.type == WSMsgType.TEXT:
+                    await self._dispatch_json(message.data)
+                elif message.type == WSMsgType.BINARY:
+                    raise ValueError("binary messages are not supported")
+                elif message.type in (
+                    WSMsgType.CLOSE,
+                    WSMsgType.CLOSING,
+                    WSMsgType.CLOSED,
+                    WSMsgType.ERROR,
+                ):
                     break
-                except Exception as e:
-                    log.exception("websocket_message_failed")
-                    await self._send_error(f"Error processing message: {str(e)}")
-                    break
-            elif msg.type == 2:
-                log.warning("websocket_binary_rejected")
-                await self._send_error("Binary messages not supported")
-                break
-            elif msg.type == 257:
-                break
-
-    async def _process_message(self, data: dict[str, Any]) -> None:
-        if not self.config_received:
-            await self._handle_config_message(data)
-        else:
-            await self._handle_text_message(data)
-
-    async def _handle_config_message(self, data: dict[str, Any]) -> None:
-        voice_settings = data.get("voice_settings", {})
-        generation_config = data.get("generation_config", {})
-
-        self.voice_settings = voice_settings
-        self.chunk_length_schedule = generation_config.get(
-            "chunk_length_schedule",
-            [120, 160, 250, 290],
-        )
-
-        params = self._map_params_to_tinfer(voice_settings, generation_config)
-
-        try:
-            self.stream = self.tts.create_stream(
-                model_id=self.model_id,
-                voice_id=self.voice_id,
-                params=params,
-            )
-            self.config_received = True
-            self._reset_inactivity_timer()
-            self._stream_task = asyncio.create_task(self._stream_audio())
-            log.info(
-                "websocket_stream_created",
-                output_format=self.output_format_str,
-                sync_alignment=self.sync_alignment,
-            )
-            text = data.get("text", "")
-            if text and text.strip():
-                self._first_audio_timer.start()
-                self.stream.add_text(text)
-                self.stream.force_generate()
-                self._text_added_event.set()
-        except Exception as e:
-            log.exception("websocket_stream_create_failed")
-            await self._send_error(f"Failed to create stream: {str(e)}")
-            self.closed = True
-
-    async def _handle_text_message(self, data: dict[str, Any]) -> None:
-        text = data.get("text", "")
-        try_trigger_generation = data.get("try_trigger_generation", False)
-        flush = data.get("flush", False)
-
-        if not text.strip():
-            if self.stream and (try_trigger_generation or flush):
-                self.stream.force_generate()
-                self._text_added_event.set()
-            self._reset_inactivity_timer()
-            return
-
-        if self.stream:
-            self._first_audio_timer.start()
-            self.stream.add_text(text)
-            if try_trigger_generation or flush:
-                self.stream.force_generate()
-            self._text_added_event.set()
-            self._reset_inactivity_timer()
-            log.info(
-                "websocket_text_accepted",
-                text_length=len(text),
-                try_trigger_generation=try_trigger_generation,
-                flush=flush,
-            )
-
-    def _map_params_to_tinfer(
-        self,
-        voice_settings: dict[str, Any],
-        generation_config: dict[str, Any],
-    ) -> dict[str, Any]:
-        params: dict[str, Any] = {}
-
-        chunk_length_schedule = generation_config.get(
-            "chunk_length_schedule",
-            [120, 160, 250, 290],
-        )
-
-        params["chunk_length_schedule"] = chunk_length_schedule
-        sample_rate = get_sample_rate(self.output_format)
-        params["target_sample_rate"] = sample_rate
-        params["target_encoding"] = self.output_format
-        params["alignment_type"] = AlignmentType.CHAR if self.sync_alignment else AlignmentType.NONE
-        tts_params = {
-            key: float(voice_settings[key])
-            for key in ("speed", "alpha", "beta")
-            if key in voice_settings and voice_settings[key] is not None
-        }
-        if self.language_code:
-            tts_params["language"] = self.language_code
-        if tts_params:
-            params["tts_params"] = tts_params
-        return params
-
-    async def _stream_audio(self) -> None:
-        if not self.stream:
-            return
-        try:
-            while not self.closed and not self.ws.closed:
-                sent_any = False
-                async for chunk in self.stream.pull_audio():
-                    if self.closed or self.ws.closed:
-                        break
-                    if getattr(chunk, "error", None):
-                        await self._send_error(chunk.error)
-                        self.closed = True
-                        break
-                    response = await self._format_response(chunk)
-                    await self._send_response(response)
-                    sent_any = True
-                    payload = {
-                        "chunk_index": chunk.chunk_index,
-                        "audio_samples": len(chunk.audio),
-                        "alignment_type": self._alignment_type(chunk),
-                    }
-                    first_audio_latency_ms = self._first_audio_timer.consume_ms()
-                    if first_audio_latency_ms is not None:
-                        payload["first_audio_latency_ms"] = first_audio_latency_ms
-                    log.info("websocket_audio_chunk_sent", **payload)
-                if sent_any and not self.closed and not self.ws.closed:
-                    self._reset_inactivity_timer()
-                if self.closed or self.ws.closed:
-                    break
-                try:
-                    await asyncio.wait_for(
-                        self._text_added_event.wait(),
-                        timeout=0.5,
-                    )
-                except asyncio.TimeoutError:
-                    pass
-                self._text_added_event.clear()
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            log.exception("websocket_streaming_failed")
-            if not self.closed and not self.ws.closed:
-                await self._send_error(f"Streaming error: {str(e)}")
-            self.closed = True
-
-    async def _format_response(self, chunk: AudioChunk) -> dict[str, Any]:
-        if chunk.audio.dtype == np.uint8:
-            audio_bytes = chunk.audio.tobytes()
-            audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
-        else:
-            audio_base64 = encode_audio_to_base64(
-                chunk.audio,
-                chunk.sample_rate,
-                self.output_format,
-            )
-        
-        response: dict[str, Any] = {
-            "audio": audio_base64,
-        }
-        if self.sync_alignment and chunk.alignments and chunk.alignments.items:
-            char_data = self.alignment_formatter.to_websocket_format(
-                chunk.alignments,
-                normalized=True,
-            )
-            response["normalizedAlignment"] = char_data
-            response["alignment"] = char_data
-        return response
-
-    def _alignment_type(self, chunk: AudioChunk) -> str | None:
-        if not chunk.alignments or not chunk.alignments.items:
-            return None
-        return chunk.alignments.type_.value if hasattr(chunk.alignments.type_, "value") else str(chunk.alignments.type_)
-
-    async def _send_response(self, response: dict[str, Any]) -> None:
-        if self.closed or self.ws.closed:
-            return
-        
-        try:
-            await self.ws.send_str(json.dumps(response))
-            self._streaming_started = True
-            self._reset_inactivity_timer()
-        except Exception as e:
-            if self.enable_logging:
-                log.exception("websocket_send_response_failed")
-            self.closed = True
-
-    async def _send_error(self, error_message: str) -> None:
-        if self.closed or self.ws.closed:
-            return
-        
-        try:
-            error_response = {
-                "error": error_message,
-            }
-            await self.ws.send_str(json.dumps(error_response))
-            log.warning("websocket_error_sent", error=error_message)
-        except Exception:
-            log.exception("websocket_send_error_failed")
-        finally:
-            self.closed = True
-
-    def _start_inactivity_timer(self) -> None:
-        self._reset_inactivity_timer()
-
-    def _reset_inactivity_timer(self) -> None:
-        if self.inactivity_task and not self.inactivity_task.done():
-            self.inactivity_task.cancel()
-        
-        self.inactivity_task = asyncio.create_task(self._inactivity_timeout())
-
-    async def _inactivity_timeout(self) -> None:
-        try:
-            await asyncio.sleep(self.inactivity_timeout)
-            if self.closed or self.ws.closed:
-                return
-            if self._streaming_started:
-                self._reset_inactivity_timer()
-                return
-            await self._send_error("Inactivity timeout")
-            self.closed = True
-        except asyncio.CancelledError:
-            pass
+        except (json.JSONDecodeError, TypeError, ValueError) as error:
+            await self._send({"error": str(error)})
+            await self.ws.close(code=1008)
 
     async def cleanup(self) -> None:
-        self.closed = True
-        self._text_added_event.set()
+        if self.context is not None:
+            await self.context.close()
 
-        if self.inactivity_task and not self.inactivity_task.done():
-            self.inactivity_task.cancel()
-            try:
-                await self.inactivity_task
-            except asyncio.CancelledError:
-                pass
+    def abort(self) -> None:
+        if self.context is not None:
+            self.context.abort()
 
-        if self._stream_task and not self._stream_task.done():
-            self._stream_task.cancel()
-            try:
-                await self._stream_task
-            except asyncio.CancelledError:
-                pass
+    async def _dispatch_json(self, raw_message: str) -> None:
+        payload = json.loads(raw_message)
+        if not isinstance(payload, dict):
+            raise ValueError("message must be a JSON object")
+        if not self._initialized:
+            await self._initialize(payload)
+            return
+        await self._dispatch_text(payload)
 
-        if self.stream:
-            try:
-                self.stream.close()
-            except Exception:
-                pass
+    async def _initialize(self, payload: dict[str, Any]) -> None:
+        if "text" not in payload or payload["text"] != " ":
+            raise ValueError('first message text must be exactly " "')
+        query = parse_query(_QueryRequest(self.query_params), Transport.WEBSOCKET)
+        model_info = self.models.resolve(query.model_id)
+        query = replace(query, model_id=model_info.model_id)
+        if self.voice_id not in self.tts.get_voice_ids(query.model_id):
+            raise ValueError(f"unknown voice: {self.voice_id}")
+        language = validate_language(query, model_info)
+        speech_payload = dict(payload)
+        for field in INITIAL_IGNORED_FIELDS:
+            speech_payload.pop(field, None)
+        speech = parse_speech_request(speech_payload)
+        self._voice_settings = speech.voice_settings
+        self._generation_config = speech.generation_config
+        alignment_type = AlignmentType.CHAR if query.sync_alignment else AlignmentType.NONE
+        params = map_stream_params(query, speech, alignment_type)
+        params["tts_params"]["language"] = language
+        stream = self.tts.create_stream(query.model_id, self.voice_id, params)
+        self.context = StreamContext(
+            stream=stream,
+            output_format=query.output_format,
+            send_response=self._send,
+            inactivity_timeout=query.inactivity_timeout,
+            close_response=self._close_socket,
+        )
+        self._initialized = True
+
+    async def _dispatch_text(self, payload: dict[str, Any]) -> None:
+        assert self.context is not None, "initialized handler requires a stream context"
+        unknown_fields = set(payload) - CLIENT_MESSAGE_FIELDS
+        if unknown_fields:
+            raise ValueError(f"unsupported message field: {sorted(unknown_fields)[0]}")
+        if "text" not in payload or not isinstance(payload["text"], str):
+            raise ValueError("text is required and must be a string")
+        text = payload["text"]
+        self._validate_settings(payload)
+        flush = payload["flush"] if "flush" in payload else False
+        trigger = (
+            payload["try_trigger_generation"]
+            if "try_trigger_generation" in payload
+            else False
+        )
+        if not isinstance(flush, bool):
+            raise ValueError("flush must be boolean")
+        if not isinstance(trigger, bool):
+            raise ValueError("try_trigger_generation must be boolean")
+        if text == "":
+            await self.context.finalize()
+            await self.ws.close()
+            return
+        if not text.endswith(" "):
+            raise ValueError("text must end in a space")
+        if text == " ":
+            if flush:
+                await self.context.flush()
+            elif trigger:
+                await self.context.try_generate()
+            else:
+                await self.context.keepalive()
+            return
+        await self.context.add_text(text)
+        if flush:
+            await self.context.flush()
+        elif trigger:
+            await self.context.try_generate()
+
+    def _validate_settings(self, payload: dict[str, Any]) -> None:
+        if "generation_config" in payload:
+            raise ValueError("generation_config is not a client message field")
+        if "voice_settings" in payload:
+            parsed = parse_speech_request(
+                {"text": payload["text"], "voice_settings": payload["voice_settings"]}
+            )
+            if parsed.voice_settings != self._voice_settings:
+                raise ValueError("voice_settings cannot change after initialization")
+        if "generator_config" in payload:
+            parsed = parse_speech_request(
+                {"text": payload["text"], "generation_config": payload["generator_config"]}
+            )
+            if parsed.generation_config != self._generation_config:
+                raise ValueError("generator_config cannot change after initialization")
+
+    async def _send(self, payload: dict[str, Any]) -> None:
+        async with self._send_lock:
+            if not self.ws.closed:
+                await self.ws.send_str(json.dumps(payload, separators=(",", ":")))
+
+    async def _close_socket(self) -> None:
+        await self.ws.close(code=1000)
+
+
+class _QueryRequest:
+    def __init__(self, query: dict[str, str]) -> None:
+        self.query = query

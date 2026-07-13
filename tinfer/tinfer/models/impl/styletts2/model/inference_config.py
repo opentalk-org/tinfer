@@ -13,3 +13,5 @@ class StyleTTS2Params:
     alpha: float = 0.3
     beta: float = 0.7
     speed: float = 1.0
+    seed: int | None = None
+    apply_text_normalization: str = "auto"

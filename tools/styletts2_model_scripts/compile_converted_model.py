@@ -8,7 +8,15 @@ from typing import Sequence
 
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tinfer"))
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "tinfer"))
+
+from tinfer.models.impl.styletts2.model.text_config import TextConfig
+from tools.styletts2_model_scripts.text_config_cli import (
+    add_text_config_arguments,
+    text_config_from_args,
+)
 
 
 def resolve_converted_model_path(path: str | Path) -> Path:
@@ -89,6 +97,13 @@ def update_model_tensorrt_metadata(model_path: str | Path, metadata: dict) -> No
     torch.save(saved, model_path)
 
 
+def update_model_text_config(model_path: str | Path, text_config: TextConfig) -> None:
+    model_path = Path(model_path)
+    saved = torch.load(model_path, map_location="cpu", weights_only=True)
+    saved["text_config"] = text_config.to_dict()
+    torch.save(saved, model_path)
+
+
 def _load_compile_dependencies():
     model_module = importlib.import_module("tinfer.models.impl.styletts2.model.model")
     export_module = importlib.import_module("tinfer.models.impl.styletts2.model.modules.tensorrt_export")
@@ -114,6 +129,7 @@ def compile_converted_model(
     diffusion_steps: Sequence[int] = (10,),
     workspace_gb: float = 8.0,
     force: bool = False,
+    text_config: TextConfig | None = None,
 ) -> dict:
     StyleTTS2, tensorrt_export, tensorrt_runtime = _load_compile_dependencies()
     model_path = resolve_converted_model_path(converted_model)
@@ -122,6 +138,9 @@ def compile_converted_model(
     engine_dir.mkdir(parents=True, exist_ok=True)
     torch_dtype = torch.float16 if dtype == "float16" else torch.float32
     workspace_bytes = int(float(workspace_gb) * (1 << 30))
+
+    if text_config is not None:
+        update_model_text_config(model_path, text_config)
 
     model = StyleTTS2(device="cuda")
     model.load(str(model_path), device="cuda", compile_model=False, load_style_encoder=False)
@@ -227,11 +246,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--diffusion-steps", type=int, nargs="+", default=[10])
     parser.add_argument("--workspace-gb", type=float, default=8.0)
     parser.add_argument("--force", action="store_true")
+    add_text_config_arguments(parser, required=False)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    model_path = resolve_converted_model_path(args.converted_model)
+    saved = torch.load(model_path, map_location="cpu", mmap=True, weights_only=True)
+    text_config = text_config_from_args(args, saved["config"]["n_token"])
     compile_converted_model(
         args.converted_model,
         components=args.components,
@@ -249,6 +272,7 @@ def main() -> None:
         diffusion_steps=args.diffusion_steps,
         workspace_gb=args.workspace_gb,
         force=args.force,
+        text_config=text_config,
     )
 
 

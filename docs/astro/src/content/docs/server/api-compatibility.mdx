@@ -1,0 +1,254 @@
+---
+title: TTS API compatibility
+description: Honest compatibility matrix for the six ElevenLabs-compatible TTS surfaces and model discovery.
+---
+
+Tinfer implements the six paths documented by the official [ElevenLabs TTS endpoint index](https://elevenlabs.io/docs/api-reference/text-to-speech). Compatibility describes wire shape, not hosted-service behavior such as authentication, billing, retention, or generation history.
+
+## Surface matrix
+
+| Surface | Reference path | Transport | Audio response | Timing | Incremental input | Tinfer status/limitations |
+| --- | --- | --- | --- | --- | --- | --- |
+| Single input stream | `/v1/text-to-speech/{voice_id}/stream-input` | WebSocket | Base64 frames | Character ms, optional | Yes | **Supported;** one context, no `eleven_v3`. |
+| Multi input stream | `/v1/text-to-speech/{voice_id}/multi-stream-input` | WebSocket | Base64 frames with `contextId` | Character ms, optional | Yes | **Supported;** independent contexts share one socket. |
+| Create speech | `/v1/text-to-speech/{voice_id}` | POST | Unary binary | No | No | **Supported.** |
+| Create with timing | `/v1/text-to-speech/{voice_id}/with-timestamps` | POST | Unary base64 JSON | Character seconds | No | **Supported.** |
+| Stream speech | `/v1/text-to-speech/{voice_id}/stream` | POST/chunked | Binary chunks | No | No | **Supported;** input is still complete JSON. |
+| Stream with timing | `/v1/text-to-speech/{voice_id}/stream/with-timestamps` | POST/chunked | Newline JSON/base64 | Character seconds | No | **Supported;** body EOF is final. |
+
+## HTTP argument matrix
+
+Every row applies to all four POST paths unless the applicability column says otherwise.
+
+| Location | Argument | Applicability | Reference type/default | Tinfer status |
+| --- | --- | --- | --- | --- |
+| Path | `voice_id` | All HTTP | string, required | **Supported.** Unknown voice: **rejected** `404`. |
+| Header | `xi-api-key` | All HTTP | string, optional | **Unsupported** authentication; accepted but not verified. |
+| Query | `enable_logging` | All HTTP | boolean, default `true` | **Accepted/no-effect.** No zero-retention guarantee. |
+| Query | `optimize_streaming_latency` | All HTTP | integer/null `0..4`, optional, deprecated | **Accepted/no-effect;** values outside `0..4` are rejected. |
+| Query | `output_format` | All HTTP | enum, default `mp3_44100_128` | **Supported.** Non-enum value: **rejected** `422`. |
+| Body | `text` | All HTTP | string, required | **Supported.** Missing/non-string: **rejected** `422`. |
+| Body | `model_id` | All HTTP | string, default `eleven_multilingual_v2` | **Supported.** Omission selects Tinfer's configured loaded default; unknown IDs are rejected. |
+| Body | `language_code` | All HTTP | ISO 639-1 string/null | **Supported.** Unsupported values select the model's default language. |
+| Body | `voice_settings` | All HTTP | object/null | **Supported;** explicit `null` selects model defaults. |
+| Body | `generation_config` | All HTTP | object, optional | **Tinfer extension.** Controls chunk scheduling for this request. |
+| Body | `pronunciation_dictionary_locators` | All HTTP | array/null, maximum 3 | **Accepted/no-effect.** Tinfer has no hosted dictionary store. |
+| Body | `seed` | All HTTP | integer/null `0..4294967295` | **Mapped.** PyTorch diffusion uses request-local deterministic generators; unsupported accelerators accept it with no effect. |
+| Body | `previous_text` | All HTTP | string/null | **Accepted/no-effect.** Tinfer has no generation-history stitching. |
+| Body | `next_text` | All HTTP | string/null | **Accepted/no-effect.** Tinfer has no generation-history stitching. |
+| Body | `previous_request_ids` | All HTTP | string array/null, maximum 3 | **Accepted/no-effect;** maximum 3 is enforced. |
+| Body | `next_request_ids` | All HTTP | string array/null, maximum 3 | **Accepted/no-effect;** maximum 3 is enforced. |
+| Body | `use_pvc_as_ivc` | All HTTP | boolean, default `false`, deprecated | **Accepted/no-effect.** |
+| Body | `apply_text_normalization` | All HTTP | `auto`/`on`/`off`, default `auto` | **Mapped.** `off` bypasses a configured model preprocessing pipeline; `auto` and `on` use it. |
+| Body | `apply_language_text_normalization` | All HTTP | boolean, default `false` | **Accepted/no-effect.** |
+| Nested | `voice_settings.stability` | All HTTP | number/null, default `0.5` | **Mapped** to StyleTTS2 style interpolation. |
+| Nested | `voice_settings.similarity_boost` | All HTTP | number/null, default `0.75` | **Mapped** to StyleTTS2 reference/style mixing; explicit `alpha` or `beta` wins. |
+| Nested | `voice_settings.style` | All HTTP | number/null, default `0` | **Mapped** to diffusion embedding scale where supported; accepted/no-effect on fixed-scale accelerators. |
+| Nested | `voice_settings.use_speaker_boost` | All HTTP | boolean/null, default `true` | **Accepted/no-effect.** |
+| Nested | `voice_settings.speed` | All HTTP | number/null, default `1` | **Supported.** |
+| Nested | `voice_settings.alpha` | All HTTP | number, optional | **Tinfer extension.** |
+| Nested | `voice_settings.beta` | All HTTP | number, optional | **Tinfer extension.** |
+| Nested | `generation_config.chunk_length_schedule` | All HTTP | integer array, default `[120,160,250,290]`, each `50..500` | **Tinfer extension.** |
+| Nested | `pronunciation_dictionary_locators[].pronunciation_dictionary_id` | All HTTP | string, required | **Unsupported.** |
+| Nested | `pronunciation_dictionary_locators[].version_id` | All HTTP | string/null; omitted means latest | **Unsupported.** |
+
+All four HTTP routes support `mp3_22050_32`, `mp3_24000_48`, `mp3_44100_32`, `mp3_44100_64`, `mp3_44100_96`, `mp3_44100_128`, `mp3_44100_192`, `pcm_8000`, `pcm_16000`, `pcm_22050`, `pcm_24000`, `pcm_32000`, `pcm_44100`, `pcm_48000`, `ulaw_8000`, `alaw_8000`, `opus_48000_32`, `opus_48000_64`, `opus_48000_96`, `opus_48000_128`, and `opus_48000_192`.
+
+The two unary routes additionally support `wav_8000`, `wav_16000`, `wav_22050`, `wav_24000`, `wav_32000`, `wav_44100`, and `wav_48000`. The two streaming routes reject WAV because the reference stream format enum does not include it.
+
+## WebSocket handshake argument matrix
+
+Every row applies to both WebSocket paths.
+
+| Location | Argument | Reference type/default | Tinfer status |
+| --- | --- | --- | --- |
+| Path | `voice_id` | string, required | **Supported.** Unknown voice: **rejected** `404`. |
+| Header | `xi-api-key` | string, optional | **Unsupported** authentication; accepted but not verified. |
+| Query | `authorization` | string, optional | **Unsupported** authentication. |
+| Query | `single_use_token` | string, optional | **Unsupported** authentication. |
+| Query | `model_id` | string, default `eleven_multilingual_v2` | **Supported.** Omission selects the configured loaded default; unknown IDs are rejected. |
+| Query | `language_code` | ISO 639-1 string, optional | **Supported.** Unsupported values select the model default. |
+| Query | `enable_logging` | boolean, default `true` | **Accepted/no-effect.** |
+| Query | `enable_ssml_parsing` | boolean, default `false` | **Unsupported** SSML semantics. |
+| Query | `output_format` | enum, reference default `mp3_44100` | **Supported** enum; other values **rejected**. Tinfer omission default is `mp3_44100_128`. |
+| Query | `inactivity_timeout` | integer seconds, default `20`, maximum `180` | **Supported;** integer type and `1..180` range are enforced. |
+| Query | `sync_alignment` | boolean, default `false` | **Supported.** |
+| Query | `auto_mode` | boolean, default `false` | **Supported;** disables the scheduler timeout buffer. |
+| Query | `apply_text_normalization` | `auto`/`on`/`off`, default `auto` | **Mapped** to the configured model preprocessing pipeline. |
+| Query | `seed` | integer `0..4294967295`, optional | **Mapped** to request-local seeded diffusion where supported. |
+
+The WebSocket enum is `mp3_22050_32`, `mp3_44100_32`, `mp3_44100_64`, `mp3_44100_96`, `mp3_44100_128`, `mp3_44100_192`, `pcm_8000`, `pcm_16000`, `pcm_22050`, `pcm_24000`, `pcm_44100`, `ulaw_8000`, `alaw_8000`, `opus_48000_32`, `opus_48000_64`, `opus_48000_96`, `opus_48000_128`, and `opus_48000_192`. Tinfer supports all 18; other values are **rejected**.
+
+## WebSocket nested-object matrix
+
+| Argument | Applicability | Reference type/default | Tinfer status |
+| --- | --- | --- | --- |
+| `voice_settings.stability` | Init; single later settings; multi create | number, default `0.5` | **Mapped** to style interpolation. |
+| `voice_settings.similarity_boost` | Same | number, default `0.75` | **Mapped** to reference/style mixing. |
+| `voice_settings.style` | Same | number, default `0` | **Mapped** to diffusion embedding scale where supported. |
+| `voice_settings.use_speaker_boost` | Same | boolean, default `true` | **Accepted/no-effect.** |
+| `voice_settings.speed` | Same | number, default `1`, range `0.7..1.2` | **Supported;** the reference range is enforced. |
+| `voice_settings.alpha` | Same | number, optional | **Tinfer extension.** |
+| `voice_settings.beta` | Same | number, optional | **Tinfer extension.** |
+| `generation_config.chunk_length_schedule` | Init and multi create | number array, default `[120,160,250,290]`, each `50..500` | **Supported.** |
+| `generator_config.chunk_length_schedule` | Single later message | number array, optional | **Supported** only if unchanged; changed setting is **rejected**. |
+| `pronunciation_dictionary_locators` | Init and multi create | locator array, optional | **Accepted/no-effect.** |
+| `pronunciation_dictionary_locators[].pronunciation_dictionary_id` | Init and multi create | string, required | **Accepted/no-effect.** |
+| `pronunciation_dictionary_locators[].version_id` | Init and multi create | string, required | **Accepted/no-effect.** |
+
+## Single-context message matrix
+
+| Message | Argument | Reference type/default | Tinfer status |
+| --- | --- | --- | --- |
+| Initialize | `text` | literal `" "`, required | **Supported and required.** Other initial text is **rejected**. |
+| Initialize | `voice_settings` | object, optional | **Supported** container; nested fields as above. |
+| Initialize | `generation_config` | object, optional | **Supported.** |
+| Initialize | `pronunciation_dictionary_locators` | array, optional | **Accepted/no-effect.** |
+| Initialize | `xi-api-key` | string, first message only | **Accepted/no-effect.** Authentication is not verified. |
+| Initialize | `authorization` | string, first message only | **Accepted/no-effect.** Authentication is not verified. |
+| Send | `text` | string, required; non-empty text ends in one space | **Supported.** Invalid suffix/state is **rejected**. |
+| Send | `try_trigger_generation` | boolean, default `false` | **Supported:** signals the scheduler without forcing below-threshold generation. |
+| Send | `voice_settings` | object, optional | **Accepted** only unchanged; changed value is **rejected**. |
+| Send | `generator_config` | object, optional | **Accepted** only unchanged; changed value is **rejected**. |
+| Send | `flush` | boolean, default `false` | **Supported.** Forces audio and keeps socket open. |
+| Close | `text` | literal `""`, required | **Supported.** Drains, sends final, and closes. |
+
+## Multi-context message matrix
+
+| Message | Argument | Reference type/default | Tinfer status |
+| --- | --- | --- | --- |
+| First initialize | `text` | literal `" "`, required | **Supported and required.** |
+| First initialize | `voice_settings` | object, optional | **Supported** container. |
+| First initialize | `generation_config` | object, optional | **Supported.** |
+| First initialize | `pronunciation_dictionary_locators` | array, optional | **Accepted/no-effect.** |
+| First initialize | `xi_api_key` | string, optional | **Accepted/no-effect.** Authentication is not verified. |
+| First initialize | `authorization` | string, optional | **Accepted/no-effect.** Authentication is not verified. |
+| First initialize | `context_id` | string, optional | **Supported.** Omission selects default context. |
+| Create/reinitialize | `text` | string, required; ends in one space | **Supported.** Reinitializing a live ID drains it before replacement. |
+| Create/reinitialize | `voice_settings` | object, optional | **Supported** container. |
+| Create/reinitialize | `generation_config` | object, optional | **Supported.** |
+| Create/reinitialize | `pronunciation_dictionary_locators` | array, optional | **Accepted/no-effect.** |
+| Create/reinitialize | `xi_api_key` | string, optional | **Accepted/no-effect.** Authentication is not verified. |
+| Create/reinitialize | `authorization` | string, optional | **Accepted/no-effect.** Authentication is not verified. |
+| Create/reinitialize | `context_id` | string, optional | **Supported.** |
+| Send text | `text` | string, required; ends in one space | **Supported.** |
+| Send text | `context_id` | string, optional | **Supported.** |
+| Send text | `flush` | boolean, default `false` | **Supported.** |
+| Flush | `context_id` | string, required | **Supported.** |
+| Flush | `text` | string, optional | **Supported.** Appended before flush. |
+| Flush | `flush` | boolean, required | **Supported** when `true`; false transition is **rejected**. |
+| Keep alive | `text` | literal `""`, required | **Supported.** Resets context timer without synthesis. |
+| Keep alive | `context_id` | string, required | **Supported.** |
+| Close context | `context_id` | string, required | **Supported.** |
+| Close context | `close_context` | boolean, reference default `false` | **Supported** when `true`; drains that context. |
+| Close socket | `close_socket` | boolean, reference default `false` | **Supported** when `true`; drains all contexts. |
+
+## Synthesis response field matrix
+
+The plain create and stream routes return encoded audio bytes rather than JSON. The timing POST routes use these fields:
+
+| Argument | Applicability | Reference type | Tinfer status |
+| --- | --- | --- | --- |
+| `audio_base64` | Both timing routes | string, required | **Supported.** |
+| `alignment` | Both timing routes | object/null | **Supported;** emitted as an object. |
+| `normalized_alignment` | Both timing routes | object/null | **Supported;** currently identical to `alignment`. |
+| `*.characters` | Both alignment objects | string array | **Supported.** |
+| `*.character_start_times_seconds` | Both alignment objects | number array | **Supported.** |
+| `*.character_end_times_seconds` | Both alignment objects | number array | **Supported.** |
+
+WebSocket server messages use these fields:
+
+| Argument | Applicability | Reference type | Tinfer status |
+| --- | --- | --- | --- |
+| `audio` | Audio output | base64 string | **Supported.** |
+| `alignment` | Audio output | object, optional | **Supported** when alignment is requested. |
+| `normalizedAlignment` | Audio output | object, optional | **Supported;** currently identical to `alignment`. |
+| `*.chars` | Both alignment objects | string array | **Supported.** |
+| `*.charStartTimesMs` | Both alignment objects | integer array | **Supported.** |
+| `*.charDurationsMs` | Both alignment objects | integer array | **Supported.** |
+| `contextId` | Multi-context audio/final output | string | **Supported.** |
+| `isFinal` | Final output | literal `true` | **Supported.** |
+| `isFinal` | Audio output | not in reference audio schema | **Tinfer extension;** emitted `false`. |
+
+Malformed JSON, missing required fields, out-of-order messages, and invalid transitions are **rejected** rather than silently skipped. Authentication, billing/tier gates, retention, SSML, dictionaries, request history, and stitching remain **unsupported**. See [HTTP details](/server/http) and [WebSocket details](/server/websocket) for examples and response schemas.
+
+## Model and language discovery
+
+`GET /v1/models` returns a top-level JSON array, not an object wrapper. `xi-api-key` is an optional reference header but has no authentication effect in Tinfer.
+
+| Request location | Argument | Reference type/default | Tinfer status |
+| --- | --- | --- | --- |
+| Header | `xi-api-key` | string, optional | **Unsupported** authentication; accepted with no effect. |
+
+```json
+[
+  {
+    "model_id": "eleven_multilingual_v2",
+    "name": "eleven_multilingual_v2",
+    "can_do_text_to_speech": true,
+    "languages": [
+      { "language_id": "en", "name": "English" },
+      { "language_id": "pl", "name": "Polish" }
+    ],
+    "default_language": "en"
+  }
+]
+```
+
+Tinfer emits `model_id`, `name`, `can_do_text_to_speech`, `languages`, and the **Tinfer extension** `default_language`. The default language is listed first. Clients should not expect the old `supported_languages` field or `{ "models": [...] }` wrapper.
+
+| Response field | Reference requirement | Tinfer status |
+| --- | --- | --- |
+| `model_id` | string, required | **Supported.** |
+| `name` | string, optional | **Supported.** |
+| `can_do_text_to_speech` | boolean, optional | **Supported;** emitted `true`. |
+| `languages` | object array, optional | **Supported.** |
+| `languages[].language_id` | string, required within entry | **Supported.** |
+| `languages[].name` | string, required within entry | **Supported.** |
+| `default_language` | not in reference | **Tinfer extension.** |
+| `can_be_finetuned` | boolean, optional | **Unsupported;** omitted. |
+| `can_do_voice_conversion` | boolean, optional | **Unsupported;** omitted. |
+| `can_use_style` | boolean, optional | **Unsupported;** omitted. |
+| `can_use_speaker_boost` | boolean, optional | **Unsupported;** omitted. |
+| `serves_pro_voices` | boolean, optional | **Unsupported;** omitted. |
+| `token_cost_factor` | number, optional | **Unsupported;** omitted. |
+| `description` | string, optional | **Unsupported;** omitted. |
+| `requires_alpha_access` | boolean, optional | **Unsupported;** omitted. |
+| `max_characters_request_free_user` | integer, optional | **Unsupported;** omitted. |
+| `max_characters_request_subscribed_user` | integer, optional | **Unsupported;** omitted. |
+| `maximum_text_length_per_request` | integer, optional | **Unsupported;** omitted. |
+| `model_rates` | object, optional | **Unsupported;** omitted. |
+| `model_rates.character_cost_multiplier` | number, required within rates | **Unsupported;** omitted. |
+| `model_rates.cost_discount_multiplier` | number, default `1` | **Unsupported;** omitted. |
+| `concurrency_group` | string, optional | **Unsupported;** omitted. |
+
+Language entries use required strings `language_id` and `name`. `default_language` is the language Electron and other clients should preselect. `GET /v1/voices` remains available for associating voices with loaded models.
+
+`GET /v1/voices` returns `{ "voices": [...] }`. Tinfer emits the identity fields clients need and omits hosted-account metadata that has no local meaning.
+
+| Voice response field | Tinfer status |
+| --- | --- |
+| `voices` | **Supported** top-level array. |
+| `voice_id` | **Supported.** |
+| `name` | **Supported;** uses the local voice ID. |
+| `category` | **Supported;** emitted as `generated`. |
+| `labels` | **Supported;** emitted as an empty object. |
+| `model_id` | **Tinfer extension** associating the voice with a loaded model. |
+| `samples`, `fine_tuning`, `description`, `preview_url` | **Omitted;** no hosted voice assets or training records exist. |
+| `available_for_tiers`, `sharing`, `collection_ids` | **Omitted;** no billing, sharing, or hosted collections exist. |
+| `settings` | **Omitted;** request settings use model defaults unless supplied. |
+| `high_quality_base_model_ids`, `verified_languages` | **Omitted;** model/language support comes from `/v1/models`. |
+| `safety_control`, `voice_verification`, `permission_on_resource` | **Omitted;** no hosted moderation or resource ACL exists. |
+| `is_owner`, `is_legacy`, `is_mixed`, `is_bookmarked` | **Omitted;** no hosted ownership state exists. |
+| `favorited_at_unix`, `created_at_unix` | **Omitted;** no hosted voice history exists. |
+| `recording_quality`, `labelling_status`, `recording_quality_reason` | **Omitted;** local voice vectors have no recording metadata. |
+
+## Reference-specific limitations
+
+- The reference declares the WebSocket default `mp3_44100`, which is not in its own format enum. Tinfer chooses explicit `mp3_44100_128` when omitted.
+- WebSocket alignments use camelCase keys and per-chunk milliseconds. HTTP alignments use snake_case keys and seconds.
+- WebSocket audio frames include `isFinal:false`; final frames contain `isFinal:true` and no audio. Multi-context output uses camelCase `contextId`, while client messages use snake_case `context_id`.
+- HTTP timing streaming is newline-delimited JSON under `text/event-stream`; it is not `data:`-prefixed SSE.
+- HTTP streaming incrementally delivers output only. Send partial text through a WebSocket surface.
+
+Official references: [single WebSocket](https://elevenlabs.io/docs/api-reference/text-to-speech/v-1-text-to-speech-voice-id-stream-input), [multi-context WebSocket](https://elevenlabs.io/docs/api-reference/text-to-speech/v-1-text-to-speech-voice-id-multi-stream-input), [create speech](https://elevenlabs.io/docs/api-reference/text-to-speech/convert), [create with timing](https://elevenlabs.io/docs/api-reference/text-to-speech/convert-with-timestamps), [stream speech](https://elevenlabs.io/docs/api-reference/text-to-speech/stream), [stream with timing](https://elevenlabs.io/docs/api-reference/text-to-speech/stream-with-timestamps), and [list models](https://elevenlabs.io/docs/api-reference/models/list).

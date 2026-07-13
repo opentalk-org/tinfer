@@ -146,7 +146,12 @@ def load_model(model_path: str, load_style_encoder: bool = True):
     model_saved = torch.load(model_path, map_location='cpu', weights_only=True)
     return load_model_from_state(model_saved, load_style_encoder)
 
-def get_model_state_dict(model: nn.Module, config: ModelConfig, runtime_config: dict | None = None) -> dict:
+def get_model_state_dict(
+    model: nn.Module,
+    config: ModelConfig,
+    runtime_config: dict | None = None,
+    text_config: dict | None = None,
+) -> dict:
     config_dict = asdict(config)
     state_dict = {
         'config': config_dict,
@@ -154,10 +159,18 @@ def get_model_state_dict(model: nn.Module, config: ModelConfig, runtime_config: 
     }
     if runtime_config is not None:
         state_dict['runtime_config'] = runtime_config
+    if text_config is not None:
+        state_dict['text_config'] = text_config
     return state_dict
 
-def save_model(model: nn.Module, config: ModelConfig, model_path: str, runtime_config: dict | None = None):
-    save_dict = get_model_state_dict(model, config, runtime_config)
+def save_model(
+    model: nn.Module,
+    config: ModelConfig,
+    model_path: str,
+    runtime_config: dict | None = None,
+    text_config: dict | None = None,
+):
+    save_dict = get_model_state_dict(model, config, runtime_config, text_config)
     torch.save(save_dict, model_path)
 
 def load_original_styletts2_config(config_path: str) -> TrainingArgs:
@@ -261,4 +274,3 @@ def load_ASR_models(ASR_MODEL_PATH, ASR_MODEL_CONFIG):
     model.load_state_dict(params)
     _ = model.train()
     return model
-

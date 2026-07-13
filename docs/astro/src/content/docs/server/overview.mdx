@@ -1,16 +1,17 @@
 ---
 title: Server overview
-description: Run tinfer as a gRPC or WebSocket server on top of AsyncStreamingTTS and choose the right transport for your client.
+description: Run tinfer as a gRPC, HTTP, or WebSocket server on top of AsyncStreamingTTS and choose the right transport for your client.
 ---
 
-The server layer exposes tinfer's streaming TTS over two transports: **gRPC** and **WebSocket**. Both use the same underlying [AsyncStreamingTTS](/api/async-streaming-tts) engine; only the protocol and client ergonomics differ.
+The server layer exposes tinfer's streaming TTS over **gRPC**, **HTTP**, and **WebSocket**. All use the same underlying [AsyncStreamingTTS](/api/async-streaming-tts) engine; only the protocol and client ergonomics differ.
 
 ## When to use which
 
 | Transport | Use when |
 | --------- | -------- |
 | **gRPC** | You want strong typing, generated client stubs, and streaming RPCs (unary, server streaming, or bidirectional). Suited for backend-to-backend or native clients. |
-| **WebSocket** | You need a browser-friendly or HTTP-oriented client, or you want ElevenLabs-compatible clients to work with tinfer as a drop-in. |
+| **HTTP** | You have complete text and want unary or streamed output, optionally with character timing. |
+| **WebSocket** | You need incremental text input, including multiple independent contexts over one connection. |
 
 ## Running the servers
 
@@ -59,4 +60,6 @@ Full runnable examples are in the repo: `examples/grpc_server.py` and `examples/
 ## Next steps
 
 - [gRPC API](/server/grpc) — Endpoint, RPCs, messages, and client/server snippets.
-- [WebSocket API](/server/websocket) — Endpoint, query params, message protocol, and examples.
+- [HTTP TTS API](/server/http) — Four POST endpoints, complete arguments, and response formats.
+- [WebSocket TTS API](/server/websocket) — Single/multi paths, complete messages, and close semantics.
+- [TTS API compatibility](/server/api-compatibility) — Six-surface matrix, model discovery, extensions, and limitations.

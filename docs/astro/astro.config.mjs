@@ -31,7 +31,9 @@ export default defineConfig({
 					items: [
 						{ slug: 'server/overview' },
 						{ slug: 'server/grpc' },
+						{ slug: 'server/http' },
 						{ slug: 'server/websocket' },
+						{ slug: 'server/api-compatibility' },
 					],
 				},
 				{

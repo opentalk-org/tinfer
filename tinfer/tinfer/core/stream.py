@@ -17,6 +17,9 @@ class TTSStream:
     def force_generate(self):
         self._engine.force_generate(self._request)
 
+    def try_generate(self):
+        self._engine.signal_input()
+
     def cancel(self):
         self._engine._cancel_request(self._request.request_id)
 

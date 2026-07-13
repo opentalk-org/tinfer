@@ -10,6 +10,7 @@ from tinfer.utils.audio_encoder import AudioFormat
 from typing import AsyncIterator, Any
 from . import styletts_pb2
 from . import styletts_pb2_grpc
+from .catalog_service import CatalogServiceMixin
 from tinfer.core.request import Alignment
 from tinfer.support.errors import InferenceError
 from tinfer.server.health import HealthState
@@ -18,7 +19,7 @@ from tinfer.support.observability import get_logger, record_span_exception, star
 
 log = get_logger(__name__)
 
-class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
+class StyleTTSService(CatalogServiceMixin, styletts_pb2_grpc.StyleTTSServiceServicer):
 
     def __init__(self, tts: AsyncStreamingTTS, health: HealthState | None = None) -> None:
         self.tts = tts
@@ -95,28 +96,6 @@ class StyleTTSService(styletts_pb2_grpc.StyleTTSServiceServicer):
             ready=ready,
             status=styletts_pb2.HealthStatus.SERVING if ready else styletts_pb2.HealthStatus.NOT_SERVING,
         )
-
-    async def ListModels(self, request: styletts_pb2.ListModelsRequest, context: grpc.ServicerContext) -> styletts_pb2.ListModelsResponse:
-        model_ids = self.tts.get_model_ids()
-        log.info("grpc_list_models", model_count=len(model_ids))
-        return styletts_pb2.ListModelsResponse(model_ids=model_ids)
-
-    async def ListVoices(self, request: styletts_pb2.ListVoicesRequest, context: grpc.ServicerContext) -> styletts_pb2.ListVoicesResponse:
-        model_ids = [request.model_id] if request.model_id else self.tts.get_model_ids()
-        response = styletts_pb2.ListVoicesResponse()
-        for model_id in model_ids:
-            try:
-                voice_ids = self.tts.get_voice_ids(model_id)
-            except ValueError as e:
-                context.set_code(grpc.StatusCode.NOT_FOUND)
-                context.set_details(str(e))
-                return response
-            for voice_id in voice_ids:
-                voice = response.voices.add()
-                voice.model_id = model_id
-                voice.voice_id = voice_id
-        log.info("grpc_list_voices", model_count=len(model_ids), voice_count=len(response.voices))
-        return response
 
     async def Synthesize(self, request: styletts_pb2.SynthesizeRequest, context: grpc.ServicerContext) -> styletts_pb2.SynthesizeResponse:
         if not await self._try_acquire_connection(context):

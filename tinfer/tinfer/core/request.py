@@ -26,6 +26,21 @@ class StreamParams(TypedDict, total=False):
     tts_params: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class ModelInfo:
+    model_id: str
+    supported_languages: tuple[str, ...]
+    default_language: str
+
+
+@dataclass(frozen=True)
+class VoiceInfo:
+    voice_id: str
+    name: str
+    category: str
+    model_id: str
+
+
 @dataclass
 class AlignmentItem:
     item: str

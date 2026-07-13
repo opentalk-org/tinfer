@@ -24,15 +24,15 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0estyletts.proto\x12\x0bstyletts.v1\"\x0f\n\rHealthRequest\"J\n\x0eHealthResponse\x12\r\n\x05ready\x18\x01 \x01(\x08\x12)\n\x06status\x18\x02 \x01(\x0e\x32\x19.styletts.v1.HealthStatus\"\x13\n\x11ListModelsRequest\"\'\n\x12ListModelsResponse\x12\x11\n\tmodel_ids\x18\x01 \x03(\t\"%\n\x11ListVoicesRequest\x12\x10\n\x08model_id\x18\x01 \x01(\t\"/\n\tVoiceInfo\x12\x10\n\x08model_id\x18\x01 \x01(\t\x12\x10\n\x08voice_id\x18\x02 \x01(\t\"<\n\x12ListVoicesResponse\x12&\n\x06voices\x18\x01 \x03(\x0b\x32\x16.styletts.v1.VoiceInfo\"O\n\x11SynthesizeRequest\x12\x0c\n\x04text\x18\x01 \x01(\t\x12,\n\x06\x63onfig\x18\x02 \x01(\x0b\x32\x1c.styletts.v1.SynthesisConfig\"\xd7\x01\n\x1cIncrementalSynthesizeRequest\x12.\n\x06\x63onfig\x18\x01 \x01(\x0b\x32\x1c.styletts.v1.SynthesisConfigH\x00\x12\x14\n\ntext_chunk\x18\x02 \x01(\tH\x00\x12.\n\x06\x63\x61ncel\x18\x03 \x01(\x0b\x32\x1c.styletts.v1.CancelSynthesisH\x00\x12\x36\n\x0f\x66orce_synthesis\x18\x04 \x01(\x0b\x32\x1b.styletts.v1.ForceSynthesisH\x00\x42\t\n\x07\x63ontent\"C\n\x14IncrementalTextChunk\x12\x12\n\ntext_chunk\x18\x02 \x01(\t\x12\x17\n\x0f\x66orce_synthesis\x18\x03 \x01(\x08\"\x11\n\x0f\x43\x61ncelSynthesis\"\x10\n\x0e\x46orceSynthesis\"_\n\x0fSynthesisConfig\x12\x10\n\x08model_id\x18\x01 \x01(\t\x12\x10\n\x08voice_id\x18\x02 \x01(\t\x12\x16\n\x0esample_rate_hz\x18\x03 \x01(\x05\x12\x10\n\x08language\x18\x04 \x01(\t\"X\n\x12SynthesizeResponse\x12\x12\n\naudio_data\x18\x01 \x01(\x0c\x12.\n\nalignments\x18\x02 \x03(\x0b\x32\x1a.styletts.v1.WordAlignment\"?\n\rWordAlignment\x12\x0c\n\x04word\x18\x01 \x01(\t\x12\x10\n\x08start_ms\x18\x02 \x01(\x05\x12\x0e\n\x06\x65nd_ms\x18\x03 \x01(\x05*G\n\x0cHealthStatus\x12\x19\n\x15HEALTH_STATUS_UNKNOWN\x10\x00\x12\x0b\n\x07SERVING\x10\x01\x12\x0f\n\x0bNOT_SERVING\x10\x02\x32\x81\x04\n\x0fStyleTTSService\x12\x41\n\x06Health\x12\x1a.styletts.v1.HealthRequest\x1a\x1b.styletts.v1.HealthResponse\x12M\n\nListModels\x12\x1e.styletts.v1.ListModelsRequest\x1a\x1f.styletts.v1.ListModelsResponse\x12M\n\nListVoices\x12\x1e.styletts.v1.ListVoicesRequest\x1a\x1f.styletts.v1.ListVoicesResponse\x12M\n\nSynthesize\x12\x1e.styletts.v1.SynthesizeRequest\x1a\x1f.styletts.v1.SynthesizeResponse\x12U\n\x10SynthesizeStream\x12\x1e.styletts.v1.SynthesizeRequest\x1a\x1f.styletts.v1.SynthesizeResponse0\x01\x12g\n\x15SynthesizeIncremental\x12).styletts.v1.IncrementalSynthesizeRequest\x1a\x1f.styletts.v1.SynthesizeResponse(\x01\x30\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0estyletts.proto\x12\x0bstyletts.v1\"\x0f\n\rHealthRequest\"J\n\x0eHealthResponse\x12\r\n\x05ready\x18\x01 \x01(\x08\x12)\n\x06status\x18\x02 \x01(\x0e\x32\x19.styletts.v1.HealthStatus\"\x13\n\x11ListModelsRequest\"<\n\x12ListModelsResponse\x12&\n\x06models\x18\x01 \x03(\x0b\x32\x16.styletts.v1.ModelInfo\"T\n\tModelInfo\x12\x10\n\x08model_id\x18\x01 \x01(\t\x12\x1b\n\x13supported_languages\x18\x02 \x03(\t\x12\x18\n\x10\x64\x65\x66\x61ult_language\x18\x03 \x01(\t\"%\n\x11ListVoicesRequest\x12\x10\n\x08model_id\x18\x01 \x01(\t\"/\n\tVoiceInfo\x12\x10\n\x08model_id\x18\x01 \x01(\t\x12\x10\n\x08voice_id\x18\x02 \x01(\t\"<\n\x12ListVoicesResponse\x12&\n\x06voices\x18\x01 \x03(\x0b\x32\x16.styletts.v1.VoiceInfo\"O\n\x11SynthesizeRequest\x12\x0c\n\x04text\x18\x01 \x01(\t\x12,\n\x06\x63onfig\x18\x02 \x01(\x0b\x32\x1c.styletts.v1.SynthesisConfig\"\xd7\x01\n\x1cIncrementalSynthesizeRequest\x12.\n\x06\x63onfig\x18\x01 \x01(\x0b\x32\x1c.styletts.v1.SynthesisConfigH\x00\x12\x14\n\ntext_chunk\x18\x02 \x01(\tH\x00\x12.\n\x06\x63\x61ncel\x18\x03 \x01(\x0b\x32\x1c.styletts.v1.CancelSynthesisH\x00\x12\x36\n\x0f\x66orce_synthesis\x18\x04 \x01(\x0b\x32\x1b.styletts.v1.ForceSynthesisH\x00\x42\t\n\x07\x63ontent\"C\n\x14IncrementalTextChunk\x12\x12\n\ntext_chunk\x18\x02 \x01(\t\x12\x17\n\x0f\x66orce_synthesis\x18\x03 \x01(\x08\"\x11\n\x0f\x43\x61ncelSynthesis\"\x10\n\x0e\x46orceSynthesis\"_\n\x0fSynthesisConfig\x12\x10\n\x08model_id\x18\x01 \x01(\t\x12\x10\n\x08voice_id\x18\x02 \x01(\t\x12\x16\n\x0esample_rate_hz\x18\x03 \x01(\x05\x12\x10\n\x08language\x18\x04 \x01(\t\"X\n\x12SynthesizeResponse\x12\x12\n\naudio_data\x18\x01 \x01(\x0c\x12.\n\nalignments\x18\x02 \x03(\x0b\x32\x1a.styletts.v1.WordAlignment\"?\n\rWordAlignment\x12\x0c\n\x04word\x18\x01 \x01(\t\x12\x10\n\x08start_ms\x18\x02 \x01(\x05\x12\x0e\n\x06\x65nd_ms\x18\x03 \x01(\x05*G\n\x0cHealthStatus\x12\x19\n\x15HEALTH_STATUS_UNKNOWN\x10\x00\x12\x0b\n\x07SERVING\x10\x01\x12\x0f\n\x0bNOT_SERVING\x10\x02\x32\x81\x04\n\x0fStyleTTSService\x12\x41\n\x06Health\x12\x1a.styletts.v1.HealthRequest\x1a\x1b.styletts.v1.HealthResponse\x12M\n\nListModels\x12\x1e.styletts.v1.ListModelsRequest\x1a\x1f.styletts.v1.ListModelsResponse\x12M\n\nListVoices\x12\x1e.styletts.v1.ListVoicesRequest\x1a\x1f.styletts.v1.ListVoicesResponse\x12M\n\nSynthesize\x12\x1e.styletts.v1.SynthesizeRequest\x1a\x1f.styletts.v1.SynthesizeResponse\x12U\n\x10SynthesizeStream\x12\x1e.styletts.v1.SynthesizeRequest\x1a\x1f.styletts.v1.SynthesizeResponse0\x01\x12g\n\x15SynthesizeIncremental\x12).styletts.v1.IncrementalSynthesizeRequest\x1a\x1f.styletts.v1.SynthesizeResponse(\x01\x30\x01\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'styletts_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_HEALTHSTATUS']._serialized_start=993
-  _globals['_HEALTHSTATUS']._serialized_end=1064
+  _globals['_HEALTHSTATUS']._serialized_start=1100
+  _globals['_HEALTHSTATUS']._serialized_end=1171
   _globals['_HEALTHREQUEST']._serialized_start=31
   _globals['_HEALTHREQUEST']._serialized_end=46
   _globals['_HEALTHRESPONSE']._serialized_start=48
@@ -40,29 +40,31 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_LISTMODELSREQUEST']._serialized_start=124
   _globals['_LISTMODELSREQUEST']._serialized_end=143
   _globals['_LISTMODELSRESPONSE']._serialized_start=145
-  _globals['_LISTMODELSRESPONSE']._serialized_end=184
-  _globals['_LISTVOICESREQUEST']._serialized_start=186
-  _globals['_LISTVOICESREQUEST']._serialized_end=223
-  _globals['_VOICEINFO']._serialized_start=225
-  _globals['_VOICEINFO']._serialized_end=272
-  _globals['_LISTVOICESRESPONSE']._serialized_start=274
-  _globals['_LISTVOICESRESPONSE']._serialized_end=334
-  _globals['_SYNTHESIZEREQUEST']._serialized_start=336
-  _globals['_SYNTHESIZEREQUEST']._serialized_end=415
-  _globals['_INCREMENTALSYNTHESIZEREQUEST']._serialized_start=418
-  _globals['_INCREMENTALSYNTHESIZEREQUEST']._serialized_end=633
-  _globals['_INCREMENTALTEXTCHUNK']._serialized_start=635
-  _globals['_INCREMENTALTEXTCHUNK']._serialized_end=702
-  _globals['_CANCELSYNTHESIS']._serialized_start=704
-  _globals['_CANCELSYNTHESIS']._serialized_end=721
-  _globals['_FORCESYNTHESIS']._serialized_start=723
-  _globals['_FORCESYNTHESIS']._serialized_end=739
-  _globals['_SYNTHESISCONFIG']._serialized_start=741
-  _globals['_SYNTHESISCONFIG']._serialized_end=836
-  _globals['_SYNTHESIZERESPONSE']._serialized_start=838
-  _globals['_SYNTHESIZERESPONSE']._serialized_end=926
-  _globals['_WORDALIGNMENT']._serialized_start=928
-  _globals['_WORDALIGNMENT']._serialized_end=991
-  _globals['_STYLETTSSERVICE']._serialized_start=1067
-  _globals['_STYLETTSSERVICE']._serialized_end=1580
+  _globals['_LISTMODELSRESPONSE']._serialized_end=205
+  _globals['_MODELINFO']._serialized_start=207
+  _globals['_MODELINFO']._serialized_end=291
+  _globals['_LISTVOICESREQUEST']._serialized_start=293
+  _globals['_LISTVOICESREQUEST']._serialized_end=330
+  _globals['_VOICEINFO']._serialized_start=332
+  _globals['_VOICEINFO']._serialized_end=379
+  _globals['_LISTVOICESRESPONSE']._serialized_start=381
+  _globals['_LISTVOICESRESPONSE']._serialized_end=441
+  _globals['_SYNTHESIZEREQUEST']._serialized_start=443
+  _globals['_SYNTHESIZEREQUEST']._serialized_end=522
+  _globals['_INCREMENTALSYNTHESIZEREQUEST']._serialized_start=525
+  _globals['_INCREMENTALSYNTHESIZEREQUEST']._serialized_end=740
+  _globals['_INCREMENTALTEXTCHUNK']._serialized_start=742
+  _globals['_INCREMENTALTEXTCHUNK']._serialized_end=809
+  _globals['_CANCELSYNTHESIS']._serialized_start=811
+  _globals['_CANCELSYNTHESIS']._serialized_end=828
+  _globals['_FORCESYNTHESIS']._serialized_start=830
+  _globals['_FORCESYNTHESIS']._serialized_end=846
+  _globals['_SYNTHESISCONFIG']._serialized_start=848
+  _globals['_SYNTHESISCONFIG']._serialized_end=943
+  _globals['_SYNTHESIZERESPONSE']._serialized_start=945
+  _globals['_SYNTHESIZERESPONSE']._serialized_end=1033
+  _globals['_WORDALIGNMENT']._serialized_start=1035
+  _globals['_WORDALIGNMENT']._serialized_end=1098
+  _globals['_STYLETTSSERVICE']._serialized_start=1174
+  _globals['_STYLETTSSERVICE']._serialized_end=1687
 # @@protoc_insertion_point(module_scope)

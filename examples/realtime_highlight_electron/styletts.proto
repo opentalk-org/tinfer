@@ -27,7 +27,13 @@ message HealthResponse {
 message ListModelsRequest {}
 
 message ListModelsResponse {
-  repeated string model_ids = 1;
+  repeated ModelInfo models = 1;
+}
+
+message ModelInfo {
+  string model_id = 1;
+  repeated string supported_languages = 2;
+  string default_language = 3;
 }
 
 message ListVoicesRequest {

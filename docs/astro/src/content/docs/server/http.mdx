@@ -1,0 +1,102 @@
+---
+title: HTTP TTS API
+description: Complete request and response contracts for unary and streaming HTTP text-to-speech endpoints.
+---
+
+Tinfer implements four JSON-request TTS endpoints. All require `Content-Type: application/json`; streaming refers to incremental **output**, not incremental text input.
+
+## Paths and responses
+
+| Surface | Exact path | Successful response | Completion |
+| --- | --- | --- | --- |
+| Create speech | `POST /v1/text-to-speech/{voice_id}` | `application/octet-stream` binary audio | End of body |
+| Create speech with timing | `POST /v1/text-to-speech/{voice_id}/with-timestamps` | `application/json` with base64 audio and timing | One JSON response |
+| Stream speech | `POST /v1/text-to-speech/{voice_id}/stream` | Selected audio MIME, chunked binary audio | End of body |
+| Stream speech with timing | `POST /v1/text-to-speech/{voice_id}/stream/with-timestamps` | `text/event-stream`, one compact JSON object plus `\n` per audio chunk | End of body; no final JSON object |
+
+All four surfaces have exactly the same path, header, query, and JSON-body arguments below.
+
+## Complete path, header, and query arguments
+
+| Location | Argument | Type/default | Tinfer behavior |
+| --- | --- | --- | --- |
+| Path | `voice_id` | string, required | **Supported.** Selects a loaded voice; unknown values return `404`. |
+| Header | `xi-api-key` | string, optional | **Unsupported auth.** Accepted but not authenticated. |
+| Query | `enable_logging` | boolean, default `true` | **Accepted/no effect.** `false` does not provide zero-retention guarantees. |
+| Query | `optimize_streaming_latency` | integer or null, optional; deprecated values `0..4` | **Accepted/no effect.** Deprecated reference field. |
+| Query | `output_format` | enum, default `mp3_44100_128` | **Supported.** Invalid values are rejected with `422`. |
+
+Supported HTTP formats are `mp3_22050_32`, `mp3_24000_48`, `mp3_44100_32`, `mp3_44100_64`, `mp3_44100_96`, `mp3_44100_128`, `mp3_44100_192`, `pcm_8000`, `pcm_16000`, `pcm_22050`, `pcm_24000`, `pcm_32000`, `pcm_44100`, `pcm_48000`, `ulaw_8000`, `alaw_8000`, `opus_48000_32`, `opus_48000_64`, `opus_48000_96`, `opus_48000_128`, and `opus_48000_192`. Unary routes also support `wav_8000`, `wav_16000`, `wav_22050`, `wav_24000`, `wav_32000`, `wav_44100`, and `wav_48000`; streaming routes reject WAV.
+
+## Complete JSON body
+
+Only `text` is required. Omitted `model_id` selects Tinfer's configured loaded default.
+
+| Field | Type/default | Tinfer behavior |
+| --- | --- | --- |
+| `text` | string, required | **Supported.** Entire input for this request. |
+| `model_id` | string, default `eleven_multilingual_v2` | **Supported.** Must name a loaded TTS model. |
+| `language_code` | ISO 639-1 string or null | **Supported.** Unsupported values select the model default. |
+| `voice_settings` | object or null | Supported/accepted per nested table below. |
+| `generation_config` | object, optional | **Tinfer extension.** Controls chunk scheduling for this request. |
+| `pronunciation_dictionary_locators` | locator array or null, reference maximum 3 | **Accepted/no effect.** Dictionaries are not applied. |
+| `seed` | integer or null, `0..4294967295` | **Mapped** to request-local diffusion sampling where supported. |
+| `previous_text` | string or null | **Accepted/no effect.** No generation-history stitching. |
+| `next_text` | string or null | **Accepted/no effect.** No generation-history stitching. |
+| `previous_request_ids` | string array or null, reference maximum 3 | **Accepted/no effect;** maximum 3 is enforced. |
+| `next_request_ids` | string array or null, reference maximum 3 | **Accepted/no effect;** maximum 3 is enforced. |
+| `use_pvc_as_ivc` | boolean, default `false`, deprecated | **Accepted/no effect.** Deprecated reference field. |
+| `apply_text_normalization` | `auto`, `on`, or `off`; default `auto` | **Mapped.** `off` bypasses a configured model preprocessing pipeline. |
+| `apply_language_text_normalization` | boolean, default `false` | **Accepted/no effect.** No special Japanese normalization pass is selected. |
+
+Nested fields:
+
+| Field | Type/default | Tinfer behavior |
+| --- | --- | --- |
+| `voice_settings.stability` | number or null, default `0.5` | **Mapped** to style interpolation. |
+| `voice_settings.similarity_boost` | number or null, default `0.75` | **Mapped** to reference/style mixing. |
+| `voice_settings.style` | number or null, default `0` | **Mapped** to embedding scale where supported. |
+| `voice_settings.use_speaker_boost` | boolean or null, default `true` | **Accepted/no effect.** |
+| `voice_settings.speed` | number or null, default `1` | **Supported.** Mapped to model TTS parameters. |
+| `voice_settings.alpha` | number, optional | **Tinfer extension.** Model-specific expressiveness parameter. |
+| `voice_settings.beta` | number, optional | **Tinfer extension.** Model-specific expressiveness parameter. |
+| `generation_config.chunk_length_schedule` | positive integer array, default `[120,160,250,290]` | **Tinfer extension.** |
+| `pronunciation_dictionary_locators[].pronunciation_dictionary_id` | string, required | **Unsupported.** |
+| `pronunciation_dictionary_locators[].version_id` | string or null; omitted means latest in reference API | **Unsupported.** |
+
+Unsupported fields are documented for compatibility discovery; they do not gain their reference semantics merely because a client includes them.
+
+## Request examples
+
+The same request works at each path:
+
+```json
+{
+  "text": "The first move sets everything in motion.",
+  "model_id": "eleven_multilingual_v2",
+  "language_code": "en",
+  "voice_settings": { "speed": 1.0 }
+}
+```
+
+Plain create and stream responses contain bytes encoded as `output_format`. Timing responses contain:
+
+```json
+{
+  "audio_base64": "BASE64_AUDIO",
+  "alignment": {
+    "characters": ["T", "h", "e"],
+    "character_start_times_seconds": [0.0, 0.04, 0.08],
+    "character_end_times_seconds": [0.04, 0.08, 0.12]
+  },
+  "normalized_alignment": {
+    "characters": ["T", "h", "e"],
+    "character_start_times_seconds": [0.0, 0.04, 0.08],
+    "character_end_times_seconds": [0.04, 0.08, 0.12]
+  }
+}
+```
+
+`audio_base64` is required. Both alignment objects may be null; when present, their three arrays tile the corresponding text and use seconds. The streaming timing endpoint repeats this shape once per newline-delimited chunk. It uses the reference `text/event-stream` content type but does not add SSE `data:` prefixes.
+
+Malformed requests return `422` JSON with `detail` issue objects containing `loc`, `msg`, and `type`. Unknown models or voices return `404`, and a draining server rejects admission with `503`. Once a streaming response has begun, a later inference error terminates the body and the stream is cleaned up.

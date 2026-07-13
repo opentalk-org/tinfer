@@ -24,7 +24,6 @@ const firstByteEl = document.getElementById("first-byte");
 const statusEl = document.getElementById("status");
 const trackEl = document.getElementById("track");
 
-// Small scheduling lookahead so a chunk is queued slightly ahead of the clock.
 const LOOKAHEAD_S = 0.03;
 
 const MODE_OPTIONS = {
@@ -33,13 +32,18 @@ const MODE_OPTIONS = {
     { value: "stream", label: "Stream" },
     { value: "incremental", label: "Incremental" },
   ],
-  websocket: [{ value: "streaming", label: "Streaming" }],
+  api: [
+    { value: "ws_single", label: "WebSocket — single context" },
+    { value: "ws_multi", label: "WebSocket — multiple contexts" },
+    { value: "post_audio", label: "POST — audio" },
+    { value: "post_timing", label: "POST — timing" },
+    { value: "stream_audio", label: "Streaming POST — audio" },
+    { value: "stream_timing", label: "Streaming POST — timing" },
+  ],
 };
-const DEFAULT_MODE = { grpc: "stream", websocket: "streaming" };
+const DEFAULT_MODE = { grpc: "stream", api: "ws_single" };
 const DEFAULT_SCHEDULE = [120, 160, 250, 290];
 
-// Parse the comma-separated chunk schedule; fall back to the default when the
-// field is blank or garbage so a stray keystroke can't send an empty schedule.
 function parseSchedule(value) {
   const nums = value.split(",").map((s) => Number(s.trim())).filter((n) => Number.isFinite(n) && n > 0);
   return nums.length ? nums : DEFAULT_SCHEDULE;
@@ -65,108 +69,6 @@ const state = {
   live: false,
 };
 
-function setStatus(value, isError = false) {
-  statusEl.textContent = value;
-  statusEl.classList.toggle("error", isError);
-}
-
-// Elapsed playback time on the AudioContext clock. Because chunks are scheduled
-// on this same clock, underrun gaps are baked into both audio and timeline —
-// so highlight and progress bars stay in sync with what you actually hear.
-function elapsedMs() {
-  if (!state.audioContext || state.audioStartTime == null) return 0;
-  return (state.audioContext.currentTime - state.audioStartTime) * 1000;
-}
-
-function stopTimer() {
-  if (state.timer) clearInterval(state.timer);
-  state.timer = null;
-}
-
-function stopSources() {
-  for (const source of state.sources) {
-    try { source.stop(); } catch (_) {}
-  }
-  state.sources = [];
-}
-
-function clearTimeline() {
-  for (const seg of state.segments) seg.el.remove();
-  state.segments = [];
-  trackEl.classList.remove("has-chunks");
-}
-
-function resetPlayback() {
-  stopSources();
-  stopTimer();
-  state.audioStartTime = null;
-  state.nextStartTime = 0;
-  state.timeline = [];
-  state.alignCursor = 0;
-  state.lastSpanIndex = -1;
-  state.pcmChunks = [];
-  state.done = false;
-  saveEl.disabled = true;
-  clearTimeline();
-}
-
-function writeAscii(view, offset, text) {
-  for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i));
-}
-
-// Wrap concatenated 16-bit mono PCM chunks in a 44-byte WAV/RIFF header.
-function pcmChunksToWavBlob(chunks, sampleRate) {
-  let dataLen = 0;
-  for (const c of chunks) dataLen += c.length;
-  const header = new ArrayBuffer(44);
-  const view = new DataView(header);
-  writeAscii(view, 0, "RIFF");
-  view.setUint32(4, 36 + dataLen, true);
-  writeAscii(view, 8, "WAVE");
-  writeAscii(view, 12, "fmt ");
-  view.setUint32(16, 16, true); // fmt chunk size
-  view.setUint16(20, 1, true); // PCM
-  view.setUint16(22, 1, true); // mono
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true); // byte rate (mono, 2 bytes/sample)
-  view.setUint16(32, 2, true); // block align
-  view.setUint16(34, 16, true); // bits per sample
-  writeAscii(view, 36, "data");
-  view.setUint32(40, dataLen, true);
-  return new Blob([header, ...chunks], { type: "audio/wav" });
-}
-
-function saveWav() {
-  if (!state.pcmChunks.length) return;
-  const blob = pcmChunksToWavBlob(state.pcmChunks, state.sampleRate);
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `tinfer-${Date.now()}.wav`;
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
-function base64ToBytes(base64) {
-  const raw = atob(base64);
-  const bytes = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
-  return bytes;
-}
-
-function pcmToAudioBuffer(base64, sampleRate) {
-  const bytes = base64ToBytes(base64);
-  const samples = Math.floor(bytes.length / 2);
-  if (!samples) return null;
-  const buffer = state.audioContext.createBuffer(1, samples, sampleRate);
-  const channel = buffer.getChannelData(0);
-  const view = new DataView(bytes.buffer);
-  for (let i = 0; i < samples; i += 1) {
-    channel[i] = view.getInt16(i * 2, true) / 32768;
-  }
-  return buffer;
-}
-
 function splitWords(text) {
   const parts = [];
   const pattern = /\S+|\s+/g;
@@ -177,8 +79,6 @@ function splitWords(text) {
   return parts;
 }
 
-// Array.from keeps multi-byte glyphs (Polish ą/ś/ż) as single tokens so char
-// spans line up 1:1 with the WebSocket char alignment stream.
 function splitChars(text) {
   return Array.from(text).map((ch) => ({ text: ch, word: !/\s/.test(ch) }));
 }
@@ -201,11 +101,6 @@ function buildHighlight(text, granularity) {
   }
 }
 
-// gRPC alignment tokens tile the sent text exactly, but the server splits
-// punctuation into its own token while splitWords glues it to the word — so a
-// token-index match drifts one step per punctuation mark. Map by character
-// offset instead: validate each token against the text it must tile, then
-// attribute it to the word span holding its first letter.
 function assignCharRange(entry, word) {
   const at = state.alignCursor;
   const slice = state.alignText.slice(at, at + word.length);
@@ -218,9 +113,6 @@ function assignCharRange(entry, word) {
   entry.spanIndex = ownerSpanIndex(at, word);
 }
 
-// Word a token belongs to: the span holding its first letter. Pure
-// punctuation/whitespace tokens (a pause) inherit the previous word so the
-// highlight lingers on it rather than blanking mid-sentence.
 function ownerSpanIndex(charStart, word) {
   const rel = word.search(/\p{L}/u);
   if (rel >= 0) {
@@ -231,199 +123,9 @@ function ownerSpanIndex(charStart, word) {
   return state.lastSpanIndex;
 }
 
-function updateSpokenSpansByChar(elapsed) {
-  let spokenMax = -1;
-  let current = -1;
-  for (const item of state.timeline) {
-    if (elapsed >= item.endMs) {
-      spokenMax = Math.max(spokenMax, item.spanIndex);
-    } else if (elapsed >= item.startMs) {
-      current = item.spanIndex;
-      break;
-    } else {
-      break;
-    }
-  }
-  if (current < 0) current = spokenMax + 1;
-  state.wordSpans.forEach((word, index) => {
-    word.el.classList.toggle("spoken", index < current);
-    word.el.classList.toggle("current", index === current);
-  });
-}
-
-// WebSocket char/word alignment drops whitespace symmetrically on both the span
-// and timeline side, so token index i maps cleanly to word span i.
-function updateSpokenSpansByIndex(elapsed) {
-  let currentIndex = -1;
-  let spokenCount = 0;
-  for (let i = 0; i < state.timeline.length; i += 1) {
-    const item = state.timeline[i];
-    if (elapsed >= item.endMs) {
-      spokenCount = i + 1;
-    } else if (elapsed >= item.startMs) {
-      currentIndex = i;
-      break;
-    }
-  }
-  if (currentIndex < 0 && spokenCount < state.timeline.length) currentIndex = spokenCount;
-  state.wordSpans.forEach((word, index) => {
-    word.el.classList.toggle("spoken", index < spokenCount);
-    word.el.classList.toggle("current", index === currentIndex);
-  });
-}
-
-function updateSpokenSpans(elapsed) {
-  if (state.protocol === "grpc") updateSpokenSpansByChar(elapsed);
-  else updateSpokenSpansByIndex(elapsed);
-}
-
-// Each chunk is a card sized to its text; the bar underneath fills as the chunk
-// plays and the card lights up while it is the one being spoken.
-function addSegment(payload, startMs, endMs, durationMs) {
-  trackEl.classList.add("has-chunks");
-
-  const el = document.createElement("div");
-  el.className = "segment";
-
-  const tokens = document.createElement("div");
-  tokens.className = "seg-tokens";
-  const words = payload.alignments || [];
-  if (words.length) {
-    for (const item of words) {
-      const chip = document.createElement("span");
-      chip.className = "chip";
-      chip.textContent = item.word;
-      tokens.appendChild(chip);
-    }
-  } else {
-    const chip = document.createElement("span");
-    chip.className = "chip chip-muted";
-    chip.textContent = "♪ audio";
-    tokens.appendChild(chip);
-  }
-
-  const meta = document.createElement("div");
-  meta.className = "seg-meta";
-  const ttfb = payload.firstByteMs != null ? ` · ${payload.firstByteMs} ms TTFB` : "";
-  meta.textContent = `#${state.segments.length} · ${Math.round(durationMs)} ms${ttfb}`;
-
-  const bar = document.createElement("div");
-  bar.className = "seg-bar";
-  const fill = document.createElement("div");
-  fill.className = "seg-fill";
-  bar.appendChild(fill);
-
-  el.append(tokens, meta, bar);
-  trackEl.appendChild(el);
-  state.segments.push({ el, fill, startMs, endMs, durationMs });
-  trackEl.scrollLeft = trackEl.scrollWidth;
-}
-
-function updateProgress(elapsed) {
-  for (const seg of state.segments) {
-    const ratio = seg.durationMs > 0
-      ? (elapsed - seg.startMs) / seg.durationMs
-      : (elapsed >= seg.endMs ? 1 : 0);
-    const clamped = Math.max(0, Math.min(1, ratio));
-    seg.fill.style.width = `${(clamped * 100).toFixed(1)}%`;
-    seg.el.classList.toggle("current", elapsed >= seg.startMs && elapsed < seg.endMs);
-    seg.el.classList.toggle("played", elapsed >= seg.endMs);
-  }
-}
-
-// On cancel, keep chunks already started and fade out the ones still pending.
-function cancelTimeline(elapsed) {
-  const kept = [];
-  for (const seg of state.segments) {
-    if (seg.startMs >= elapsed) {
-      const el = seg.el;
-      el.classList.add("fading");
-      setTimeout(() => el.remove(), 260);
-    } else {
-      kept.push(seg);
-    }
-  }
-  state.segments = kept;
-}
-
-function finishIfIdle() {
-  if (!state.done) return;
-  if (state.audioContext && state.audioStartTime != null && state.audioContext.currentTime < state.nextStartTime) return;
-  stopTimer();
-  state.live = false;
-  updateControls();
-  setStatus("Idle");
-}
-
-function updateHighlight() {
-  const elapsed = elapsedMs();
-  updateSpokenSpans(elapsed);
-  updateProgress(elapsed);
-  finishIfIdle();
-}
-
-async function enqueueAudio(payload) {
-  if (!state.audioContext) state.audioContext = new AudioContext();
-  const ctx = state.audioContext;
-  if (ctx.state === "suspended") await ctx.resume();
-
-  const buffer = pcmToAudioBuffer(payload.audioBase64, payload.sampleRate);
-  if (!buffer) return;
-  const durationMs = payload.durationMs || buffer.duration * 1000;
-
-  state.pcmChunks.push(base64ToBytes(payload.audioBase64));
-  state.sampleRate = payload.sampleRate;
-  saveEl.disabled = false;
-
-  // Schedule seamlessly after the previous chunk; if we underran, start slightly
-  // ahead of now and let the real gap show up in the timeline.
-  const startAt = Math.max(ctx.currentTime + LOOKAHEAD_S, state.nextStartTime);
-  if (state.audioStartTime == null) state.audioStartTime = startAt;
-  const startMs = (startAt - state.audioStartTime) * 1000;
-  const endMs = startMs + durationMs;
-  state.nextStartTime = startAt + durationMs / 1000;
-
-  const source = ctx.createBufferSource();
-  source.buffer = buffer;
-  source.connect(ctx.destination);
-  source.start(startAt);
-  state.sources.push(source);
-
-  try {
-    for (const item of payload.alignments || []) {
-      const entry = { word: item.word, startMs: startMs + item.startMs, endMs: startMs + item.endMs };
-      if (state.protocol === "grpc") assignCharRange(entry, item.word);
-      state.timeline.push(entry);
-    }
-  } catch (err) {
-    setStatus(err.message, true);
-    throw err;
-  }
-  addSegment(payload, startMs, endMs, durationMs);
-  if (!state.timer) state.timer = setInterval(updateHighlight, 30);
-}
-
 function populateCatalog(catalog) {
   state.catalog = catalog;
-  modelEl.textContent = "";
-  for (const model of state.catalog) {
-    const option = document.createElement("option");
-    option.value = model.id;
-    option.textContent = model.id;
-    modelEl.appendChild(option);
-  }
-  populateVoices();
-}
-
-function populateVoices() {
-  const model = state.catalog.find((item) => item.id === modelEl.value);
-  voiceEl.textContent = "";
-  for (const voice of ["auto", ...(model ? model.voices : [])]) {
-    const option = document.createElement("option");
-    option.value = voice;
-    option.textContent = voice;
-    voiceEl.appendChild(option);
-  }
+  window.TinferCatalogUi.populate(catalog, modelEl, voiceEl, languageEl);
 }
 
 function populateModes() {
@@ -437,10 +139,9 @@ function populateModes() {
   modeEl.value = DEFAULT_MODE[protocolEl.value];
 }
 
-// gRPC Incremental and WS Streaming accept live text chunks / force / end mid-run.
 function isIncrementalMode() {
   return (protocolEl.value === "grpc" && modeEl.value === "incremental") ||
-    (protocolEl.value === "websocket" && modeEl.value === "streaming");
+    modeEl.value === "ws_single" || modeEl.value === "ws_multi";
 }
 
 function updateControls() {
@@ -454,12 +155,16 @@ function updateControls() {
 }
 
 function syncProtocolDefaults() {
-  if (protocolEl.value === "grpc" && portEl.value === "8002") portEl.value = "50051";
-  if (protocolEl.value === "websocket" && portEl.value === "50051") portEl.value = "8002";
-  // gRPC only carries word-level timings, so char highlighting is WebSocket-only.
-  granularityEl.disabled = protocolEl.value === "grpc";
-  // Alpha/beta/speed ride in WebSocket voice_settings; the gRPC config has no field for them.
-  alphaEl.disabled = betaEl.disabled = speedEl.disabled = scheduleEl.disabled = protocolEl.value === "grpc";
+  if (protocolEl.value === "grpc" && portEl.value === "8000") portEl.value = "50051";
+  if (protocolEl.value === "api" && portEl.value === "50051") portEl.value = "8000";
+  updateModeControls();
+}
+
+function updateModeControls() {
+  const controls = window.TinferCatalogUi.controlState(protocolEl.value, modeEl.value);
+  granularityEl.disabled = controls.granularityDisabled;
+  alphaEl.disabled = betaEl.disabled = speedEl.disabled = controls.voiceSettingsDisabled;
+  scheduleEl.disabled = controls.scheduleDisabled;
 }
 
 async function send() {
@@ -530,14 +235,17 @@ async function sync() {
   }
 }
 
-modelEl.addEventListener("change", populateVoices);
+modelEl.addEventListener("change", () => window.TinferCatalogUi.updateSelection(state.catalog, modelEl, voiceEl, languageEl));
 syncEl.addEventListener("click", sync);
 protocolEl.addEventListener("change", () => {
-  syncProtocolDefaults();
   populateModes();
+  syncProtocolDefaults();
   updateControls();
 });
-modeEl.addEventListener("change", updateControls);
+modeEl.addEventListener("change", () => {
+  updateControls();
+  updateModeControls();
+});
 sendEl.addEventListener("click", send);
 cancelEl.addEventListener("click", cancel);
 saveEl.addEventListener("click", saveWav);
@@ -584,5 +292,3 @@ window.tinfer.onSynthesisEvent(async (event) => {
     setStatus(event.message || "Error", true);
   }
 });
-
-populateVoices();

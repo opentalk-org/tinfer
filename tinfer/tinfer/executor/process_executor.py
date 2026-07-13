@@ -1,5 +1,6 @@
 from tinfer.executor.base import BaseExecutor
-from tinfer.core.request import AudioChunkIPC, TTSRequestIPC, AudioChunk
+from tinfer.core.request import AudioChunkIPC, TTSRequestIPC, AudioChunk, ModelInfo
+from tinfer.models.impl.styletts2.model.text_config import TextConfig
 from tinfer.process.worker import WorkerManager
 from tinfer.process.shared_memory import SharedMemoryManager
 from tinfer.process.protocol import MessageType, IPCProtocol
@@ -37,6 +38,7 @@ class ProcessExecutor(BaseExecutor):
         self.batch_size_per_device = batch_size_per_device
         self._workers: dict[int, Any] = {}
         self._model_to_worker: dict[str, int] = {}
+        self._model_infos: dict[str, ModelInfo] = {}
         self._worker_round_robin = 0
         self._shm_manager = SharedMemoryManager()
         self._callback_thread: threading.Thread | None = None
@@ -138,6 +140,13 @@ class ProcessExecutor(BaseExecutor):
         compile_models: bool = False,
         runtime_engine: str | None = None,
     ) -> None:
+        saved = torch.load(path, map_location="cpu", mmap=True, weights_only=True)
+        text_config = TextConfig.from_dict(saved["text_config"], saved["config"]["n_token"])
+        self._model_infos[model_id] = ModelInfo(
+            model_id=model_id,
+            supported_languages=text_config.supported_languages,
+            default_language=text_config.default_language,
+        )
         worker = self._model_load_register_util(model_id, device)
         worker_id = self._model_to_worker[model_id]
         self._load_args_per_worker[worker_id][model_id] = {
@@ -159,6 +168,12 @@ class ProcessExecutor(BaseExecutor):
         worker = self._model_load_register_util(model_id, device)
     
         state = model.get_state()
+        text_config = TextConfig.from_dict(state["text_config"], state["config"]["n_token"])
+        self._model_infos[model_id] = ModelInfo(
+            model_id=model_id,
+            supported_languages=text_config.supported_languages,
+            default_language=text_config.default_language,
+        )
         state = self._shm_manager.serialize_recursive(state)
         worker.register_model(model_id, state)
 
@@ -220,12 +235,16 @@ class ProcessExecutor(BaseExecutor):
         worker = self._workers[worker_id]
         worker.unload_model(model_id)
         del self._model_to_worker[model_id]
+        del self._model_infos[model_id]
         if worker_id in self._load_args_per_worker:
             self._load_args_per_worker[worker_id].pop(model_id, None)
 
 
     def get_model_ids(self) -> list[str]:
         return list(self._model_to_worker.keys())
+
+    def get_model_infos(self) -> list[ModelInfo]:
+        return [self._model_infos[model_id] for model_id in self._model_to_worker]
 
     def get_voice_ids(self, model_id: str) -> list[str]:
         if model_id not in self._model_to_worker:

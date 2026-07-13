@@ -9,6 +9,15 @@ tinfer: Fast production ready TTS inference server with gRPC and elevenlabs-comp
 - Websocket (elevenlabs compatible) and GRPC streaming api.
 - Modular, easy to add new models in the future.
 
+## Server APIs
+
+Tinfer exposes gRPC plus six ElevenLabs-compatible HTTP/WebSocket TTS surfaces. The compatibility layer includes unary and streamed audio, character timing, single- and multi-context incremental input, and model/language discovery.
+
+- [Server overview](docs/astro/src/content/docs/server/overview.mdx)
+- [HTTP TTS API](docs/astro/src/content/docs/server/http.mdx)
+- [WebSocket TTS API](docs/astro/src/content/docs/server/websocket.mdx)
+- [Compatibility matrix and model discovery](docs/astro/src/content/docs/server/api-compatibility.mdx)
+
 ## Development (Nix)
 
 The devshell and the serving image share one set of dependency lists in

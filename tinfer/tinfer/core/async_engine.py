@@ -34,6 +34,9 @@ class AsyncStreamingTTS:
     def get_model_ids(self) -> list[str]:
         return self.engine.get_model_ids()
 
+    def get_model_infos(self):
+        return self.engine.get_model_infos()
+
     def get_voice_ids(self, model_id: str) -> list[str]:
         return self.engine.get_voice_ids(model_id)
 

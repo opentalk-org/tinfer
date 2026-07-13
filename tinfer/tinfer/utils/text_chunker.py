@@ -66,7 +66,7 @@ class TextChunker:
         cursor = 0
 
         for raw_chunk in chunks:
-            chunk = raw_chunk.strip()
+            chunk = raw_chunk
             start = text.find(chunk, cursor)
             if start < 0:
                 raise ValueError("text chunker output does not match source text")
@@ -176,7 +176,7 @@ class TextChunker:
                 current += piece
 
         if current:
-            chunks.append(current.rstrip())
+            chunks.append(current)
 
         if len(chunks) > 1:
             previous_index = chunk_index + len(chunks) - 2

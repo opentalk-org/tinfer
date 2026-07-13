@@ -9,7 +9,9 @@ from tinfer.core.request import AlignmentItem
 from tinfer.core.request import TTSRequest
 from tinfer.core.stream import TTSStream
 from tinfer.models.impl.styletts2.alignment.converter import AlignmentConverter
-from tinfer.models.impl.styletts2.model.model import _trim_leading_silence_and_shift_alignments
+from tinfer.models.impl.styletts2.model.model_utils import (
+    _trim_leading_silence_and_shift_alignments,
+)
 from tinfer.models.impl.styletts2.model.phonemizer import StyleTTS2Phonemizer
 from tinfer.utils.text_chunker import TextChunker
 
@@ -109,6 +111,31 @@ class AlignmentSpanTests(unittest.TestCase):
         chunks = TextChunker().get_chunks(request)
 
         self.assertGreater(len(chunks), 1)
+        for chunk, _chunk_index, _is_final, span in chunks:
+            self.assertEqual(text[span[0] : span[1]], chunk)
+
+    def test_chunker_preserves_sentence_boundary_whitespace(self) -> None:
+        text = (
+            "In case you don't know, you can run /side or just use the plus button "
+            "on the top right to open side conversations. This is great for context "
+            'management, going down rabbit holes, side-questions like "wait why did '
+            'you do it that way", etc'
+        )
+        request = TTSRequest(
+            request_id="test",
+            model_id="libri",
+            voice_id="libri_m1",
+            chunk_length_schedule=[120, 160, 250, 290],
+            timeout_trigger_ms=0,
+        )
+        request.append_text(text)
+
+        chunks = TextChunker().get_chunks(request)
+
+        self.assertEqual(len(chunks), 2)
+        self.assertTrue(chunks[0][0].endswith("conversations. "))
+        self.assertTrue(chunks[1][0].startswith("This is great"))
+        self.assertEqual("".join(chunk[0] for chunk in chunks), text)
         for chunk, _chunk_index, _is_final, span in chunks:
             self.assertEqual(text[span[0] : span[1]], chunk)
 

@@ -1,25 +1,23 @@
-# Realtime highlight Electron example
+# Realtime Highlight Electron Example
 
-Small Electron app for testing Tinfer streaming TTS. It can use either the gRPC
-streaming API or the ElevenLabs-compatible WebSocket API, plays streamed PCM
-audio, shows latency to the first audio byte, and highlights the current spoken
-word.
+This app plays Tinfer PCM audio as it arrives and highlights available timing data.
 
 ## Run
 
+Start Tinfer's gRPC server on port `50051` and HTTP/WebSocket server on port `8000`, then:
+
 ```bash
-cd /workspace/tinfer/examples/realtime_highlight_electron
-. /opt/nvm/nvm.sh
 npm install
 npm start
 ```
 
-Defaults:
+Sync the catalog after choosing a protocol. Model selection rebuilds the language list from the model metadata and selects its baked default.
 
-- gRPC: `localhost:50051`
-- WebSocket: `localhost:8002`
-- sample rate/output: `pcm_24000`
+The gRPC modes are unary, server streaming, and incremental. The API modes cover single-context WebSocket, multi-context WebSocket, regular audio/timing POST, and streaming audio/timing POST. Plain audio modes support playback and WAV saving without text highlighting.
 
-The model/voice selectors are populated from `/workspace/converted_models`, with
-fallbacks for the current converted model folders: `agnieszka`, `magda`, and
-`olam`.
+## Verify
+
+```bash
+npm test
+npm run check
+```

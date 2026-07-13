@@ -13,7 +13,7 @@
         <span>Protocol</span>
         <select id="protocol">
           <option value="grpc">gRPC</option>
-          <option value="websocket">WebSocket</option>
+          <option value="api">HTTP / WebSocket API</option>
         </select>
       </label>
       <label>
@@ -38,18 +38,7 @@
       </label>
       <label>
         <span>Language</span>
-        <select id="language">
-          <option value="">Auto</option>
-          <option value="pl">Polish (pl)</option>
-          <option value="en-us">English US (en-us)</option>
-          <option value="en-gb">English GB (en-gb)</option>
-          <option value="de">German (de)</option>
-          <option value="fr">French (fr)</option>
-          <option value="es">Spanish (es)</option>
-          <option value="it">Italian (it)</option>
-          <option value="uk">Ukrainian (uk)</option>
-          <option value="ru">Russian (ru)</option>
-        </select>
+        <select id="language"></select>
       </label>
       <label>
         <span>&nbsp;</span>
@@ -119,6 +108,8 @@
     </section>
   </main>
 
+  <script src="./catalog-ui.js"></script>
+  <script src="./playback.js"></script>
   <script src="./renderer.js"></script>
 </body>
 </html>

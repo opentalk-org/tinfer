@@ -11,6 +11,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from tinfer.models.impl.styletts2.model.modules.load_utils import load_original_styletts2_model, save_model
 
 from tinfer.models.impl.styletts2.model.modules.config import ModelConfig
+from tools.styletts2_model_scripts.text_config_cli import (
+    add_text_config_arguments,
+    load_text_config,
+)
 
 def find_model_files(model_dir: Path):
     pth_files = list(model_dir.glob("*.pth"))
@@ -54,7 +58,15 @@ def resolve_config_paths(config_dict: dict, extra_files_dir: Path):
     return resolved_config
 
 
-def convert_model_folder(model_folder: str, output_dir: str = None, extra_files_dir: str = None):
+def convert_model_folder(
+    model_folder: str,
+    output_dir: str = None,
+    extra_files_dir: str = None,
+    *,
+    symbols_file: str,
+    supported_languages: list[str],
+    default_language: str,
+):
     model_dir = Path(model_folder)
     if not model_dir.exists():
         raise ValueError(f"Model folder does not exist: {model_folder}")
@@ -106,9 +118,21 @@ def convert_model_folder(model_folder: str, output_dir: str = None, extra_files_
         )
     
     model_output_path = output_dir / "model.pth"
+    text_config = load_text_config(
+        symbols_file,
+        supported_languages,
+        default_language,
+        model_config.n_token,
+    )
     
     print(f"Saving model to {model_output_path}")
-    save_model(model, model_config, str(model_output_path), runtime_config=runtime_config)
+    save_model(
+        model,
+        model_config,
+        str(model_output_path),
+        runtime_config=runtime_config,
+        text_config=text_config.to_dict(),
+    )
     
     print("Conversion complete!")
     print(f"  Model saved to: {model_output_path}")
@@ -136,10 +160,17 @@ def main():
         default=None,
         help="Path to extra files directory (e.g., models/extra_files). Required if config uses Utils/ paths"
     )
+    add_text_config_arguments(parser, required=True)
         
     args = parser.parse_args()
-    convert_model_folder(args.model_folder, args.output, args.extra_files)
+    convert_model_folder(
+        args.model_folder,
+        args.output,
+        args.extra_files,
+        symbols_file=args.symbols_file,
+        supported_languages=args.supported_languages,
+        default_language=args.default_language,
+    )
 
 if __name__ == "__main__":
     main()
-

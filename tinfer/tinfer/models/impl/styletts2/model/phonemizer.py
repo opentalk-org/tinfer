@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import threading
-from typing import Any, Union
+from typing import Any, Sequence, Union
 
 import espeak_align
 from nltk.tokenize import TweetTokenizer
@@ -31,6 +31,7 @@ class StyleTTS2Phonemizer:
         with_stress: bool = True,
         tie: bool = True,
         espeak_workers: int = 4,
+        symbols: Sequence[str] | None = None,
     ):
         self.language = language
         self.preserve_punctuation = preserve_punctuation
@@ -39,14 +40,15 @@ class StyleTTS2Phonemizer:
         self.espeak_workers = espeak_workers
         self._engine, self._engine_lock = _get_engine(language, tie, espeak_workers)
         self.t_tokenizer = TweetTokenizer()
-        self._init_tokenizer()
+        self._init_tokenizer(symbols)
 
-    def _init_tokenizer(self) -> None:
+    def _init_tokenizer(self, symbols: Sequence[str] | None) -> None:
         _pad = "$"
         _punctuation = ';:,.!?¡¿—…"«»“” '
         _letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
         _letters_ipa = "ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʂʃʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢ\u0303\u032f\u032a\u0306ˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘'̩'\u0361"
-        symbols = [_pad] + list(_punctuation) + list(_letters) + list(_letters_ipa)
+        if symbols is None:
+            symbols = [_pad] + list(_punctuation) + list(_letters) + list(_letters_ipa)
         self.word_index_dictionary = {s: i for i, s in enumerate(symbols)}
         self.index_to_symbol = {i: s for s, i in self.word_index_dictionary.items()}
 
