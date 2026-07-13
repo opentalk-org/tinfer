@@ -13,6 +13,7 @@
 - Apply every constraint in `2026-07-13-tinfer-rust-port.md`.
 - Do not add ONNX Runtime, TensorRT, CUDA, Tonic, Axum, or PyO3 in this stage.
 - The stage gate is a CPU-only `cargo test --workspace` plus a runnable fake-model example.
+- Run Cargo commands from `/workspace/tinfer/tinfer_rust` and Git command blocks from `/workspace/tinfer`.
 
 ---
 

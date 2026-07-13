@@ -14,6 +14,7 @@
 - Copy the current protobuf source as the sole wire authority; do not edit field numbers or service names.
 - Do not shell out to ffmpeg and do not make each audio chunk a separate MP3, Opus, or WAV file.
 - Protocol handlers must release engine admission on success, error, cancellation, and disconnected clients.
+- Run Cargo commands from `/workspace/tinfer/tinfer_rust` and Git command blocks from `/workspace/tinfer`.
 
 ---
 

@@ -47,7 +47,7 @@ cmake --build target/cmake-build --target tinfer_models_native
 
 Expected: all commands exit 0. Hardware-tagged CUDA and TensorRT tests may be selected only on workers providing the declared libraries and devices; they must never replace a missing backend with CPU.
 
-Before cutover, also run:
+Before cutover, run these separately from `/workspace/tinfer`:
 
 ```bash
 python -m pytest tmp_tests/tts_api tmp_tests/styletts2 -q
@@ -56,4 +56,3 @@ python tinfer_rust/tools/check_api_manifest.py --reference tinfer --candidate ti
 ```
 
 Expected: all suites pass and the manifest checker reports `0 incompatible API differences`.
-

@@ -14,6 +14,7 @@
 - Treat current `tmp_tests/tts_api/` tests and the route table in `tinfer/tinfer/server/websocket/server.py` as contract authority.
 - Preserve current status codes, JSON shapes, close codes, error timing, final messages, alignment offsets, and content types.
 - Use bounded inbound, engine-output, and socket-writer channels; overload is explicit.
+- Run Cargo commands from `/workspace/tinfer/tinfer_rust` and Git command blocks from `/workspace/tinfer`.
 
 ---
 

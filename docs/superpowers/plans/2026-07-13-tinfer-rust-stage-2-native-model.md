@@ -14,6 +14,7 @@
 - Do not build a C++ `main`, model DLL, helper process, or backend sidecar.
 - Backend/platform selection occurs during pipeline construction, never per request.
 - CPU CI must run without CUDA or TensorRT installed; configured unavailable features fail explicitly rather than falling back.
+- Run Cargo/CMake commands from `/workspace/tinfer/tinfer_rust` and Git command blocks from `/workspace/tinfer`.
 
 ---
 
@@ -31,7 +32,7 @@
 
 - [ ] **Step 1: Copy the Cargo project without rewriting it**
 
-Run: `cp -a tinfer/espeak_align tinfer_rust/espeak_align`
+Run from `/workspace/tinfer`: `cp -a tinfer/espeak_align tinfer_rust/espeak_align`
 
 Expected: `tinfer_rust/espeak_align/espeak_align_core/Cargo.toml` and the separate PyO3 crate exist; no source under `tools/styletts2_model_scripts/` changes.
 
