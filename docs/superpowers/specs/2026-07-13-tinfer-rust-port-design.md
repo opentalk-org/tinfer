@@ -5,13 +5,11 @@
 Create `tinfer_rust/` as the production implementation of Tinfer's engine,
 scheduling, model runtime, gRPC service, and ElevenLabs-compatible HTTP and
 WebSocket service. Preserve the behavior of the current working tree while
-removing Python multiprocessing and Python model execution from the serving
-path.
+removing Python multiprocessing and request-time Python model execution from
+the serving path.
 
-The first runnable model is deterministic and uses stub artifacts. Real model
-artifacts will be produced by a separate exporter. The port does not recreate
-the PyTorch architecture, training, checkpoint-conversion, or export modules
-under `tinfer/tinfer/models/impl/styletts2/model/modules/`.
+The first model uses deterministic stub artifacts from the future external
+exporter; PyTorch architecture, training, conversion, and export are not ported.
 
 `tools/styletts2_model_scripts/` remains in the repository and is not removed
 or rewritten by this work.
@@ -42,8 +40,8 @@ names:
   single- and multi-context incremental WebSocket routes with strict state
   transitions.
 
-Generated Python protobuf files are not ported. Rust code is generated from the
-existing protobuf contract.
+Rust and Python protobuf bindings are generated from the existing protobuf
+contract; generated files are not hand-ported.
 
 ## Selected Architecture
 
@@ -56,6 +54,7 @@ tinfer_rust/
 ├── build.rs
 ├── proto/
 ├── native/
+├── python/
 ├── src/
 │   ├── config/
 │   ├── core/
@@ -70,8 +69,7 @@ tinfer_rust/
 └── espeak_align/
 ```
 
-Each directory is split before it reaches 16 files. Every source file remains
-under 300 lines.
+Each directory stays below 16 files and every source file below 300 lines.
 
 ### Core and engine placement
 
@@ -82,9 +80,6 @@ execution-slot count. It never guesses a device.
 The higher-level engine provides automatic placement. It inspects configured
 devices and model requirements, constructs explicit placements, and submits
 them to core. Explicit public configuration bypasses automatic selection.
-
-This separation permits automatic multi-GPU deployment without making the
-device scheduler depend on policy.
 
 ### Device runtime
 
@@ -172,15 +167,11 @@ TensorRT plans when TensorRT hardware is available.
 
 ## Scheduling and Concurrency
 
-Scheduling is split according to the two responsibilities in the Python code:
-
-1. The stream scheduler owns text accumulation, derived chunk limits, sentence
-   splitting, whitespace-preserving source spans, timeout triggers, flush,
-   conditional trigger, cancellation generation, sequential model context, and
-   delivery order.
-2. The device scheduler owns compatible grouping, batch caps, starvation
-   priority, replica eligibility, device load, execution-slot leases, and
-   cross-GPU dispatch.
+One Rust scheduler actor owns stream readiness, timeouts, cancellation,
+compatible batching, priority, placement selection, slot leases, context
+updates, and ordered delivery. Focused source files do not create independent
+schedulers or state owners. CPU, native, and encoding jobs run on bounded
+executors and return typed completion commands to the actor.
 
 Requests from one stream remain sequential when model context depends on the
 previous chunk. Independent streams execute concurrently. Batches contain one
@@ -200,8 +191,16 @@ model preprocessing path calls `espeak-align-core` directly. Its alignment,
 span, punctuation, batch, worker-pool, and language behavior is covered by the
 current alignment fixtures.
 
-The PyO3 wrapper remains part of the copied project but is not in the Rust
-server's serving dependency path.
+The copied PyO3 wrapper is independent of the server and main Python frontend.
+
+## Python API Compatibility
+
+The crate builds a PyO3 `cdylib`, and thin `python/tinfer/` modules preserve the
+current public imports and behavior through the same in-process Rust engine.
+There is no executable, RPC sidecar, second inference library, or request-time
+Python model callback. Exact signature, type, async, NumPy, server, protobuf,
+registration-import, and `aiohttp` adapter contracts are defined and tested by
+the Python companion spec.
 
 ## Protocol and Audio Boundaries
 
@@ -277,16 +276,15 @@ than resetting a shared context underneath other models.
 8. Port gRPC health, catalog, unary, streaming, and incremental services.
 9. Port HTTP discovery and the four synthesis routes.
 10. Port single- and multi-context WebSocket state machines.
-11. Add observability, graceful draining, deployment configuration, stress
+11. Build the PyO3 package and satisfy the Python API and behavior parity suite.
+12. Add observability, graceful draining, deployment configuration, stress
     tests, parity gates, and production cutover documentation.
-
-Each increment ends with independently runnable tests and does not depend on a
-real StyleTTS2 model.
 
 ## Detailed Implementation Contracts
 
 - [Runtime and native details](2026-07-13-tinfer-rust-runtime-details.md)
 - [Protocol and operations details](2026-07-13-tinfer-rust-protocol-details.md)
+- [Python compatibility details](2026-07-13-tinfer-rust-python-details.md)
 
 ## Explicit Non-Goals
 
@@ -296,4 +294,4 @@ real StyleTTS2 model.
 - Shipping a real StyleTTS2 model in the stub milestone
 - C++ executables, inference subprocesses, or per-model native binaries
 - Dynamic model plugins or a stable third-party plugin ABI
-- Compatibility fallbacks for the Python server or its multiprocessing IPC
+- Python multiprocessing, Python inference callbacks, or RPC to a sidecar

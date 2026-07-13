@@ -2,14 +2,11 @@
 
 ## Module Layout
 
-The application remains one Rust crate. Modules are split by responsibility,
-not recreated from Python package names.
-
 ```text
 tinfer_rust/src/
 ├── config/       mod.rs, engine.rs, model.rs, server.rs
 ├── core/         mod.rs, request.rs, stream.rs, chunk.rs, alignment.rs
-├── scheduling/   mod.rs, stream.rs, batch.rs, priority.rs, timeout.rs
+├── scheduling/   mod.rs, scheduler.rs, state.rs, queue.rs, priority.rs, timeout.rs
 ├── engine/       mod.rs, engine.rs, catalog.rs, placement.rs, lifecycle.rs
 ├── models/       mod.rs, traits.rs, registry.rs, stub/
 ├── audio/        mod.rs, format.rs, resample.rs, pcm.rs, compressed.rs
@@ -18,9 +15,8 @@ tinfer_rust/src/
 └── main.rs
 ```
 
-Every folder stays below 16 direct files and every source stays below 300
-lines. `src/models/stub/` contains its Rust files, artifacts, tests, and `cpp/`
-subtree. No model-specific implementation is placed in another module.
+Every folder stays below 16 direct files and every source below 300 lines.
+`src/models/stub/` owns its Rust, artifacts, tests, and `cpp/` subtree.
 
 ## Typed Runtime Contracts
 
@@ -49,8 +45,8 @@ pub struct StreamOptions {
 }
 ```
 
-`NonEmptyVec` validates positive, nondecreasing chunk sizes once. Model
-parameters are a model-owned enum variant rather than a raw map. The stub uses
+`NonEmptyVec` validates positive, nondecreasing sizes once. Model parameters
+are a model-owned enum variant rather than a raw map. The stub uses
 `ModelParameters::Stub(StubParameters)`; a future StyleTTS2 module owns its
 typed parameter struct.
 
@@ -60,8 +56,8 @@ Encoded bytes exist only in protocol/audio modules.
 
 ## Engine and Stream API
 
-The public engine returns an owned stream handle backed by bounded Tokio
-channels. Dropping the handle sends cancellation and closes its receiver.
+The public engine returns an owned stream backed by bounded Tokio channels.
+Dropping it sends cancellation and closes its receiver.
 
 ```rust
 impl Engine {
@@ -233,7 +229,13 @@ features to deterministic float audio. This exercises dynamic batch and
 sequence shapes, alternating graph/native stages, result splitting, and timing
 without pretending to be StyleTTS2.
 
-## Stream Scheduler
+## Unified Scheduler
+
+One `Scheduler` actor owns every mutable scheduling structure. Protocol and
+engine tasks send bounded commands: create stream, append text, trigger, flush,
+cancel, close, timeout, placement change, and executor completion. The actor
+mutates state, selects ready work, leases slots, and dispatches owned jobs. It
+does not await CPU or native work while processing a command.
 
 `StreamState` owns the full source text, committed byte offset, chunk index,
 prepared chunks, pending count, generation-window deadline, model context, and
@@ -257,8 +259,6 @@ model context before the next prepared chunk is eligible. Cancellation clears
 buffers and queues, increments the generation, and drops results carrying an
 older generation.
 
-## Device Scheduler
-
 Jobs are grouped by model, placement, backend, platform, shape bucket, and model
 parameter compatibility. Within a group, priority is request age plus a
 starvation boost when elapsed playback time exceeds collected audio duration.
@@ -269,6 +269,11 @@ Each device queue and stream output channel has an explicit bounded capacity.
 Admission beyond capacity returns `Overloaded`; it never silently drops work or
 allocates an unbounded queue. Completed batches are split by request, checked
 against cancellation generation, and delivered in stream chunk order.
+
+CPU preprocessing and native inference receive immutable owned jobs through
+bounded executor queues. Completion messages carry the slot, batch outputs,
+request generations, and timing. The scheduler releases the slot, applies model
+context, queues output, and immediately reevaluates all newly eligible work.
 
 ## Shutdown and Recovery
 
