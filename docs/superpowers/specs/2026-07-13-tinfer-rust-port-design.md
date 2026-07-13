@@ -236,9 +236,10 @@ Protocol adapters map errors to their existing gRPC status, HTTP body/status,
 or WebSocket error/close contract.
 
 An inference failure affects its batch and requests but does not silently return
-empty successful audio. A failed GPU placement becomes unhealthy and stops
-receiving work. Recovery reloads the placement within the same retained device
-runtime; it does not create another CUDA context.
+empty successful audio. A failed placement becomes unhealthy and stops receiving
+work. Recoverable backend failures reload inside the retained device runtime.
+Fatal CUDA device failures disable that device and all its placements rather
+than resetting a shared context underneath other models.
 
 ## Verification Strategy
 
@@ -281,6 +282,11 @@ runtime; it does not create another CUDA context.
 
 Each increment ends with independently runnable tests and does not depend on a
 real StyleTTS2 model.
+
+## Detailed Implementation Contracts
+
+- [Runtime and native details](2026-07-13-tinfer-rust-runtime-details.md)
+- [Protocol and operations details](2026-07-13-tinfer-rust-protocol-details.md)
 
 ## Explicit Non-Goals
 
