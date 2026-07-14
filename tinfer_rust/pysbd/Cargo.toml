@@ -1,0 +1,10 @@
+[package]
+name = "pysbd"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+fancy-regex = "0.16"
+regex = "1.11"
+thiserror = "2"

@@ -2,6 +2,9 @@
 
 mod async_engine;
 mod caller;
+mod chunker;
+#[cfg(test)]
+mod chunker_tests;
 mod engine;
 mod registry;
 mod scheduler;

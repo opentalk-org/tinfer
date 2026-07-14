@@ -1,11 +1,11 @@
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded};
+use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender};
 
-use super::caller::{Call, callers};
+use super::caller::{callers, Call};
 use super::registry::Registry;
-use super::scheduler::{Request, dispatch, find_request, next_wait, unload};
+use super::scheduler::{dispatch, find_request, next_wait, unload, Request};
 use crate::models::Model;
 use crate::{AudioChunk, Config, Error, ModelInfo, Result, StreamParams};
 
@@ -219,15 +219,15 @@ fn process(message: Message, registry: &mut Registry, requests: &mut Vec<Request
             let _ = reply.send(registry.voices(&model));
         }
         Message::Create(model, voice, mut params, reply) => {
-            let result = registry.validate(&model, &voice).map(|default_language| {
+            let result = registry.validate(&model, &voice).and_then(|default_language| {
                 let language =
                     params.model["language"].as_str().filter(|language| !language.is_empty()).unwrap_or(&default_language).to_owned();
                 params.model["language"] = serde_json::Value::String(language.clone());
                 let id = *next_id;
                 *next_id += 1;
                 let (tx, rx) = bounded(2);
-                requests.push(Request::new(id, model, voice, language, params, tx));
-                (id, rx)
+                requests.push(Request::new(id, model, voice, language, params, tx)?);
+                Ok((id, rx))
             });
             let _ = reply.send(result);
         }
@@ -249,6 +249,14 @@ fn process(message: Message, registry: &mut Registry, requests: &mut Vec<Request
         Message::Cancel(id, reply) => {
             let result = find_request(requests, id).map(|request| {
                 request.cancelled = true;
+                request.text.clear();
+                request.committed = 0;
+                request.committed_chars = 0;
+                request.prepared.clear();
+                request.deadline = None;
+                request.forced = false;
+                request.pending = 0;
+                request.nonce = request.nonce.wrapping_add(1);
                 let _ = request.output.send(Delivery::Error(Error::Cancelled));
             });
             let _ = reply.send(result);

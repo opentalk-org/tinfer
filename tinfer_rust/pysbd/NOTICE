@@ -1,0 +1,5 @@
+This crate translates pySBD source code and tests from commit
+5905f13be4fc95f407b98392e0ec303617a33d86.
+
+pySBD is Copyright (c) 2019 Nipun Sadvilkar and licensed under the MIT License.
+The translated sources and test corpus remain subject to the included LICENSE.

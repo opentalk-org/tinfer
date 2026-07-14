@@ -1,3 +1,4 @@
+use std::ops::Range;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
@@ -5,15 +6,15 @@ use crossbeam_channel::{Receiver, Sender};
 
 use super::engine::Message;
 use super::registry::EntryId;
-use crate::ModelRequest;
 use crate::models::Model;
+use crate::ModelRequest;
 
 #[derive(Clone)]
 pub(crate) struct Dispatch {
     pub request_id: u64,
     pub chunk_index: u64,
-    pub text_start: usize,
-    pub text_end: usize,
+    pub text_span: Range<usize>,
+    pub nonce: u64,
 }
 
 #[derive(Clone)]

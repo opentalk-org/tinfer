@@ -1,0 +1,12 @@
+use super::assert_cases;
+
+#[test]
+fn nl_matches_upstream() {
+    assert_cases("nl", false, None, CASES);
+}
+
+const CASES: &[(&str, &[&str])] = &[
+    ("Hij schoot op de JP8-brandstof toen de Surface-to-Air (sam)-missiles op hem af kwamen. 81 procent van de schoten was raak.", &["Hij schoot op de JP8-brandstof toen de Surface-to-Air (sam)-missiles op hem af kwamen.", "81 procent van de schoten was raak."]),
+    ("81 procent van de schoten was raak. ...en toen barste de hel los.", &["81 procent van de schoten was raak.", "...en toen barste de hel los."]),
+    ("Afkorting aanw. vnw.", &["Afkorting aanw. vnw."]),
+];

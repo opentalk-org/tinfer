@@ -5,7 +5,7 @@ edition = "2024"
 build = "build.rs"
 
 [workspace]
-members = ["python"]
+members = ["pysbd", "python"]
 exclude = ["espeak_align/espeak_align_core"]
 
 [features]
@@ -27,7 +27,7 @@ rubato = "0.16"
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_yaml = "0.9"
 serde_json = "1.0"
-sentencex = "0.1.30"
+pysbd = { path = "pysbd" }
 futures-util = "0.3"
 half = "2"
 libloading = "0.8"
