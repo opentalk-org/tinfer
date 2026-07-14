@@ -91,8 +91,13 @@ TrtExecution::TrtExecution(std::shared_ptr<const TrtProgram> program, void*) : p
 }
 
 std::optional<DType> TrtExecution::input_dtype(const std::string& name) const {
-  if (program_->engine_->getTensorIOMode(name.c_str()) != nvinfer1::TensorIOMode::kINPUT) return std::nullopt;
-  return dtype(program_->engine_->getTensorDataType(name.c_str()));
+  for (std::int32_t index = 0; index < program_->engine_->getNbIOTensors(); ++index) {
+    const auto* input = program_->engine_->getIOTensorName(index);
+    if (name == input && program_->engine_->getTensorIOMode(input) == nvinfer1::TensorIOMode::kINPUT) {
+      return dtype(program_->engine_->getTensorDataType(input));
+    }
+  }
+  return std::nullopt;
 }
 
 Tensors TrtExecution::run(const Tensors& inputs, void* stream) {

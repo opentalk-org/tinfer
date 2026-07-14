@@ -57,6 +57,7 @@ class OnnxProgram final : public Program, public std::enable_shared_from_this<On
  public:
   OnnxProgram(const std::string& path, std::int32_t device)
       : device_(device), options_(), session_(nullptr) {
+    (void)environment();
     options_.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
     if (device >= 0) {
 #ifdef TINFER_CUDA

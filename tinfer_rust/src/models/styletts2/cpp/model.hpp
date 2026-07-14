@@ -18,6 +18,7 @@ class StyleTts2Model final : public Model {
   Output run_cpu(const Batch& batch) const;
   Output run_cuda(const Batch& batch) const;
 
+  Backend backend_;
   std::int32_t device_;
   void* stream_ = nullptr;
   Tensors weights_a_;

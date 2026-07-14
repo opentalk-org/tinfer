@@ -55,7 +55,7 @@ Tensor host_output(const std::string& name, DType dtype,
 StyleTts2Model::StyleTts2Model(const std::string& root,
                                const std::string& architecture,
                                Backend backend, std::int32_t device)
-    : device_(device) {
+    : backend_(backend), device_(device) {
   auto backend_dir = std::filesystem::path(root);
   if (backend == Backend::Onnx) backend_dir /= device < 0 ? "onnx/cpu" : "onnx/cuda";
   else backend_dir /= "tensorrt";

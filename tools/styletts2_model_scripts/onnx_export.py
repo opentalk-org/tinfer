@@ -171,7 +171,7 @@ def _save_weight_input_graph(
     with torch.no_grad():
         torch.onnx.export(
             wrapper, inputs, graph_path, input_names=input_names, output_names=output_names, dynamic_axes=dynamic_axes,
-            opset_version=20, dynamo=False, do_constant_folding=False,
+            opset_version=20, dynamo=False, do_constant_folding=True,
         )
     graph = onnx.load(graph_path)
     weights = promote_weights(graph)
