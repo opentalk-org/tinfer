@@ -1,0 +1,12 @@
+[package]
+name = "espeak_align"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+pyo3 = { version = "0.26", features = ["extension-module"] }
+espeak-align-core = { path = "../espeak_align_core" }
+
+[lib]
+name = "espeak_align"
+crate-type = ["cdylib"]

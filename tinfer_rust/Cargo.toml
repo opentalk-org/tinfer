@@ -1,0 +1,53 @@
+[package]
+name = "tinfer_rust"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[workspace]
+members = ["python"]
+exclude = ["espeak_align/espeak_align_core"]
+
+[features]
+default = []
+onnx = []
+native-cuda = []
+onnx-cuda = ["onnx", "native-cuda"]
+tensorrt = ["native-cuda"]
+native-test-double = []
+native-hardware-tests = []
+
+[dependencies]
+axum = { version = "0.8.9", features = ["ws"] }
+base64 = "0.22"
+bytes = "1.10"
+crossbeam-channel = "0.5"
+cxx = "1.0"
+rubato = "0.16"
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_yaml = "0.9"
+serde_json = "1.0"
+sentencex = "0.1.30"
+futures-util = "0.3"
+half = "2"
+libloading = "0.8"
+prost = "0.13"
+tonic = "0.12"
+tonic-health = "0.12"
+tokio = { version = "1.48", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "test-util", "time"] }
+tokio-util = { version = "0.7", features = ["time"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+thiserror = "2"
+espeak-align-core = { path = "espeak_align/espeak_align_core" }
+toml = "0.9"
+
+[build-dependencies]
+cc = "1.2"
+cxx-build = "1.0"
+tonic-build = "0.12"
+protoc-bin-vendored = "3.2"
+
+[dev-dependencies]
+minimp3 = "0.5"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tokio-tungstenite = "0.29"

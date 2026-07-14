@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package styletts.v1;
+
+service StyleTTSService {
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
+
+  rpc ListVoices(ListVoicesRequest) returns (ListVoicesResponse);
+
+  // 1. UNARY
+  // Standard request/response. Best for short phrases.
+  rpc Synthesize(SynthesizeRequest) returns (SynthesizeResponse);
+
+  // 2. SERVER STREAMING
+  // You send the *complete* text at once. We stream audio back as it renders.
+  rpc SynthesizeStream(SynthesizeRequest) returns (stream SynthesizeResponse);
+
+  // 3. BI-DIRECTIONAL (INCREMENTAL)
+  // You send text piecemeal (e.g., from an LLM stream). We stream audio back.
+  // Best for live conversational AI.
+  rpc SynthesizeIncremental(stream IncrementalSynthesizeRequest) returns (stream SynthesizeResponse);
+}
+
+message HealthRequest {}
+
+enum HealthStatus {
+  HEALTH_STATUS_UNKNOWN = 0;
+  SERVING = 1;
+  NOT_SERVING = 2;
+}
+
+message HealthResponse {
+  bool ready = 1;
+  HealthStatus status = 2;
+}
+
+message ListModelsRequest {}
+
+message ListModelsResponse {
+  repeated ModelInfo models = 1;
+}
+
+message ModelInfo {
+  string model_id = 1;
+  repeated string supported_languages = 2;
+  string default_language = 3;
+}
+
+message ListVoicesRequest {
+  string model_id = 1;
+}
+
+message VoiceInfo {
+  string model_id = 1;
+  string voice_id = 2;
+}
+
+message ListVoicesResponse {
+  repeated VoiceInfo voices = 1;
+}
+
+message SynthesizeRequest {
+  string text = 1;
+  SynthesisConfig config = 2;
+}
+
+message IncrementalSynthesizeRequest {
+  oneof content {
+    SynthesisConfig config = 1; 
+    string text_chunk = 2; 
+    CancelSynthesis cancel = 3;
+    ForceSynthesis force_synthesis = 4;
+  }
+}
+
+message IncrementalTextChunk {
+  string text_chunk = 2; 
+  bool force_synthesis = 3; // Forces synthesis for this chunk rather than waiting for subsequent chunks
+}
+
+message CancelSynthesis {}
+message ForceSynthesis {}
+
+message SynthesisConfig {
+  string model_id = 1;
+  string voice_id = 2;
+  int32 sample_rate_hz = 3;
+  string language = 4;
+}
+
+message SynthesizeResponse {
+  bytes audio_data = 1;
+  repeated WordAlignment alignments = 2;
+}
+
+message WordAlignment {
+  string word = 1;
+  int32 start_ms = 2;
+  int32 end_ms = 3;
+}

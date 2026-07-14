@@ -1,0 +1,90 @@
+[
+  {
+    "name": "terminal punctuation checked before deletion",
+    "language": "en-us",
+    "vocabulary": "english",
+    "text": "Hello!/",
+    "expected": {
+      "phonemes": "həlˈoʊ ! .",
+      "token_ids": [50, 83, 54, 156, 57, 135, 16, 5, 16, 4],
+      "spans": [
+        {"source": {"start": 0, "end": 5}, "phonemes": "həlˈoʊ ", "token_range": {"start": 0, "end": 7}},
+        {"source": {"start": 5, "end": 6}, "phonemes": "! ", "token_range": {"start": 7, "end": 9}},
+        {"source": {"start": 6, "end": 7}, "phonemes": "", "token_range": {"start": 9, "end": 9}},
+        {"source": {"start": 7, "end": 7}, "phonemes": ".", "token_range": {"start": 9, "end": 10}}
+      ]
+    }
+  },
+  {
+    "name": "english punctuation and collapsed tab",
+    "language": "en-us",
+    "vocabulary": "english",
+    "text": "Hello,\tworld!",
+    "expected": {
+      "phonemes": "həlˈoʊ , wˈɜːld !",
+      "token_ids": [50, 83, 54, 156, 57, 135, 16, 3, 16, 65, 156, 87, 158, 54, 46, 16, 5],
+      "spans": [
+        {"source": {"start": 0, "end": 5}, "phonemes": "həlˈoʊ ", "token_range": {"start": 0, "end": 7}},
+        {"source": {"start": 5, "end": 6}, "phonemes": ", ", "token_range": {"start": 7, "end": 9}},
+        {"source": {"start": 6, "end": 12}, "phonemes": "wˈɜːld ", "token_range": {"start": 9, "end": 16}},
+        {"source": {"start": 12, "end": 13}, "phonemes": "!", "token_range": {"start": 16, "end": 17}}
+      ]
+    }
+  },
+  {
+    "name": "unicode with leading and trailing whitespace",
+    "language": "en-us",
+    "vocabulary": "english",
+    "text": "  Café\tworld  ",
+    "expected": {
+      "phonemes": "kæfˈeɪ wˈɜːld .",
+      "token_ids": [53, 72, 48, 156, 47, 102, 16, 65, 156, 87, 158, 54, 46, 16, 4],
+      "spans": [
+        {"source": {"start": 0, "end": 2}, "phonemes": "", "token_range": {"start": 0, "end": 0}},
+        {"source": {"start": 2, "end": 8}, "phonemes": "kæfˈeɪ ", "token_range": {"start": 0, "end": 7}},
+        {"source": {"start": 8, "end": 15}, "phonemes": "wˈɜːld ", "token_range": {"start": 7, "end": 14}},
+        {"source": {"start": 15, "end": 15}, "phonemes": ".", "token_range": {"start": 14, "end": 15}}
+      ]
+    }
+  },
+  {
+    "name": "polish curly quotes and dash",
+    "language": "pl",
+    "vocabulary": "polish",
+    "text": "„Cześć” — świecie!",
+    "expected": {
+      "phonemes": "\" t͡ʃˈɛɕt͡ɕ \" — ɕfʲˈɛt͡ɕɛ !",
+      "token_ids": [11, 16, 62, 177, 131, 156, 86, 77, 62, 177, 77, 16, 11, 16, 9, 16, 77, 48, 164, 156, 86, 62, 177, 77, 86, 16, 5],
+      "spans": [
+        {"source": {"start": 0, "end": 3}, "phonemes": "\" ", "token_range": {"start": 0, "end": 2}},
+        {"source": {"start": 3, "end": 10}, "phonemes": "t͡ʃˈɛɕt͡ɕ ", "token_range": {"start": 2, "end": 12}},
+        {"source": {"start": 10, "end": 13}, "phonemes": "\" ", "token_range": {"start": 12, "end": 14}},
+        {"source": {"start": 13, "end": 17}, "phonemes": "— ", "token_range": {"start": 14, "end": 16}},
+        {"source": {"start": 17, "end": 26}, "phonemes": "ɕfʲˈɛt͡ɕɛ ", "token_range": {"start": 16, "end": 26}},
+        {"source": {"start": 26, "end": 27}, "phonemes": "!", "token_range": {"start": 26, "end": 27}}
+      ]
+    }
+  },
+  {
+    "name": "styletts2 url deletion mapping",
+    "language": "pl",
+    "vocabulary": "polish",
+    "text": "Wyślij https://a-b.pl/x",
+    "expected": {
+      "phonemes": "vˈɨɕlij xˌatˌɛtˈɛpˌɛˈɛs : a — bˈɛ . pˌɛˌɛlˈiks .",
+      "token_ids": [64, 156, 101, 77, 54, 51, 52, 16, 66, 157, 43, 62, 157, 86, 62, 156, 86, 58, 157, 86, 156, 86, 61, 16, 2, 16, 43, 16, 9, 16, 44, 156, 86, 16, 4, 16, 58, 157, 86, 157, 86, 54, 156, 51, 53, 61, 16, 4],
+      "spans": [
+        {"source": {"start": 0, "end": 8}, "phonemes": "vˈɨɕlij ", "token_range": {"start": 0, "end": 8}},
+        {"source": {"start": 8, "end": 13}, "phonemes": "xˌatˌɛtˈɛpˌɛˈɛs ", "token_range": {"start": 8, "end": 24}},
+        {"source": {"start": 13, "end": 14}, "phonemes": ": ", "token_range": {"start": 24, "end": 26}},
+        {"source": {"start": 14, "end": 16}, "phonemes": "", "token_range": {"start": 26, "end": 26}},
+        {"source": {"start": 16, "end": 17}, "phonemes": "a ", "token_range": {"start": 26, "end": 28}},
+        {"source": {"start": 17, "end": 18}, "phonemes": "— ", "token_range": {"start": 28, "end": 30}},
+        {"source": {"start": 18, "end": 19}, "phonemes": "bˈɛ ", "token_range": {"start": 30, "end": 34}},
+        {"source": {"start": 19, "end": 20}, "phonemes": ". ", "token_range": {"start": 34, "end": 36}},
+        {"source": {"start": 20, "end": 24}, "phonemes": "pˌɛˌɛlˈiks ", "token_range": {"start": 36, "end": 47}},
+        {"source": {"start": 24, "end": 24}, "phonemes": ".", "token_range": {"start": 47, "end": 48}}
+      ]
+    }
+  }
+]

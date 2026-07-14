@@ -1,0 +1,31 @@
+revision = "stub-onnx-cpu-r1"
+sample_rate = 24000
+languages = [{ id = "en-us" }]
+voices = [{ id = "default" }]
+supported = [
+  { backend = "onnx", platform = "cpu" },
+  { backend = "onnx", platform = "cuda" },
+  { backend = "tensorrt", platform = "cuda" },
+]
+language = "en-us"
+tie = true
+espeak_workers = 1
+alignment_threads = 1
+vocabulary_path = "vocabulary.json"
+
+[graphs.graph_1]
+path = "graphs/graph_1.onnx"
+inputs = [{ name = "tokens", dtype = "int64", rank = 1, min_shape = [1], max_shape = [64] }]
+outputs = [
+  { name = "features", dtype = "float32", rank = 1, min_shape = [1], max_shape = [64] },
+  { name = "durations", dtype = "int64", rank = 1, min_shape = [1], max_shape = [64] },
+]
+
+[graphs.graph_2]
+path = "graphs/graph_2.onnx"
+inputs = [{ name = "expanded_features", dtype = "float32", rank = 1, min_shape = [1], max_shape = [128] }]
+outputs = [{ name = "audio", dtype = "float32", rank = 1, min_shape = [1], max_shape = [128] }]
+
+[warmup]
+token_shapes = [[3], [64]]
+max_batch = 4
