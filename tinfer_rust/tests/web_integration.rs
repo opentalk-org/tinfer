@@ -6,5 +6,7 @@ mod http;
 mod streaming;
 #[path = "web_integration/single.rs"]
 mod single;
+#[path = "web_integration/multi.rs"]
+mod multi;
 #[path = "web_integration/support.rs"]
 mod support;

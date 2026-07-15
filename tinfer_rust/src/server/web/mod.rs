@@ -1,4 +1,5 @@
 mod server;
+mod multi;
 pub(super) mod wire;
 
 pub use server::{WebConfig, WebServer};
@@ -46,6 +47,7 @@ pub(super) fn router(engine: AsyncEngine, health: Arc<HealthState>) -> Router {
         .route("/v1/text-to-speech/{voice}/stream", post(speech_stream))
         .route("/v1/text-to-speech/{voice}", post(speech))
         .route("/v1/text-to-speech/{voice}/stream-input", get(websocket))
+        .route("/v1/text-to-speech/{voice}/multi-stream-input", get(multi::upgrade))
         .with_state(app)
 }
 
