@@ -46,21 +46,11 @@ async fn unary_audio_and_timing_match_contract() {
 #[tokio::test]
 async fn catalog_and_speech_failures_are_explicit() {
     let server = TestServer::start().await;
-    let missing = server
-        .client
-        .post(server.url("/v1/text-to-speech/missing"))
-        .json(&json!({"text":"Hello","model_id":"stub"}))
-        .send()
-        .await
-        .unwrap();
+    let missing =
+        server.client.post(server.url("/v1/text-to-speech/missing")).json(&json!({"text":"Hello","model_id":"stub"})).send().await.unwrap();
     assert_eq!(missing.status(), 404);
-    let empty = server
-        .client
-        .post(server.url("/v1/text-to-speech/default"))
-        .json(&json!({"text":"  ","model_id":"stub"}))
-        .send()
-        .await
-        .unwrap();
+    let empty =
+        server.client.post(server.url("/v1/text-to-speech/default")).json(&json!({"text":"  ","model_id":"stub"})).send().await.unwrap();
     assert_eq!(empty.status(), 422);
     server.stop().await;
 }

@@ -15,11 +15,10 @@ async fn receive_json(socket: &mut tokio_tungstenite::WebSocketStream<tokio_tung
 #[tokio::test]
 async fn policy_errors_are_reported_before_close() {
     let server = TestServer::start().await;
-    let (mut socket, _) = tokio_tungstenite::connect_async(server.ws_url(
-        "/v1/text-to-speech/default/stream-input?model_id=stub&output_format=pcm_24000",
-    ))
-    .await
-    .unwrap();
+    let (mut socket, _) =
+        tokio_tungstenite::connect_async(server.ws_url("/v1/text-to-speech/default/stream-input?model_id=stub&output_format=pcm_24000"))
+            .await
+            .unwrap();
     socket.send(Message::text(r#"{"text":"not initialization "}"#)).await.unwrap();
     assert!(receive_json(&mut socket).await["error"].as_str().unwrap().contains("first message"));
     let close = socket.next().await.unwrap().unwrap();
@@ -31,9 +30,9 @@ async fn policy_errors_are_reported_before_close() {
 #[tokio::test]
 async fn alignment_and_final_messages_match_contract() {
     let server = TestServer::start().await;
-    let (mut socket, _) = tokio_tungstenite::connect_async(server.ws_url(
-        "/v1/text-to-speech/default/stream-input?model_id=stub&output_format=pcm_24000&sync_alignment=true",
-    ))
+    let (mut socket, _) = tokio_tungstenite::connect_async(
+        server.ws_url("/v1/text-to-speech/default/stream-input?model_id=stub&output_format=pcm_24000&sync_alignment=true"),
+    )
     .await
     .unwrap();
     socket.send(Message::text(r#"{"text":" "}"#)).await.unwrap();
@@ -49,12 +48,36 @@ async fn alignment_and_final_messages_match_contract() {
 #[tokio::test]
 async fn inactivity_reports_error_and_closes() {
     let server = TestServer::start().await;
-    let (mut socket, _) = tokio_tungstenite::connect_async(server.ws_url(
-        "/v1/text-to-speech/default/stream-input?model_id=stub&output_format=pcm_24000&inactivity_timeout=1",
-    ))
+    let (mut socket, _) = tokio_tungstenite::connect_async(
+        server.ws_url("/v1/text-to-speech/default/stream-input?model_id=stub&output_format=pcm_24000&inactivity_timeout=1"),
+    )
     .await
     .unwrap();
     socket.send(Message::text(r#"{"text":" "}"#)).await.unwrap();
     assert!(receive_json(&mut socket).await["error"].as_str().unwrap().contains("inactivity"));
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn initialization_settings_are_strict_and_immutable() {
+    let server = TestServer::start().await;
+    let (mut socket, _) =
+        tokio_tungstenite::connect_async(server.ws_url("/v1/text-to-speech/default/stream-input?model_id=stub&output_format=pcm_24000"))
+            .await
+            .unwrap();
+    socket
+        .send(Message::text(r#"{"text":" ","voice_settings":{"speed":1.1},"generation_config":{"chunk_length_schedule":[50]}}"#))
+        .await
+        .unwrap();
+    socket.send(Message::text(r#"{"text":"Hello ","flush":"yes"}"#)).await.unwrap();
+    assert!(receive_json(&mut socket).await["error"].as_str().unwrap().contains("flush must be boolean"));
+
+    let (mut socket, _) =
+        tokio_tungstenite::connect_async(server.ws_url("/v1/text-to-speech/default/stream-input?model_id=stub&output_format=pcm_24000"))
+            .await
+            .unwrap();
+    socket.send(Message::text(r#"{"text":" ","voice_settings":{"speed":1.1}}"#)).await.unwrap();
+    socket.send(Message::text(r#"{"text":"Hello ","voice_settings":{"speed":1.0}}"#)).await.unwrap();
+    assert!(receive_json(&mut socket).await["error"].as_str().unwrap().contains("cannot change"));
     server.stop().await;
 }

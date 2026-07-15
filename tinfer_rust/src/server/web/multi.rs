@@ -8,9 +8,12 @@ use serde_json::{Map, Value};
 use tokio::sync::mpsc;
 
 use super::wire::{WebError, WsAudio, encode};
-use super::{App, resolve_model};
-use crate::server::http::{Transport, parse_query};
-use crate::{AlignmentType, AsyncStream, Error, StreamParams};
+use super::{App, resolve_language, resolve_model};
+use crate::server::http::{SpeechQuery, Transport, parse_query, parse_speech};
+use crate::{AlignmentType, AsyncStream, Error};
+
+type Delivery = crate::Result<(Option<crate::AudioChunk>, bool)>;
+type Output = mpsc::Sender<(String, Delivery)>;
 
 pub(super) async fn upgrade(
     ws: WebSocketUpgrade,
@@ -18,11 +21,12 @@ pub(super) async fn upgrade(
     Path(voice): Path<String>,
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<Response, WebError> {
-    let parsed = parse_query(&query, Transport::WebSocket)?;
+    let mut parsed = parse_query(&query, Transport::WebSocket)?;
     let model = resolve_model(&app.engine, query.get("model_id").cloned()).await?;
     if !app.engine.get_voice_ids(&model).await?.contains(&voice) {
         return Err(Error::Catalog(format!("unknown voice: {voice}")).into());
     }
+    parsed.language_code = Some(resolve_language(&app.engine, &model, parsed.language_code.as_deref()).await?);
     let admission = app.health.admit().ok_or(WebError::Unavailable)?;
     Ok(ws.on_upgrade(move |socket| session(socket, app, model, voice, parsed, admission)))
 }
@@ -91,51 +95,133 @@ async fn dispatch(
     model: &str,
     voice: &str,
     query: &crate::server::http::SpeechQuery,
-    output: &mpsc::Sender<(String, crate::Result<(Option<crate::AudioChunk>, bool)>)>,
+    output: &Output,
     contexts: &mut HashMap<String, AsyncStream>,
     initialized: &mut bool,
     closing: &mut bool,
 ) -> Result<(), String> {
-    if command.get("close_socket").and_then(Value::as_bool) == Some(true) {
+    let allowed = [
+        "text",
+        "context_id",
+        "voice_settings",
+        "generation_config",
+        "pronunciation_dictionary_locators",
+        "xi_api_key",
+        "authorization",
+        "flush",
+        "close_context",
+        "close_socket",
+    ];
+    if let Some(field) = command.keys().filter(|key| !allowed.contains(&key.as_str())).min() {
+        return Err(format!("unsupported message field: {field}"));
+    }
+    let text = command.get("text").and_then(Value::as_str);
+    if !*initialized && text != Some(" ") {
+        return Err("first message text must be exactly \" \"".into());
+    }
+    if optional_bool(command, "close_socket")? {
         *closing = true;
-        for stream in contexts.values() { stream.finish().await.map_err(|error| error.to_string())?; }
+        for stream in contexts.values() {
+            stream.finish().await.map_err(|error| error.to_string())?;
+        }
         return Ok(());
     }
     let id = command.get("context_id").map_or(Ok("default"), |value| value.as_str().ok_or("context_id must be a string"))?.to_owned();
-    if id.is_empty() { return Err("context_id must not be empty".into()) }
-    if command.get("close_context").and_then(Value::as_bool) == Some(true) {
+    if id.is_empty() {
+        return Err("context_id must not be empty".into());
+    }
+    let close_context = optional_bool(command, "close_context")?;
+    if close_context {
         let stream = contexts.get(&id).ok_or_else(|| format!("unknown context: {id}"))?;
         stream.finish().await.map_err(|error| error.to_string())?;
         return Ok(());
     }
-    let text = command.get("text").and_then(Value::as_str);
-    if !*initialized && text != Some(" ") { return Err("first message text must be exactly \" \"".into()) }
+    if contexts.contains_key(&id) && (command.contains_key("voice_settings") || command.contains_key("generation_config")) {
+        let stream = contexts.remove(&id).expect("known context");
+        stream.finish().await.map_err(|error| error.to_string())?;
+        create_context(command, &id, app, model, voice, query, output, contexts).await?;
+        return Ok(());
+    }
     if !contexts.contains_key(&id) {
-        let Some(text) = text else { return Err(format!("unknown context: {id}")) };
-        if !matches!(text, "" | " ") && !text.ends_with(' ') { return Err("text must end in a space".into()) }
-        let params = StreamParams { alignment_type: if query.sync_alignment { AlignmentType::Char } else { AlignmentType::None }, ..StreamParams::default() };
-        let stream = app.engine.create_stream(model, voice, params).await.map_err(|error| error.to_string())?;
-        pump(id.clone(), stream.clone(), output.clone());
-        contexts.insert(id.clone(), stream);
+        if text.is_none() {
+            return Err(format!("unknown context: {id}"));
+        }
+        create_context(command, &id, app, model, voice, query, output, contexts).await?;
         *initialized = true;
+        return Ok(());
     }
     let stream = contexts.get(&id).expect("context was created");
-    if let Some(text) = text {
-        if !matches!(text, "" | " ") {
-            if !text.ends_with(' ') { return Err("text must end in a space".into()) }
-            stream.add_text(text).await.map_err(|error| error.to_string())?;
+    if let Some(text) = text.filter(|text| !matches!(*text, "" | " ")) {
+        if !text.ends_with(' ') {
+            return Err("text must end in a space".into());
         }
+        stream.add_text(text).await.map_err(|error| error.to_string())?;
     }
-    if command.get("flush").and_then(Value::as_bool) == Some(true) { stream.force_generate().await.map_err(|error| error.to_string())?; }
+    if optional_bool(command, "flush")? {
+        stream.force_generate().await.map_err(|error| error.to_string())?;
+    }
     Ok(())
 }
 
-fn pump(id: String, stream: AsyncStream, output: mpsc::Sender<(String, crate::Result<(Option<crate::AudioChunk>, bool)>)>) {
+#[allow(clippy::too_many_arguments)]
+async fn create_context(
+    command: &Map<String, Value>,
+    id: &str,
+    app: &App,
+    model: &str,
+    voice: &str,
+    query: &SpeechQuery,
+    output: &Output,
+    contexts: &mut HashMap<String, AsyncStream>,
+) -> Result<(), String> {
+    let mut speech = Map::new();
+    speech.insert("text".into(), command.get("text").cloned().unwrap_or_else(|| Value::String(" ".into())));
+    for field in ["voice_settings", "generation_config"] {
+        if let Some(value) = command.get(field) {
+            speech.insert(field.into(), value.clone());
+        }
+    }
+    let speech = parse_speech(Value::Object(speech)).map_err(validation_message)?;
+    if !matches!(speech.text.as_str(), "" | " ") && !speech.text.ends_with(' ') {
+        return Err("text must end in a space".into());
+    }
+    let alignment = if query.sync_alignment { AlignmentType::Char } else { AlignmentType::None };
+    let stream =
+        app.engine.create_stream(model, voice, query.stream_params(&speech, alignment)).await.map_err(|error| error.to_string())?;
+    pump(id.to_owned(), stream.clone(), output.clone());
+    if !matches!(speech.text.as_str(), "" | " ") {
+        stream.add_text(&speech.text).await.map_err(|error| error.to_string())?;
+        if optional_bool(command, "flush")? {
+            stream.force_generate().await.map_err(|error| error.to_string())?;
+        }
+    }
+    contexts.insert(id.to_owned(), stream);
+    Ok(())
+}
+
+fn optional_bool(command: &Map<String, Value>, field: &str) -> Result<bool, String> {
+    match command.get(field) {
+        None => Ok(false),
+        Some(Value::Bool(value)) => Ok(*value),
+        Some(_) => Err(format!("{field} must be boolean")),
+    }
+}
+
+fn validation_message(error: WebError) -> String {
+    match error {
+        WebError::Validation(message) => message,
+        _ => "invalid speech request".into(),
+    }
+}
+
+fn pump(id: String, stream: AsyncStream, output: Output) {
     tokio::spawn(async move {
         loop {
             let delivery = stream.recv_marked().await;
             let finished = matches!(delivery, Ok((None, true)) | Err(_));
-            if output.send((id.clone(), delivery)).await.is_err() || finished { break }
+            if output.send((id.clone(), delivery)).await.is_err() || finished {
+                break;
+            }
         }
     });
 }

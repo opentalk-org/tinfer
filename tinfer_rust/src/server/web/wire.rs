@@ -4,19 +4,10 @@ use axum::Json;
 use axum::body::Bytes;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::audio::{AudioEncoder, AudioFormat};
 use crate::{AudioChunk, Error, ModelInfo};
-
-#[derive(Deserialize)]
-pub(crate) struct WsSpeech {
-    pub text: String,
-    #[serde(default)]
-    pub try_trigger_generation: bool,
-    #[serde(default)]
-    pub flush: bool,
-}
 
 #[derive(Serialize)]
 pub(crate) struct HealthResponse {
@@ -27,6 +18,7 @@ pub(crate) struct HealthResponse {
 #[derive(Serialize)]
 pub(crate) struct LiveResponse {
     pub live: bool,
+    pub status: &'static str,
 }
 
 #[derive(Serialize)]
@@ -165,9 +157,12 @@ impl IntoResponse for WebError {
         let (status, message) = match self {
             Self::Validation(message) => (StatusCode::UNPROCESSABLE_ENTITY, message),
             Self::Issue { location, message, kind } => {
-                return (StatusCode::UNPROCESSABLE_ENTITY, Json(serde_json::json!({
-                    "detail": [{"loc": location, "msg": message, "type": kind}]
-                })))
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(serde_json::json!({
+                        "detail": [{"loc": location, "msg": message, "type": kind}]
+                    })),
+                )
                     .into_response();
             }
             Self::Engine(Error::Catalog(message)) => (StatusCode::NOT_FOUND, message),

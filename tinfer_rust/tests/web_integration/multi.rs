@@ -15,9 +15,9 @@ async fn receive_json(socket: &mut tokio_tungstenite::WebSocketStream<tokio_tung
 #[tokio::test]
 async fn contexts_are_isolated_and_drained_before_socket_close() {
     let server = TestServer::start().await;
-    let (mut socket, _) = tokio_tungstenite::connect_async(server.ws_url(
-        "/v1/text-to-speech/default/multi-stream-input?model_id=stub&output_format=pcm_24000",
-    ))
+    let (mut socket, _) = tokio_tungstenite::connect_async(
+        server.ws_url("/v1/text-to-speech/default/multi-stream-input?model_id=stub&output_format=pcm_24000"),
+    )
     .await
     .unwrap();
     for message in [
@@ -48,13 +48,35 @@ async fn contexts_are_isolated_and_drained_before_socket_close() {
 #[tokio::test]
 async fn unknown_context_transition_is_a_policy_error() {
     let server = TestServer::start().await;
-    let (mut socket, _) = tokio_tungstenite::connect_async(server.ws_url(
-        "/v1/text-to-speech/default/multi-stream-input?model_id=stub&output_format=pcm_24000",
-    ))
+    let (mut socket, _) = tokio_tungstenite::connect_async(
+        server.ws_url("/v1/text-to-speech/default/multi-stream-input?model_id=stub&output_format=pcm_24000"),
+    )
     .await
     .unwrap();
     socket.send(Message::text(r#"{"context_id":"a","text":" "}"#)).await.unwrap();
     socket.send(Message::text(r#"{"context_id":"missing","close_context":true}"#)).await.unwrap();
     assert!(receive_json(&mut socket).await["error"].as_str().unwrap().contains("unknown context"));
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn context_settings_and_control_types_are_validated() {
+    let server = TestServer::start().await;
+    let (mut socket, _) = tokio_tungstenite::connect_async(
+        server.ws_url("/v1/text-to-speech/default/multi-stream-input?model_id=stub&output_format=pcm_24000"),
+    )
+    .await
+    .unwrap();
+    socket.send(Message::text(r#"{"text":" ","voice_settings":{"speed":1.1}}"#)).await.unwrap();
+    socket.send(Message::text(r#"{"text":"Hello ","flush":"yes"}"#)).await.unwrap();
+    assert!(receive_json(&mut socket).await["error"].as_str().unwrap().contains("flush must be boolean"));
+
+    let (mut socket, _) = tokio_tungstenite::connect_async(
+        server.ws_url("/v1/text-to-speech/default/multi-stream-input?model_id=stub&output_format=pcm_24000"),
+    )
+    .await
+    .unwrap();
+    socket.send(Message::text(r#"{"text":" ","unknown":true}"#)).await.unwrap();
+    assert!(receive_json(&mut socket).await["error"].as_str().unwrap().contains("unsupported message field"));
     server.stop().await;
 }

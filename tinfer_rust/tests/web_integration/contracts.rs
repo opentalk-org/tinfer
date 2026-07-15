@@ -46,3 +46,21 @@ async fn websocket_contract_is_checked_before_upgrade() {
     }
     server.stop().await;
 }
+
+#[tokio::test]
+async fn nested_speech_fields_are_strictly_validated() {
+    let server = TestServer::start().await;
+    let invalid = [
+        json!({"text":"Hello","voice_settings":{"speed":1.21}}),
+        json!({"text":"Hello","voice_settings":{"unknown":1}}),
+        json!({"text":"Hello","generation_config":{"chunk_length_schedule":[49]}}),
+        json!({"text":"Hello","seed":4_294_967_296_u64}),
+        json!({"text":"Hello","previous_request_ids":["1","2","3","4"]}),
+        json!({"text":"Hello","pronunciation_dictionary_locators":[{"version_id":"1"}]}),
+    ];
+    for body in invalid {
+        let response = server.client.post(server.url("/v1/text-to-speech/default")).json(&body).send().await.unwrap();
+        assert_eq!(response.status(), 422, "accepted invalid body: {body}");
+    }
+    server.stop().await;
+}

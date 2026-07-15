@@ -10,7 +10,8 @@ use tinfer_rust::{AsyncEngine, Backend, Config, Device, Engine, ModelConfig};
 pub struct TestServer {
     pub address: SocketAddr,
     pub client: Client,
-    server: WebServer,
+    pub health: Arc<HealthState>,
+    pub server: Arc<WebServer>,
     engine: Engine,
 }
 
@@ -28,16 +29,14 @@ impl TestServer {
             ..Config::default()
         })
         .unwrap();
-        let server = WebServer::new(
+        let health = Arc::new(HealthState::new());
+        let server = Arc::new(WebServer::new(
             AsyncEngine::new(engine.clone()),
-            Arc::new(HealthState::new()),
-            WebConfig {
-                address: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
-                shutdown_grace: Duration::from_secs(1),
-            },
-        );
+            health.clone(),
+            WebConfig { address: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0), shutdown_grace: Duration::from_secs(1) },
+        ));
         let address = server.start().await.unwrap();
-        Self { address, client: Client::new(), server, engine }
+        Self { address, client: Client::new(), health, server, engine }
     }
 
     pub fn url(&self, path: &str) -> String {

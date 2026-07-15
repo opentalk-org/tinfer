@@ -12,10 +12,10 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use super::{Transport, parse_query, parse_speech};
 use crate::AlignmentType;
+use crate::AudioChunk;
 use crate::audio::{AudioEncoder, AudioEncoding};
 use crate::server::web::wire::{TimedAudio, Timing, WebError};
-use crate::server::web::{App, resolve_model};
-use crate::{AudioChunk, StreamParams};
+use crate::server::web::{App, resolve_language, resolve_model};
 
 pub(crate) async fn speech_stream(
     State(app): State<App>,
@@ -35,8 +35,14 @@ pub(crate) async fn timing_stream(
     stream(app, voice, query, value, true).await
 }
 
-async fn stream(app: App, voice: String, query: HashMap<String, String>, value: serde_json::Value, timed: bool) -> Result<Response, WebError> {
-    let request = parse_speech(value)?;
+async fn stream(
+    app: App,
+    voice: String,
+    query: HashMap<String, String>,
+    value: serde_json::Value,
+    timed: bool,
+) -> Result<Response, WebError> {
+    let mut request = parse_speech(value)?;
     if request.text.trim().is_empty() {
         return Err(WebError::Validation("text must contain speech content".into()));
     }
@@ -45,12 +51,9 @@ async fn stream(app: App, voice: String, query: HashMap<String, String>, value: 
         return Err(WebError::Validation("WAV output is not supported for streaming".into()));
     }
     let admission = app.health.admit().ok_or(WebError::Unavailable)?;
-    let model = resolve_model(&app.engine, request.model_id).await?;
-    let params = StreamParams {
-        alignment_type: if timed { AlignmentType::Char } else { AlignmentType::None },
-        model: serde_json::json!({"language": request.language_code}),
-        ..StreamParams::default()
-    };
+    let model = resolve_model(&app.engine, request.model_id.clone()).await?;
+    request.language_code = Some(resolve_language(&app.engine, &model, request.language_code.as_deref()).await?);
+    let params = request.stream_params(if timed { AlignmentType::Char } else { AlignmentType::None });
     let stream = app.engine.create_stream(&model, &voice, params).await?;
     stream.add_text(&request.text).await?;
     stream.finish().await?;
@@ -59,7 +62,8 @@ async fn stream(app: App, voice: String, query: HashMap<String, String>, value: 
         let _admission = admission;
         let mut encoder: Option<AudioEncoder> = None;
         while let Ok((Some(chunk), _)) = stream.recv_marked().await {
-            let current = encoder.get_or_insert_with(|| AudioEncoder::new(parsed.output_format, chunk.sample_rate).expect("validated encoder"));
+            let current =
+                encoder.get_or_insert_with(|| AudioEncoder::new(parsed.output_format, chunk.sample_rate).expect("validated encoder"));
             let payload = match encode_record(current, chunk, timed) {
                 Ok(payload) => payload,
                 Err(_) => break,
@@ -69,13 +73,12 @@ async fn stream(app: App, voice: String, query: HashMap<String, String>, value: 
                 break;
             }
         }
-        if let Some(encoder) = encoder.as_mut() {
-            if !timed {
-                if let Ok(tail) = encoder.finish() {
-                    if !tail.is_empty() {
-                        let _ = sender.send(Ok(tail)).await;
-                    }
+        if let (false, Some(encoder)) = (timed, encoder.as_mut()) {
+            match encoder.finish() {
+                Ok(tail) if !tail.is_empty() => {
+                    let _ = sender.send(Ok(tail)).await;
                 }
+                Ok(_) | Err(_) => {}
             }
         }
         let _ = stream.close().await;
