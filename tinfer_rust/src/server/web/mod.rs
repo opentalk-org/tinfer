@@ -1,5 +1,5 @@
 mod server;
-mod wire;
+pub(super) mod wire;
 
 pub use server::{WebConfig, WebServer};
 
@@ -17,9 +17,10 @@ use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt};
 
 use self::wire::{
-    HealthResponse, LiveResponse, ModelResponse, Speech, TimedAudio, Timing, VoiceResponse, VoicesResponse, WebError, WsAudio, WsSpeech,
-    encode, format_model, output_format,
+    HealthResponse, LiveResponse, ModelResponse, TimedAudio, Timing, VoiceResponse, VoicesResponse, WebError, WsAudio, WsSpeech, encode,
+    format_model,
 };
+use super::http::{Speech, Transport, parse_query, parse_speech};
 use super::health::HealthState;
 use crate::audio::{AudioEncoding, AudioFormat};
 use crate::{AsyncEngine, AudioChunk, Error, StreamParams};
@@ -88,10 +89,11 @@ async fn speech(
     State(app): State<App>,
     Path(voice): Path<String>,
     Query(query): Query<HashMap<String, String>>,
-    Json(request): Json<Speech>,
+    Json(value): Json<serde_json::Value>,
 ) -> Result<Response, WebError> {
+    let request = parse_speech(value)?;
     let _admission = app.health.admit().ok_or(WebError::Unavailable)?;
-    let format = output_format(&query)?;
+    let format = parse_query(&query, Transport::Http)?.output_format;
     let content_type = match format.encoding {
         AudioEncoding::Mp3 => "audio/mpeg",
         AudioEncoding::Opus => "audio/ogg",
@@ -106,10 +108,11 @@ async fn timing(
     State(app): State<App>,
     Path(voice): Path<String>,
     Query(query): Query<HashMap<String, String>>,
-    Json(request): Json<Speech>,
+    Json(value): Json<serde_json::Value>,
 ) -> Result<Json<TimedAudio>, WebError> {
+    let request = parse_speech(value)?;
     let _admission = app.health.admit().ok_or(WebError::Unavailable)?;
-    let format = output_format(&query)?;
+    let format = parse_query(&query, Transport::Http)?.output_format;
     let chunk = generate(&app.engine, voice, request).await?;
     let timing = Timing::from(chunk.alignment.clone().unwrap_or_default());
     Ok(Json(TimedAudio {
@@ -126,7 +129,7 @@ async fn websocket(
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<Response, WebError> {
     let admission = app.health.admit().ok_or(WebError::Unavailable)?;
-    let format = output_format(&query)?;
+    let format = parse_query(&query, Transport::WebSocket)?.output_format;
     let model = resolve_model(&app.engine, query.get("model_id").cloned()).await?;
     if !app.engine.get_voice_ids(&model).await?.contains(&voice) {
         return Err(Error::Catalog(format!("unknown voice: {voice}")).into());

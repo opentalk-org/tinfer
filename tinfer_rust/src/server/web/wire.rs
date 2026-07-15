@@ -11,13 +11,6 @@ use crate::audio::{AudioEncoder, AudioFormat};
 use crate::{AudioChunk, Error, ModelInfo};
 
 #[derive(Deserialize)]
-pub(crate) struct Speech {
-    pub text: String,
-    pub model_id: Option<String>,
-    pub language_code: Option<String>,
-}
-
-#[derive(Deserialize)]
 pub(crate) struct WsSpeech {
     pub text: String,
     #[serde(default)]
@@ -127,6 +120,7 @@ struct ErrorDetail {
 
 pub(crate) enum WebError {
     Validation(String),
+    Issue { location: Vec<&'static str>, message: &'static str, kind: &'static str },
     Engine(Error),
     Audio(crate::audio::AudioError),
     Unavailable,
@@ -142,6 +136,12 @@ impl IntoResponse for WebError {
     fn into_response(self) -> Response {
         let (status, message) = match self {
             Self::Validation(message) => (StatusCode::UNPROCESSABLE_ENTITY, message),
+            Self::Issue { location, message, kind } => {
+                return (StatusCode::UNPROCESSABLE_ENTITY, Json(serde_json::json!({
+                    "detail": [{"loc": location, "msg": message, "type": kind}]
+                })))
+                    .into_response();
+            }
             Self::Engine(Error::Catalog(message)) => (StatusCode::NOT_FOUND, message),
             Self::Engine(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
             Self::Audio(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
