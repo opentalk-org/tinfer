@@ -61,6 +61,8 @@ class TrtExecution final : public Execution {
  private:
   std::shared_ptr<const TrtProgram> program_;
   std::unique_ptr<nvinfer1::IExecutionContext> context_;
+  Tensors outputs_;
+  std::int64_t max_batch_ = 1;
 };
 
 class TrtProgram final : public Program, public std::enable_shared_from_this<TrtProgram> {
@@ -88,6 +90,14 @@ TrtExecution::TrtExecution(std::shared_ptr<const TrtProgram> program, void*) : p
   if (cudaSetDevice(program_->device_) != cudaSuccess) throw std::runtime_error("cannot select TensorRT CUDA device");
   context_.reset(program_->engine_->createExecutionContext());
   if (!context_) throw std::runtime_error("cannot create TensorRT execution context");
+  for (std::int32_t index = 0; index < program_->engine_->getNbIOTensors(); ++index) {
+    const auto* name = program_->engine_->getIOTensorName(index);
+    if (program_->engine_->getTensorIOMode(name) != nvinfer1::TensorIOMode::kINPUT) continue;
+    const auto shape = program_->engine_->getTensorShape(name);
+    if (shape.nbDims == 0 || shape.d[0] >= 0) continue;
+    const auto maximum = program_->engine_->getProfileShape(name, 0, nvinfer1::OptProfileSelector::kMAX);
+    if (maximum.nbDims == shape.nbDims && maximum.d[0] > max_batch_) max_batch_ = maximum.d[0];
+  }
 }
 
 std::optional<DType> TrtExecution::input_dtype(const std::string& name) const {
@@ -119,7 +129,17 @@ Tensors TrtExecution::run(const Tensors& inputs, void* stream) {
     if (program_->engine_->getTensorIOMode(name) != nvinfer1::TensorIOMode::kOUTPUT) continue;
     const auto output_dims = context_->getTensorShape(name);
     std::vector<std::int64_t> shape(output_dims.d, output_dims.d + output_dims.nbDims);
-    auto output = allocate(dtype(program_->engine_->getTensorDataType(name)), std::move(shape), program_->device_);
+    auto capacity_shape = shape;
+    if (!capacity_shape.empty()) capacity_shape[0] = max_batch_;
+    const auto output_dtype = dtype(program_->engine_->getTensorDataType(name));
+    auto cached = outputs_.find(name);
+    if (cached == outputs_.end()) {
+      cached = outputs_.emplace(name, allocate(output_dtype, std::move(capacity_shape), program_->device_)).first;
+    }
+    std::size_t bytes = element_size(output_dtype);
+    for (const auto dimension : shape) bytes *= static_cast<std::size_t>(dimension);
+    if (cached->second.bytes < bytes) throw std::runtime_error("TensorRT output exceeds its profile capacity");
+    auto output = Buffer{output_dtype, std::move(shape), cached->second.memory, bytes};
     if (!context_->setTensorAddress(name, output.data())) throw std::runtime_error("cannot bind TensorRT output: " + std::string(name));
     outputs.emplace(name, std::move(output));
   }

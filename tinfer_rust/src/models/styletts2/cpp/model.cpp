@@ -13,8 +13,9 @@
 namespace tinfer::native {
 StyleTts2Model::StyleTts2Model(const std::string& root,
                                const std::string& architecture,
-                               Backend backend, std::int32_t device)
-    : backend_(backend), device_(device) {
+                               Backend backend, std::int32_t device,
+                               std::int32_t max_batch)
+    : backend_(backend), device_(device), max_batch_(max_batch) {
   auto backend_dir = std::filesystem::path(root);
   if (backend == Backend::Onnx) backend_dir /= device < 0 ? "onnx/cpu" : "onnx/cuda";
   else backend_dir /= "tensorrt";
@@ -75,6 +76,7 @@ StyleTts2Model::~StyleTts2Model() {
   if (stream_ != nullptr) {
     cudaSetDevice(device_);
     cudaStreamSynchronize(static_cast<cudaStream_t>(stream_));
+    if (download_staging_ != nullptr) cudaFreeHost(download_staging_);
     execution_c_.reset();
     execution_b_.reset();
     execution_a_.reset();
@@ -84,9 +86,10 @@ StyleTts2Model::~StyleTts2Model() {
 }
 
 std::unique_ptr<Model> load_styletts2(rust::Str root, rust::Str architecture,
-                                      std::uint8_t backend, std::int32_t device) {
+                                      std::uint8_t backend, std::int32_t device,
+                                      std::int32_t max_batch) {
   if (backend > static_cast<std::uint8_t>(Backend::TensorRt)) throw std::invalid_argument("invalid native backend");
-  return std::make_unique<StyleTts2Model>(std::string(root), std::string(architecture), static_cast<Backend>(backend), device);
+  return std::make_unique<StyleTts2Model>(std::string(root), std::string(architecture), static_cast<Backend>(backend), device, max_batch);
 }
 
 }  // namespace tinfer::native

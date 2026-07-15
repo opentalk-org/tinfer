@@ -48,6 +48,7 @@ pub fn load(config: &ModelConfig) -> Result<Arc<dyn Model>> {
         &manifest.architecture_id,
         backend,
         device,
+        i32::try_from(config.max_batch).map_err(|_| Error::Validation("StyleTTS2 max_batch exceeds native range".into()))?,
     )?;
     let voices = manifest.voices.keys().cloned().collect();
     Ok(Arc::new(StyleTts2 {

@@ -12,8 +12,8 @@ impl Handle {
         ffi::load_stub().map(Self).map_err(|error| Error::Inference(error.to_string()))
     }
 
-    pub fn styletts2(root: &str, architecture: &str, backend: u8, device: i32) -> Result<Self> {
-        ffi::load_styletts2(root, architecture, backend, device).map(Self).map_err(|error| Error::Inference(error.to_string()))
+    pub fn styletts2(root: &str, architecture: &str, backend: u8, device: i32, max_batch: i32) -> Result<Self> {
+        ffi::load_styletts2(root, architecture, backend, device, max_batch).map(Self).map_err(|error| Error::Inference(error.to_string()))
     }
 
     pub fn generate(&self, tensors: Vec<ffi::Tensor>) -> Result<Vec<ffi::Tensor>> {
@@ -60,7 +60,7 @@ pub(crate) mod ffi {
         include!("tinfer_rust/src/models/base/cpp/model.hpp");
         type Model;
         fn load_stub() -> Result<UniquePtr<Model>>;
-        fn load_styletts2(root: &str, architecture: &str, backend: u8, device: i32) -> Result<UniquePtr<Model>>;
+        fn load_styletts2(root: &str, architecture: &str, backend: u8, device: i32, max_batch: i32) -> Result<UniquePtr<Model>>;
         fn generate_batch(self: &Model, batch: &Batch) -> Result<Output>;
         #[allow(dead_code)]
         fn cpu_duration_prefix(durations: &[f32], lengths: &[i32], speeds: &[f32], batch: i32, tokens: i32) -> Result<Vec<i32>>;

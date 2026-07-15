@@ -41,6 +41,7 @@ void append_phases(StyleTts2Session& session, std::int32_t count) {
 void StyleTts2Model::ensure_prosody(
     const std::vector<StyleTts2Session*>& sessions,
     const std::vector<std::int32_t>& targets) const {
+  std::int32_t iteration = 0;
   while (true) {
     std::vector<StyleTts2Session*> pending;
     for (std::size_t index = 0; index < sessions.size(); ++index) {
@@ -70,9 +71,12 @@ void StyleTts2Model::ensure_prosody(
                 styles.begin() + static_cast<std::size_t>(item) * 128);
     }
     auto inputs = weights_b_;
+    const auto suffix = std::to_string(iteration++);
     inputs.emplace("en", upload_floats(
-                             encoding, {batch, channels, kWindowFrames}));
-    inputs.emplace("s", upload_floats(styles, {batch, 128}));
+                             "b.encoding." + suffix, encoding,
+                             {batch, channels, kWindowFrames}));
+    inputs.emplace("s", upload_floats("b.style." + suffix, styles,
+                                       {batch, 128}));
     const auto output = execution_b_->run(inputs, stream_);
     if (device_ >= 0) {
       for (std::int32_t item = 0; item < batch; ++item) {

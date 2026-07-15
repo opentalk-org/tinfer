@@ -14,22 +14,42 @@
 #include <stdexcept>
 
 namespace tinfer::native {
-namespace {
-#ifdef TINFER_CUDA
-template <typename T>
-Buffer upload_values(const std::vector<T>& values, DType dtype,
-                     std::vector<std::int64_t> shape, std::int32_t device,
-                     cudaStream_t stream) {
-  auto output = allocate(dtype, std::move(shape), device);
-  if (output.bytes != values.size() * sizeof(T) ||
-      cudaMemcpyAsync(output.data(), values.data(), output.bytes,
-                      cudaMemcpyHostToDevice, stream) != cudaSuccess) {
-    throw std::runtime_error("StyleTTS2 CUDA state upload failed");
+Buffer StyleTts2Model::workspace(const std::string& name, DType dtype,
+                                 std::vector<std::int64_t> shape,
+                                 std::vector<std::int64_t> capacity) const {
+  std::size_t bytes = element_size(dtype);
+  for (const auto dimension : shape) bytes *= static_cast<std::size_t>(dimension);
+  auto found = workspace_.find(name);
+  if (found == workspace_.end() || found->second.bytes < bytes) {
+    found = workspace_.insert_or_assign(name, allocate(dtype, std::move(capacity), device_)).first;
   }
-  return output;
+  if (found->second.dtype != dtype || found->second.bytes < bytes) {
+    throw std::runtime_error("StyleTTS2 workspace capacity is invalid");
+  }
+  return Buffer{dtype, std::move(shape), found->second.memory, bytes};
 }
+
+void* StyleTts2Model::pinned(const std::string& name, std::size_t bytes,
+                             std::size_t capacity) const {
+#ifdef TINFER_CUDA
+  auto found = upload_staging_.find(name);
+  if (found == upload_staging_.end() || found->second.bytes < bytes) {
+    void* memory = nullptr;
+    if (cudaMallocHost(&memory, capacity) != cudaSuccess) {
+      throw std::runtime_error("StyleTTS2 pinned upload allocation failed");
+    }
+    auto release = [](void* value) { cudaFreeHost(value); };
+    found = upload_staging_
+                .insert_or_assign(name, PinnedBuffer{
+                                            std::shared_ptr<void>(memory, release),
+                                            capacity})
+                .first;
+  }
+  return found->second.memory.get();
+#else
+  throw std::runtime_error("CUDA support is not enabled in this build");
 #endif
-}  // namespace
+}
 
 Tensors StyleTts2Model::upload(const Batch& batch,
                                const Execution& execution) const {
@@ -38,14 +58,22 @@ Tensors StyleTts2Model::upload(const Batch& batch,
     validate_tensor(source);
     const auto name = std::string(source.name);
     const auto dtype = execution.input_dtype(name).value_or(source.dtype);
-    auto value = allocate(dtype, {source.shape.begin(), source.shape.end()},
-                          device_);
+    std::vector<std::int64_t> shape(source.shape.begin(), source.shape.end());
+    auto capacity = shape;
+    if (!capacity.empty()) capacity[0] = max_batch_;
+    auto value = workspace("input." + name, dtype, std::move(shape),
+                           std::move(capacity));
     if (source.dtype == dtype) {
       if (device_ < 0) {
         std::memcpy(value.data(), source.data.data(), value.bytes);
       } else {
 #ifdef TINFER_CUDA
-        if (cudaMemcpyAsync(value.data(), source.data.data(), value.bytes,
+        const auto capacity_bytes = value.bytes /
+                                    static_cast<std::size_t>(source.shape[0]) *
+                                    static_cast<std::size_t>(max_batch_);
+        auto* staging = pinned("input." + name, value.bytes, capacity_bytes);
+        std::memcpy(staging, source.data.data(), value.bytes);
+        if (cudaMemcpyAsync(value.data(), staging, value.bytes,
                             cudaMemcpyHostToDevice,
                             static_cast<cudaStream_t>(stream_)) != cudaSuccess) {
           throw std::runtime_error("StyleTTS2 CUDA upload failed");
@@ -56,10 +84,15 @@ Tensors StyleTts2Model::upload(const Batch& batch,
                dtype == DType::F16) {
 #ifdef TINFER_CUDA
       const auto* floats = reinterpret_cast<const float*>(source.data.data());
-      std::vector<__half> halves(source.data.size() / sizeof(float));
-      std::transform(floats, floats + halves.size(), halves.begin(),
+      const auto count = source.data.size() / sizeof(float);
+      const auto capacity_bytes = count * sizeof(__half) /
+                                  static_cast<std::size_t>(source.shape[0]) *
+                                  static_cast<std::size_t>(max_batch_);
+      auto* halves = static_cast<__half*>(
+          pinned("input." + name, count * sizeof(__half), capacity_bytes));
+      std::transform(floats, floats + count, halves,
                      [](float item) { return __float2half(item); });
-      if (cudaMemcpyAsync(value.data(), halves.data(), value.bytes,
+      if (cudaMemcpyAsync(value.data(), halves, value.bytes,
                           cudaMemcpyHostToDevice,
                           static_cast<cudaStream_t>(stream_)) != cudaSuccess) {
         throw std::runtime_error("StyleTTS2 CUDA fp16 upload failed");
@@ -73,10 +106,14 @@ Tensors StyleTts2Model::upload(const Batch& batch,
   return output;
 }
 
-Buffer StyleTts2Model::upload_floats(const std::vector<float>& values,
+Buffer StyleTts2Model::upload_floats(const std::string& name,
+                                     const std::vector<float>& values,
                                      std::vector<std::int64_t> shape) const {
+  auto capacity = shape;
+  if (!capacity.empty()) capacity[0] = max_batch_;
   if (device_ < 0) {
-    auto output = allocate(DType::F32, std::move(shape), device_);
+    auto output = workspace(name, DType::F32, std::move(shape),
+                            std::move(capacity));
     if (output.bytes != values.size() * sizeof(float)) {
       throw std::runtime_error("StyleTTS2 host tensor shape differs from data");
     }
@@ -84,25 +121,37 @@ Buffer StyleTts2Model::upload_floats(const std::vector<float>& values,
     return output;
   }
 #ifdef TINFER_CUDA
-  std::vector<__half> halves(values.size());
-  std::transform(values.begin(), values.end(), halves.begin(),
+  const auto capacity_bytes = values.size() * sizeof(__half) /
+                              static_cast<std::size_t>(shape[0]) *
+                              static_cast<std::size_t>(max_batch_);
+  auto* halves = static_cast<__half*>(
+      pinned(name, values.size() * sizeof(__half), capacity_bytes));
+  std::transform(values.begin(), values.end(), halves,
                  [](float item) { return __float2half(item); });
-  return upload_values(halves, DType::F16, std::move(shape), device_,
-                       static_cast<cudaStream_t>(stream_));
+  auto output = workspace(name, DType::F16, std::move(shape),
+                          std::move(capacity));
+  if (cudaMemcpyAsync(output.data(), halves, output.bytes,
+                      cudaMemcpyHostToDevice,
+                      static_cast<cudaStream_t>(stream_)) != cudaSuccess) {
+    throw std::runtime_error("StyleTTS2 CUDA state upload failed");
+  }
+  return output;
 #else
   throw std::runtime_error("CUDA support is not enabled in this build");
 #endif
 }
 
-Buffer StyleTts2Model::pad_columns(const Buffer& source, std::int64_t columns,
-                                   int fill) const {
+Buffer StyleTts2Model::pad_columns(const std::string& name,
+                                   const Buffer& source,
+                                   std::int64_t columns, int fill) const {
   if (source.shape.size() != 2 || source.shape[1] >= columns) return source;
   const auto rows = source.shape[0];
   const auto source_pitch = static_cast<std::size_t>(source.shape[1]) *
                             element_size(source.dtype);
   const auto target_pitch = static_cast<std::size_t>(columns) *
                             element_size(source.dtype);
-  auto output = allocate(source.dtype, {rows, columns}, device_);
+  auto output = workspace("input.padding." + name, source.dtype, {rows, columns},
+                          {max_batch_, columns});
   if (device_ < 0) {
     std::memset(output.data(), fill, output.bytes);
     for (std::int64_t row = 0; row < rows; ++row) {
@@ -138,21 +187,34 @@ std::vector<float> StyleTts2Model::download_floats(
   }
 #ifdef TINFER_CUDA
   const auto stream = static_cast<cudaStream_t>(stream_);
+  auto capacity = buffer.bytes;
+  if (!buffer.shape.empty() && buffer.shape[0] > 0) {
+    capacity = buffer.bytes / static_cast<std::size_t>(buffer.shape[0]) *
+               static_cast<std::size_t>(max_batch_);
+  }
+  if (download_capacity_ < capacity) {
+    if (download_staging_ != nullptr) cudaFreeHost(download_staging_);
+    if (cudaMallocHost(&download_staging_, capacity) != cudaSuccess) {
+      throw std::runtime_error("StyleTTS2 pinned download allocation failed");
+    }
+    download_capacity_ = capacity;
+  }
   if (buffer.dtype == DType::F16) {
-    std::vector<__half> halves(output.size());
-    if (cudaMemcpyAsync(halves.data(), buffer.data(), buffer.bytes,
+    if (cudaMemcpyAsync(download_staging_, buffer.data(), buffer.bytes,
                         cudaMemcpyDeviceToHost, stream) != cudaSuccess ||
         cudaStreamSynchronize(stream) != cudaSuccess) {
       throw std::runtime_error("StyleTTS2 CUDA download failed");
     }
-    std::transform(halves.begin(), halves.end(), output.begin(),
+    const auto* halves = static_cast<const __half*>(download_staging_);
+    std::transform(halves, halves + output.size(), output.begin(),
                    [](__half item) { return __half2float(item); });
   } else if (buffer.dtype == DType::F32) {
-    if (cudaMemcpyAsync(output.data(), buffer.data(), buffer.bytes,
+    if (cudaMemcpyAsync(download_staging_, buffer.data(), buffer.bytes,
                         cudaMemcpyDeviceToHost, stream) != cudaSuccess ||
         cudaStreamSynchronize(stream) != cudaSuccess) {
       throw std::runtime_error("StyleTTS2 CUDA download failed");
     }
+    std::memcpy(output.data(), download_staging_, buffer.bytes);
   } else {
     throw std::runtime_error("StyleTTS2 output is not floating point");
   }
@@ -181,7 +243,8 @@ Buffer StyleTts2Model::harmonic(const std::vector<float>& f0,
       f0.data(), static_cast<const float*>(weight.data()),
       *static_cast<const float*>(bias.data()), batch, kWindowFrames,
       seeds.data(), true, advances.data(), phase_state.data());
-  return upload_floats(values, {batch, 22, kWindowFrames * 120 + 1});
+  return upload_floats("c.harmonic", values,
+                       {batch, 22, kWindowFrames * 120 + 1});
 }
 
 }  // namespace tinfer::native

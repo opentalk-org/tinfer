@@ -99,10 +99,13 @@ DeviceProsodyWindow StyleTts2Model::device_prosody_window(
   const auto values = static_cast<std::size_t>(batch) * kWindowFrames * 2;
   const auto f0_bytes = values * kHalf;
   const auto phase_bytes = static_cast<std::size_t>(batch) * 9 * sizeof(float);
-  auto storage = allocate(
-      DType::F32,
+  const auto capacity_bytes = static_cast<std::size_t>(max_batch_) *
+                              (kWindowFrames * 4 * kHalf +
+                               9 * sizeof(float));
+  auto storage = workspace(
+      "c.prosody", DType::F32,
       {static_cast<std::int64_t>((f0_bytes * 2 + phase_bytes) / sizeof(float))},
-      device_);
+      {static_cast<std::int64_t>(capacity_bytes / sizeof(float))});
   auto* base = static_cast<std::uint8_t*>(storage.data());
   DeviceProsodyWindow window{
       view(storage, DType::F16, base, {batch, kWindowFrames * 2}, f0_bytes),
@@ -147,10 +150,16 @@ Buffer StyleTts2Model::harmonic(
                      seeds.size() * sizeof(std::int32_t) +
                      phase_values * sizeof(float) * (kWindowFrames * 2 + 1) +
                      source_values * sizeof(float) + output_values * kHalf;
-  auto storage = allocate(
-      DType::F32,
+  const auto capacity_bytes = static_cast<std::size_t>(max_batch_) *
+                              (sizeof(std::uint64_t) + sizeof(std::int32_t) +
+                               9 * sizeof(float) * (kWindowFrames * 2 + 1) +
+                               kWindowFrames * 600 * sizeof(float) +
+                               22 * (kWindowFrames * 120 + 1) * kHalf);
+  auto storage = workspace(
+      "c.harmonic", DType::F32,
       {static_cast<std::int64_t>((bytes + sizeof(float) - 1) / sizeof(float))},
-      device_);
+      {static_cast<std::int64_t>((capacity_bytes + sizeof(float) - 1) /
+                                 sizeof(float))});
   auto* position = static_cast<std::uint8_t*>(storage.data());
   auto* seed_data = reinterpret_cast<std::uint64_t*>(position);
   position += seeds.size() * sizeof(std::uint64_t);

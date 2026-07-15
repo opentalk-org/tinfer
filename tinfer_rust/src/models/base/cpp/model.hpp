@@ -19,7 +19,8 @@ class Model {
 
 std::unique_ptr<Model> load_stub();
 std::unique_ptr<Model> load_styletts2(rust::Str root, rust::Str architecture,
-                                      std::uint8_t backend, std::int32_t device);
+                                      std::uint8_t backend, std::int32_t device,
+                                      std::int32_t max_batch);
 rust::Vec<std::int32_t> cpu_duration_prefix(rust::Slice<const float> durations,
                                             rust::Slice<const std::int32_t> lengths,
                                             rust::Slice<const float> speeds,

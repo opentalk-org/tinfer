@@ -8,15 +8,14 @@
 #include <stdexcept>
 #include <string_view>
 
-namespace tinfer::native
-{
-  namespace
-  {
+namespace tinfer::native {
+  namespace {
     const Tensor &host(const Batch &batch, std::string_view name, DType dtype)
     {
-      const auto found = std::find_if(
-          batch.tensors.begin(), batch.tensors.end(), [name](const Tensor &value)
-          { return std::string_view(value.name.data(), value.name.size()) == name; });
+      const auto found = std::find_if(batch.tensors.begin(), batch.tensors.end(),
+          [name](const Tensor &value) {
+            return std::string_view(value.name.data(), value.name.size()) == name;
+          });
       if (found == batch.tensors.end() || found->dtype != dtype)
       {
         throw std::runtime_error("missing StyleTTS2 request tensor: " +
@@ -28,8 +27,7 @@ namespace tinfer::native
     const Buffer &need(const Tensors &tensors, std::string_view name)
     {
       const auto found = tensors.find(name);
-      if (found == tensors.end())
-      {
+      if (found == tensors.end()) {
         throw std::runtime_error("missing StyleTTS2 inference tensor: " +
                                  std::string(name));
       }
@@ -51,42 +49,27 @@ namespace tinfer::native
       Tensor result;
       result.name = name;
       result.dtype = dtype;
-      for (const auto dimension : shape)
-        result.shape.push_back(dimension);
+      for (const auto dimension : shape) result.shape.push_back(dimension);
       const auto *bytes = reinterpret_cast<const std::uint8_t *>(values.data());
       result.data.reserve(values.size() * sizeof(T));
-      for (std::size_t index = 0; index < values.size() * sizeof(T); ++index)
-      {
+      for (std::size_t index = 0; index < values.size() * sizeof(T); ++index) {
         result.data.push_back(bytes[index]);
       }
       return result;
     }
 
-    void copy_prosody(const StyleTts2Session &session, std::int32_t frame_start,
-                      float *f0, float *noise)
-    {
-      for (std::int32_t index = 0; index < kWindowFrames * 2; ++index)
-      {
-        const auto source = frame_start * 2 + index;
-        if (source >= 0 && source < session.prosody_cursor * 2)
-        {
-          f0[index] = session.f0[source];
-          noise[index] = session.noise[source];
-        }
-      }
-    }
   } // namespace
 
   Output StyleTts2Model::start(const Batch &batch) const
   {
-    auto values = upload(batch, *execution_a_);
     const auto &token_tensor = host(batch, "tokens", DType::I64);
     const auto batch_size = static_cast<std::int32_t>(token_tensor.shape[0]);
+    auto values = upload(batch, *execution_a_);
     const auto token_count = static_cast<std::int32_t>(token_tensor.shape[1]);
     if (backend_ == Backend::TensorRt && token_count < 8)
     {
-      values["tokens"] = pad_columns(values.at("tokens"), 8, 0);
-      values["mask"] = pad_columns(values.at("mask"), 8, 1);
+      values["tokens"] = pad_columns("tokens", values.at("tokens"), 8, 0);
+      values["mask"] = pad_columns("mask", values.at("mask"), 8, 1);
     }
     const auto a = execution_a_->run(combine(weights_a_, values), stream_);
     const auto durations_output = download_floats(need(a, "dur"));
@@ -236,7 +219,7 @@ namespace tinfer::native
                 references.begin() + static_cast<std::size_t>(item) * 128);
       if (device_ < 0)
       {
-        copy_prosody(session, window_start,
+        styletts2::copy_prosody(session, window_start,
                      f0.data() + static_cast<std::size_t>(item) *
                                      kWindowFrames * 2,
                      noise.data() + static_cast<std::size_t>(item) *
@@ -250,14 +233,15 @@ namespace tinfer::native
     }
     auto inputs = weights_c_;
     inputs.emplace("asr", upload_floats(
-                              asr, {batch_size, 512, kWindowFrames}));
-    inputs.emplace("style", upload_floats(references, {batch_size, 128}));
+                              "c.asr", asr, {batch_size, 512, kWindowFrames}));
+    inputs.emplace("style", upload_floats("c.style", references,
+                                           {batch_size, 128}));
     if (device_ < 0)
     {
       inputs.emplace("f0", upload_floats(
-                               f0, {batch_size, kWindowFrames * 2}));
+                               "c.f0", f0, {batch_size, kWindowFrames * 2}));
       inputs.emplace("noise", upload_floats(
-                                  noise, {batch_size, kWindowFrames * 2}));
+                                  "c.noise", noise, {batch_size, kWindowFrames * 2}));
       inputs.emplace("har", harmonic(f0, seeds, phases));
     }
     else
