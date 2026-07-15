@@ -90,11 +90,19 @@ impl Default for StreamParams {
 
 #[derive(Clone, Debug)]
 pub struct ModelRequest {
+    pub stream_id: u64,
+    pub operation: ModelOperation,
     pub text: String,
     pub voice_id: String,
     pub params: serde_json::Value,
     pub state: serde_json::Value,
     pub alignment_type: AlignmentType,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ModelOperation {
+    Start,
+    Continue,
 }
 
 #[derive(Clone, Debug)]
@@ -103,4 +111,5 @@ pub struct ModelOutput {
     pub sample_rate: u32,
     pub alignment: Option<Alignment>,
     pub state: serde_json::Value,
+    pub complete: bool,
 }

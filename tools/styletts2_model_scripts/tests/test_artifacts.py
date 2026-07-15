@@ -38,12 +38,12 @@ def test_write_tinf_uses_native_little_endian_contract(tmp_path: Path) -> None:
 
 def test_architecture_id_covers_topology_parameters_and_profile() -> None:
     parameters = (("decoder.weight", (8, 4)),)
-    first = architecture_id(ModelTopology(512, 3), parameters, 16, 512, 1200, 5)
+    first = architecture_id(ModelTopology(512, 3), parameters, 16, 512, 5)
 
-    assert first == architecture_id(ModelTopology(512, 3), parameters, 16, 512, 1200, 5)
-    assert first != architecture_id(ModelTopology(256, 3), parameters, 16, 512, 1200, 5)
-    assert first != architecture_id(ModelTopology(512, 3), (("decoder.weight", (9, 4)),), 16, 512, 1200, 5)
-    assert first != architecture_id(ModelTopology(512, 3), parameters, 8, 512, 1200, 5)
+    assert first == architecture_id(ModelTopology(512, 3), parameters, 16, 512, 5)
+    assert first != architecture_id(ModelTopology(256, 3), parameters, 16, 512, 5)
+    assert first != architecture_id(ModelTopology(512, 3), (("decoder.weight", (9, 4)),), 16, 512, 5)
+    assert first != architecture_id(ModelTopology(512, 3), parameters, 8, 512, 5)
 
 
 def test_staged_target_publishes_only_successful_output(tmp_path: Path) -> None:

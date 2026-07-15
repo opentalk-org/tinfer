@@ -1,11 +1,11 @@
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender};
+use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded};
 
-use super::caller::{callers, Call};
+use super::caller::{Call, callers};
 use super::registry::Registry;
-use super::scheduler::{dispatch, find_request, next_wait, unload, Request};
+use super::scheduler::{Request, dispatch, find_request, next_wait, unload};
 use crate::models::Model;
 use crate::{AudioChunk, Config, Error, ModelInfo, Result, StreamParams};
 
@@ -206,7 +206,11 @@ fn process(message: Message, registry: &mut Registry, requests: &mut Vec<Request
             let _ = reply.send(result);
         }
         Message::Unload(model, reply) => {
-            let result = registry.unload(&model);
+            let result = requests
+                .iter()
+                .filter(|request| request.model == model)
+                .try_for_each(|request| registry.close_stream(&model, request.id))
+                .and_then(|()| registry.unload(&model));
             if result.is_ok() {
                 unload(requests, &model);
             }
@@ -247,17 +251,20 @@ fn process(message: Message, registry: &mut Registry, requests: &mut Vec<Request
             let _ = reply.send(result);
         }
         Message::Cancel(id, reply) => {
-            let result = find_request(requests, id).map(|request| {
+            let result = find_request(requests, id).and_then(|request| {
+                registry.close_stream(&request.model, request.id)?;
                 request.cancelled = true;
                 request.text.clear();
                 request.committed = 0;
                 request.committed_chars = 0;
                 request.prepared.clear();
+                request.active = None;
                 request.deadline = None;
                 request.forced = false;
                 request.pending = 0;
                 request.nonce = request.nonce.wrapping_add(1);
                 let _ = request.output.send(Delivery::Error(Error::Cancelled));
+                Ok(())
             });
             let _ = reply.send(result);
         }
@@ -265,15 +272,22 @@ fn process(message: Message, registry: &mut Registry, requests: &mut Vec<Request
             let _ = reply.send(find_request(requests, id).map(|request| request.state.clone()));
         }
         Message::Close(id, reply) => {
-            requests.retain(|request| request.id != id);
-            let _ = reply.send(Ok(()));
+            let result = find_request(requests, id).and_then(|request| registry.close_stream(&request.model, request.id));
+            if result.is_ok() {
+                requests.retain(|request| request.id != id);
+            }
+            let _ = reply.send(result);
         }
         Message::Complete(call, result) => super::scheduler::complete(registry, requests, call, result),
         Message::Stop(reply) => {
+            let mut result = Ok(());
             for request in requests.drain(..) {
+                if let Err(error) = registry.close_stream(&request.model, request.id) {
+                    result = Err(error);
+                }
                 let _ = request.output.send(Delivery::Error(Error::Shutdown));
             }
-            let _ = reply.send(Ok(()));
+            let _ = reply.send(result);
             return true;
         }
     }

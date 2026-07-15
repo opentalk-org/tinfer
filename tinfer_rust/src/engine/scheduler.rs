@@ -6,8 +6,14 @@ use crossbeam_channel::Sender;
 use super::caller::{Call, Dispatch};
 use super::chunker::{Chunker, PreparedChunk};
 use super::engine::Delivery;
-use super::registry::Registry;
-use crate::{Error, ModelOutput, ModelRequest, Result, StreamParams};
+use super::registry::{EntryId, Registry};
+use crate::{Error, ModelOperation, ModelOutput, ModelRequest, Result, StreamParams};
+
+pub(crate) struct ActiveChunk {
+    pub entry: EntryId,
+    pub text: String,
+    pub span: std::ops::Range<usize>,
+}
 
 pub(crate) struct Request {
     pub id: u64,
@@ -17,13 +23,15 @@ pub(crate) struct Request {
     pub text: String,
     pub committed: usize,
     pub committed_chars: usize,
-    pub chunk_index: u64,
+    pub text_index: usize,
+    pub output_index: u64,
     pub pending: usize,
     pub forced: bool,
     pub finished: bool,
     pub cancelled: bool,
     pub deadline: Option<Instant>,
     pub prepared: VecDeque<PreparedChunk>,
+    pub active: Option<ActiveChunk>,
     pub created_at: Instant,
     pub start_time: Option<Instant>,
     pub collected_time: Duration,
@@ -43,13 +51,15 @@ impl Request {
             text: String::new(),
             committed: 0,
             committed_chars: 0,
-            chunk_index: 0,
+            text_index: 0,
+            output_index: 0,
             pending: 0,
             forced: false,
             finished: false,
             cancelled: false,
             deadline: None,
             prepared: VecDeque::new(),
+            active: None,
             created_at: Instant::now(),
             start_time: None,
             collected_time: Duration::ZERO,
@@ -73,7 +83,7 @@ impl Request {
     pub fn finish(&mut self) {
         self.forced = true;
         self.finished = true;
-        if self.pending == 0 && self.committed == self.text.len() {
+        if self.pending == 0 && self.active.is_none() && self.committed == self.text.len() {
             let _ = self.output.send(Delivery::End(true));
         }
     }
@@ -82,6 +92,9 @@ impl Request {
         if self.cancelled || self.pending > 0 {
             return Ok(false);
         }
+        if self.active.is_some() {
+            return Ok(true);
+        }
         if !self.prepared.is_empty() {
             return Ok(true);
         }
@@ -89,7 +102,7 @@ impl Request {
         if pending.trim().is_empty() {
             return Ok(false);
         }
-        let index = self.chunk_index as usize;
+        let index = self.text_index;
         let trigger = self.params.chunk_length_schedule[index.min(self.params.chunk_length_schedule.len() - 1)];
         let trigger_now = if self.forced {
             self.forced = false;
@@ -114,9 +127,10 @@ impl Request {
     }
 
     fn priority(&self, now: Instant) -> u128 {
-        let boost =
+        let first_audio = (self.output_index == 0) as u128 * 2_000_000_000_000_000_000;
+        let realtime =
             self.start_time.is_some_and(|start| now.duration_since(start) > self.collected_time) as u128 * 1_000_000_000_000_000_000;
-        boost + now.duration_since(self.created_at).as_nanos()
+        first_audio + realtime + now.duration_since(self.created_at).as_nanos()
     }
 }
 
@@ -169,23 +183,46 @@ pub(crate) fn dispatch(registry: &mut Registry, requests: &mut [Request], work: 
     for model_id in model_order {
         let indices = ready.get_mut(&model_id).expect("model came from ready map");
         while !indices.is_empty() {
-            let Some((entry, model, max_batch)) = registry.choose(&model_id) else {
+            let Some((position, (entry, model, max_batch))) = indices.iter().enumerate().find_map(|(position, index)| {
+                let pinned = requests[*index].active.as_ref().map(|active| active.entry);
+                registry.choose(&model_id, pinned).map(|chosen| (position, chosen))
+            }) else {
                 break;
             };
-            let selected: Vec<usize> = indices.drain(..max_batch.min(indices.len())).collect();
+            let first = indices.remove(position);
+            let operation = if requests[first].active.is_some() { ModelOperation::Continue } else { ModelOperation::Start };
+            let mut selected = vec![first];
+            let mut candidate = 0;
+            while selected.len() < max_batch && candidate < indices.len() {
+                let request = &requests[indices[candidate]];
+                let request_operation = if request.active.is_some() { ModelOperation::Continue } else { ModelOperation::Start };
+                let compatible_entry = request.active.as_ref().is_none_or(|active| active.entry == entry);
+                if request_operation == operation && compatible_entry {
+                    selected.push(indices.remove(candidate));
+                } else {
+                    candidate += 1;
+                }
+            }
             let mut batch = Vec::with_capacity(selected.len());
             let mut dispatches = Vec::with_capacity(selected.len());
             for index in selected {
                 let request = &mut requests[index];
-                let chunk = request.prepared.pop_front().expect("ready request has prepared text");
-                request.committed = chunk.bytes;
-                request.committed_chars = chunk.span.end;
+                if operation == ModelOperation::Start {
+                    let chunk = request.prepared.pop_front().expect("ready request has prepared text");
+                    request.committed = chunk.bytes;
+                    request.committed_chars = chunk.span.end;
+                    request.active = Some(ActiveChunk { entry, text: chunk.text, span: chunk.span });
+                    request.text_index += 1;
+                    request.start_time = Some(now);
+                    request.collected_time = Duration::ZERO;
+                    request.deadline = (request.committed < request.text.len()).then(|| now + request.params.timeout);
+                }
+                let active = request.active.as_ref().expect("ready request has active text");
                 request.pending += 1;
-                request.start_time = Some(now);
-                request.collected_time = Duration::ZERO;
-                request.deadline = (request.committed < request.text.len()).then(|| now + request.params.timeout);
                 batch.push(ModelRequest {
-                    text: chunk.text,
+                    stream_id: request.id,
+                    operation,
+                    text: active.text.clone(),
                     voice_id: request.voice.clone(),
                     params: request.params.model.clone(),
                     state: request.state.clone(),
@@ -193,11 +230,10 @@ pub(crate) fn dispatch(registry: &mut Registry, requests: &mut [Request], work: 
                 });
                 dispatches.push(Dispatch {
                     request_id: request.id,
-                    chunk_index: request.chunk_index,
-                    text_span: chunk.span,
+                    chunk_index: request.output_index,
+                    text_span: active.span.clone(),
                     nonce: request.nonce,
                 });
-                request.chunk_index += 1;
             }
             work.send(Call { entry, model, batch, dispatches }).expect("caller pool exists while coordinator runs");
         }
@@ -217,15 +253,21 @@ pub(crate) fn complete(registry: &mut Registry, requests: &mut [Request], call: 
         };
         request.pending -= 1;
         request.state = output.state;
-        request.collected_time += Duration::from_secs_f64(output.audio.len() as f64 / output.sample_rate as f64);
-        let _ = request.output.send(Delivery::Chunk(crate::AudioChunk {
-            audio: output.audio,
-            sample_rate: output.sample_rate,
-            chunk_index: dispatch.chunk_index,
-            text_span: dispatch.text_span,
-            alignment: output.alignment,
-        }));
-        if request.pending == 0 && request.committed == request.text.len() {
+        if !output.audio.is_empty() {
+            request.collected_time += Duration::from_secs_f64(output.audio.len() as f64 / output.sample_rate as f64);
+            let _ = request.output.send(Delivery::Chunk(crate::AudioChunk {
+                audio: output.audio,
+                sample_rate: output.sample_rate,
+                chunk_index: dispatch.chunk_index,
+                text_span: dispatch.text_span,
+                alignment: output.alignment,
+            }));
+            request.output_index += 1;
+        }
+        if output.complete {
+            request.active = None;
+        }
+        if output.complete && request.pending == 0 && request.committed == request.text.len() {
             let _ = request.output.send(Delivery::End(request.finished));
         }
     }
@@ -237,6 +279,8 @@ fn fail(requests: &mut [Request], call: &Call, error: Error) {
             request.pending -= 1;
             request.collected_time = Duration::ZERO;
             request.start_time = None;
+            request.active = None;
+            let _ = call.model.close_stream(request.id);
             let _ = request.output.send(Delivery::Error(error.clone()));
         }
     }

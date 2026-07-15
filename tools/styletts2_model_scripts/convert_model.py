@@ -67,7 +67,6 @@ def convert_model(
     default_language: str,
     max_batch: int,
     max_tokens: int,
-    max_frames: int,
     workspace_gb: int,
     force: bool,
 ) -> None:
@@ -75,8 +74,8 @@ def convert_model(
         raise NotADirectoryError(f"original model folder does not exist: {model_folder}")
     if len(set(supported_languages)) != len(supported_languages) or default_language not in supported_languages:
         raise ValueError("supported languages must be unique and contain the default language")
-    if max_batch < 1 or max_tokens < 8 or max_frames < 128 or workspace_gb < 1:
-        raise ValueError("export requires max_batch >= 1, max_tokens >= 8, max_frames >= 128, and workspace_gb >= 1")
+    if max_batch < 1 or max_tokens < 8 or workspace_gb < 1:
+        raise ValueError("export requires max_batch >= 1, max_tokens >= 8, and workspace_gb >= 1")
 
     checkpoint, config_path = find_model_files(model_folder)
     source_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
@@ -94,7 +93,7 @@ def convert_model(
         parameters.extend(
             (f"{component_name}.{name}", tuple(parameter.shape)) for name, parameter in component.named_parameters()
         )
-    architecture = architecture_id(model_config, parameters, max_batch, max_tokens, max_frames, 5)
+    architecture = architecture_id(model_config, parameters, max_batch, max_tokens, 5)
     write_manifest(output, architecture, default_language, supported_languages, symbols)
     (output / "voices").mkdir(exist_ok=True)
 
@@ -102,11 +101,11 @@ def convert_model(
         # Backend modules are loaded only when selected so ONNX conversion has no TensorRT dependency.
         compiler = importlib.import_module("tools.styletts2_model_scripts.onnx_export")
         with stage_output(output / "onnx", force) as staging:
-            compiler.export_onnx(model, model_config, staging, max_tokens, max_frames, 5)
+            compiler.export_onnx(model, model_config, staging, max_tokens, 5)
     if backend in (Backend.TENSORRT, Backend.ALL):
         compiler = importlib.import_module("tools.styletts2_model_scripts.tensorrt_export")
         with stage_output(output / "tensorrt", force) as staging:
-            compiler.export_tensorrt(model, model_config, staging, max_batch, max_tokens, max_frames, 5, workspace_gb)
+            compiler.export_tensorrt(model, model_config, staging, max_batch, max_tokens, 5, workspace_gb)
 
 
 def main() -> None:
@@ -119,7 +118,6 @@ def main() -> None:
     parser.add_argument("--default-language", required=True)
     parser.add_argument("--max-batch", type=int, default=16)
     parser.add_argument("--max-tokens", type=int, default=512)
-    parser.add_argument("--max-frames", type=int, default=1200)
     parser.add_argument("--workspace-gb", type=int, default=8)
     parser.add_argument("--force", action="store_true")
     arguments = parser.parse_args()
@@ -132,7 +130,6 @@ def main() -> None:
         arguments.default_language,
         arguments.max_batch,
         arguments.max_tokens,
-        arguments.max_frames,
         arguments.workspace_gb,
         arguments.force,
     )

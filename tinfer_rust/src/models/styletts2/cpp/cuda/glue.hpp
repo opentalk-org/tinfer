@@ -23,7 +23,9 @@ void align_expand(const __half* text, const __half* encoding,
                   cudaStream_t stream);
 void source_to_har(const __half* f0, const __half* weights,
                    const __half* bias, const std::uint64_t* seeds, __half* har,
-                   float* phases, float* source, std::int32_t batch,
-                   std::int32_t frames, bool randomize, cudaStream_t stream);
+                   float* phases, float* phase_state,
+                   const std::int32_t* advances, float* source,
+                   std::int32_t batch, std::int32_t frames, bool randomize,
+                   cudaStream_t stream);
 
 }  // namespace tinfer::styletts2::cuda

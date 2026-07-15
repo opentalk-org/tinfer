@@ -53,10 +53,20 @@ impl Registry {
         Ok(entry.model.info().default_language.clone())
     }
 
-    pub fn choose(&mut self, model: &str) -> Option<(EntryId, Arc<dyn Model>, usize)> {
-        let entry = self.entries.iter_mut().find(|entry| entry.model.info().model_id == model && !entry.busy)?;
+    pub fn choose(&mut self, model: &str, pinned: Option<EntryId>) -> Option<(EntryId, Arc<dyn Model>, usize)> {
+        let entry = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.model.info().model_id == model && !entry.busy && pinned.is_none_or(|entry_id| entry.id == entry_id))?;
         entry.busy = true;
         Some((entry.id, entry.model.clone(), entry.max_batch))
+    }
+
+    pub fn close_stream(&self, model: &str, stream_id: u64) -> Result<()> {
+        for entry in self.entries.iter().filter(|entry| entry.model.info().model_id == model) {
+            entry.model.close_stream(stream_id)?;
+        }
+        Ok(())
     }
 
     pub fn release(&mut self, id: EntryId) {

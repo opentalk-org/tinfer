@@ -88,6 +88,10 @@ class OnnxProgram final : public Program, public std::enable_shared_from_this<On
 Tensors OnnxExecution::run(const Tensors& inputs, void* stream) {
 #ifndef TINFER_CUDA
   (void)stream;
+#else
+  if (program_->device_ >= 0 && cudaStreamSynchronize(static_cast<cudaStream_t>(stream)) != cudaSuccess) {
+    throw std::runtime_error("ONNX CUDA input synchronization failed");
+  }
 #endif
   auto memory = memory_info(program_->device_);
   Ort::AllocatorWithDefaultOptions allocator;
@@ -137,6 +141,11 @@ Tensors OnnxExecution::run(const Tensors& inputs, void* stream) {
     }
     result.emplace(output_name_views[index], std::move(output));
   }
+#ifdef TINFER_CUDA
+  if (program_->device_ >= 0 && cudaStreamSynchronize(static_cast<cudaStream_t>(stream)) != cudaSuccess) {
+    throw std::runtime_error("ONNX CUDA output synchronization failed");
+  }
+#endif
   return result;
 }
 

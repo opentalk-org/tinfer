@@ -139,6 +139,13 @@ pub(super) fn prepare(
     }
     let sigmas = diffusion_schedule(params[0].diffusion_steps);
     let tensors = vec![
+        tensor("operation", ffi::DType::I32, vec![1], bytes(&[0_i32])),
+        tensor(
+            "stream_ids",
+            ffi::DType::I64,
+            vec![batch as i64],
+            bytes(&requests.iter().map(|request| request.stream_id as i64).collect::<Vec<_>>()),
+        ),
         tensor("tokens", ffi::DType::I64, vec![batch as i64, width as i64], bytes(&padded)),
         tensor("mask", ffi::DType::Bool, vec![batch as i64, width as i64], mask),
         tensor("ref_s", ffi::DType::F32, vec![batch as i64, 256], bytes(&voice_vectors)),
@@ -163,7 +170,7 @@ pub(super) fn parameters(request: &ModelRequest) -> Result<StyleTts2Params> {
     serde_json::from_value(request.params.clone()).map_err(|error| Error::Validation(format!("invalid StyleTTS2 parameters: {error}")))
 }
 
-fn bytes<T: Copy>(values: &[T]) -> Vec<u8> {
+pub(super) fn bytes<T: Copy>(values: &[T]) -> Vec<u8> {
     let length = std::mem::size_of_val(values);
     let pointer = values.as_ptr().cast::<u8>();
     unsafe { std::slice::from_raw_parts(pointer, length) }.to_vec()

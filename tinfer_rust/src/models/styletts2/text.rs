@@ -7,11 +7,13 @@ use crate::{Error, Result};
 
 const PUNCTUATION: &str = ";:,.!?¡¿—–…\"«»“”";
 
+#[derive(Clone)]
 pub(super) struct PreparedText {
     pub phonemes: String,
     pub mapping: Vec<MappedItem>,
 }
 
+#[derive(Clone)]
 pub(super) struct MappedItem {
     pub original_start: usize,
     pub original_end: usize,

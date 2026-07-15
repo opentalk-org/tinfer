@@ -9,13 +9,14 @@ use espeak_align_core::Engine;
 mod manifest;
 mod postprocessing;
 mod preprocessing;
+mod stream;
 mod text;
 
 #[cfg(test)]
 mod tests;
 
 use manifest::Manifest;
-use preprocessing::{parameters, prepare};
+use preprocessing::{bytes, parameters, prepare};
 
 struct StyleTts2 {
     info: ModelInfo,
@@ -23,6 +24,7 @@ struct StyleTts2 {
     manifest: Manifest,
     voice_cache: Mutex<HashMap<String, Vec<f32>>>,
     phonemizers: Mutex<HashMap<String, Engine>>,
+    streams: Mutex<stream::Streams>,
     native: Handle,
 }
 
@@ -58,6 +60,7 @@ pub fn load(config: &ModelConfig) -> Result<Arc<dyn Model>> {
         manifest,
         voice_cache: Mutex::new(HashMap::new()),
         phonemizers: Mutex::new(HashMap::new()),
+        streams: Mutex::new(HashMap::new()),
         native,
     }))
 }
@@ -72,6 +75,24 @@ impl Model for StyleTts2 {
     }
 
     fn generate_batch(&self, batch: &[ModelRequest]) -> Result<Vec<ModelOutput>> {
+        let operation = batch.first().expect("model batch is non-empty").operation;
+        if batch.iter().any(|request| request.operation != operation) {
+            return Err(Error::Inference("StyleTTS2 batch mixes starts and continuations".into()));
+        }
+        if operation == crate::ModelOperation::Continue {
+            let tensors = vec![
+                crate::models::base::native::tensor("operation", crate::models::base::native::ffi::DType::I32, vec![1], bytes(&[1_i32])),
+                crate::models::base::native::tensor(
+                    "stream_ids",
+                    crate::models::base::native::ffi::DType::I64,
+                    vec![batch.len() as i64],
+                    bytes(&batch.iter().map(|request| request.stream_id as i64).collect::<Vec<_>>()),
+                ),
+            ];
+            let tensors = self.native.generate(tensors)?;
+            let mut streams = self.streams.lock().expect("StyleTTS2 stream lock poisoned");
+            return stream::continued(batch, tensors, &mut streams, self.manifest.sample_rate);
+        }
         let mut groups = BTreeMap::<(usize, u32), Vec<usize>>::new();
         for (index, request) in batch.iter().enumerate() {
             let params = parameters(request)?;
@@ -82,11 +103,26 @@ impl Model for StyleTts2 {
             let requests = indexes.iter().map(|index| batch[*index].clone()).collect::<Vec<_>>();
             let prepared = prepare(&requests, &self.manifest, &self.voice_cache, &self.phonemizers)?;
             let tensors = self.native.generate(prepared.tensors)?;
-            let generated = postprocessing::finish(&requests, prepared.texts, tensors, self.manifest.sample_rate)?;
+            let mut streams = self.streams.lock().expect("StyleTTS2 stream lock poisoned");
+            let generated = stream::started(&requests, prepared.texts, tensors, &mut streams, self.manifest.sample_rate)?;
             for (index, item) in indexes.into_iter().zip(generated) {
                 output[index] = Some(item);
             }
         }
         output.into_iter().map(|item| item.ok_or_else(|| Error::Inference("StyleTTS2 omitted a batch item".into()))).collect()
+    }
+
+    fn close_stream(&self, stream_id: u64) -> Result<()> {
+        self.streams.lock().expect("StyleTTS2 stream lock poisoned").remove(&stream_id);
+        self.native.generate(vec![
+            crate::models::base::native::tensor("operation", crate::models::base::native::ffi::DType::I32, vec![1], bytes(&[2_i32])),
+            crate::models::base::native::tensor(
+                "stream_ids",
+                crate::models::base::native::ffi::DType::I64,
+                vec![1],
+                bytes(&[stream_id as i64]),
+            ),
+        ])?;
+        Ok(())
     }
 }

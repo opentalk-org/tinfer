@@ -50,14 +50,18 @@ def architecture_id(
     parameters: Iterable[tuple[str, tuple[int, ...]]],
     max_batch: int,
     max_tokens: int,
-    max_frames: int,
     max_diffusion_steps: int,
 ) -> str:
     description = {
-        "abi": "styletts2-weight-input-v1",
+        "abi": "styletts2-window-128-v1",
         "config": _canonical(model_config),
         "parameters": sorted((name, list(shape)) for name, shape in parameters),
-        "limits": [max_batch, max_tokens, max_frames, max_diffusion_steps],
+        "limits": {
+            "batch": max_batch,
+            "tokens": max_tokens,
+            "diffusion_steps": max_diffusion_steps,
+            "window": {"pre": 64, "core": 48, "post": 16},
+        },
     }
     encoded = json.dumps(description, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
     return f"styletts2-{sha256(encoded).hexdigest()[:16]}"

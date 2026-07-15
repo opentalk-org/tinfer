@@ -59,6 +59,65 @@ fn stream_can_generate_more_than_once() {
 }
 
 #[test]
+fn model_continuations_yield_audio_without_blocking_the_stream() {
+    let engine = engine();
+    let stream = engine
+        .create_stream("stub", "default", StreamParams { model: serde_json::json!({"characters_per_call": 2}), ..StreamParams::default() })
+        .unwrap();
+
+    stream.add_text("first").unwrap();
+    stream.force_generate().unwrap();
+    let chunks = stream.collect_audio().unwrap();
+
+    assert_eq!(chunks.iter().map(|chunk| chunk.audio.len()).collect::<Vec<_>>(), vec![81, 81, 40]);
+    assert_eq!(chunks.iter().map(|chunk| chunk.chunk_index).collect::<Vec<_>>(), vec![0, 1, 2]);
+    assert!(chunks.iter().all(|chunk| chunk.text_span == (0..5)));
+
+    stream.add_text("more").unwrap();
+    stream.force_generate().unwrap();
+    let chunks = stream.collect_audio().unwrap();
+    assert_eq!(chunks.iter().map(|chunk| chunk.audio.len()).collect::<Vec<_>>(), vec![81, 81]);
+    assert_eq!(chunks.iter().map(|chunk| chunk.chunk_index).collect::<Vec<_>>(), vec![3, 4]);
+    assert!(chunks.iter().all(|chunk| chunk.text_span == (5..9)));
+    stream.close().unwrap();
+    engine.stop().unwrap();
+}
+
+#[test]
+fn a_new_stream_joins_between_acoustic_continuations() {
+    let engine = engine();
+    let params = StreamParams { model: serde_json::json!({"characters_per_call": 1}), ..StreamParams::default() };
+    let long = engine.create_stream("stub", "default", params.clone()).unwrap();
+    long.add_text("abcdefghijkl").unwrap();
+    long.force_generate().unwrap();
+    assert!(long.recv().unwrap().is_some());
+
+    let short = engine.create_stream("stub", "default", params).unwrap();
+    short.add_text("xy").unwrap();
+    short.force_generate().unwrap();
+    let (tx, rx) = mpsc::sync_channel(1);
+    std::thread::spawn(move || tx.send(short.recv()).unwrap());
+
+    let mut long_chunks = 0;
+    let first_short = loop {
+        match rx.try_recv() {
+            Ok(result) => break result.unwrap(),
+            Err(mpsc::TryRecvError::Empty) => {
+                if long.recv().unwrap().is_none() {
+                    break rx.recv_timeout(Duration::from_secs(1)).expect("short stream must join active generation").unwrap();
+                }
+                long_chunks += 1;
+            }
+            Err(mpsc::TryRecvError::Disconnected) => panic!("short stream worker disconnected"),
+        }
+    };
+    assert!(first_short.is_some());
+    assert!(long_chunks < 11, "long stream completed before the short stream joined");
+    long.close().unwrap();
+    engine.stop().unwrap();
+}
+
+#[test]
 fn cancellation_is_delivered_to_the_stream() {
     let engine = engine();
     let stream = engine.create_stream("stub", "default", StreamParams::default()).unwrap();

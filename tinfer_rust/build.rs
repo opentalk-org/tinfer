@@ -20,8 +20,10 @@ fn main() {
         .file("src/models/base/cpp/tensorrt.cpp")
         .file("src/models/stub/cpp/model.cpp")
         .file("src/models/styletts2/cpp/model.cpp")
-        .file("src/models/styletts2/cpp/cuda/pipeline.cpp")
+        .file("src/models/styletts2/cpp/window.cpp")
+        .file("src/models/styletts2/cpp/cuda/stream.cpp")
         .file("src/models/styletts2/cpp/cpu/glue.cpp")
+        .file("src/models/styletts2/cpp/cpu/pipeline.cpp")
         .include(workspace)
         .flag_if_supported("-std=c++20");
     let onnx = env::var_os("CARGO_FEATURE_ONNX").is_some();
@@ -53,6 +55,8 @@ fn main() {
             .include(workspace)
             .include(cuda_home.join("include"))
             .flag("-std=c++20")
+            .flag("-Xcompiler")
+            .flag("-U_GNU_SOURCE")
             .compile("tinfer_styletts2_cuda");
         println!("cargo:rustc-link-search=native={}", cuda_home.join("lib64").display());
         println!("cargo:rustc-link-lib=dylib=cudart");
@@ -91,11 +95,15 @@ fn main() {
     println!("cargo:rerun-if-changed=src/models/stub/cpp/model.cpp");
     println!("cargo:rerun-if-changed=src/models/styletts2/cpp/cpu/glue.hpp");
     println!("cargo:rerun-if-changed=src/models/styletts2/cpp/cpu/glue.cpp");
+    println!("cargo:rerun-if-changed=src/models/styletts2/cpp/cpu/pipeline.cpp");
     println!("cargo:rerun-if-changed=src/models/styletts2/cpp/model.hpp");
+    println!("cargo:rerun-if-changed=src/models/styletts2/cpp/session.hpp");
+    println!("cargo:rerun-if-changed=src/models/styletts2/cpp/window.hpp");
+    println!("cargo:rerun-if-changed=src/models/styletts2/cpp/window.cpp");
     println!("cargo:rerun-if-changed=src/models/styletts2/cpp/model.cpp");
     println!("cargo:rerun-if-changed=src/models/styletts2/cpp/cuda/glue.hpp");
     println!("cargo:rerun-if-changed=src/models/styletts2/cpp/cuda/kernels.cu");
-    println!("cargo:rerun-if-changed=src/models/styletts2/cpp/cuda/pipeline.cpp");
+    println!("cargo:rerun-if-changed=src/models/styletts2/cpp/cuda/stream.cpp");
     println!("cargo:rerun-if-env-changed=ORT_INCLUDE_DIR");
     println!("cargo:rerun-if-env-changed=ORT_LIB_DIR");
     println!("cargo:rerun-if-env-changed=TENSORRT_INCLUDE_DIR");

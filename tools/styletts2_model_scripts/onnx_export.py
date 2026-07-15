@@ -26,13 +26,12 @@ def export_onnx(
     model_config: object,
     output: Path,
     max_tokens: int,
-    max_frames: int,
     max_diffusion_steps: int,
 ) -> None:
-    export_variant(model, model_config, output / "cpu", "cpu", torch.float32, max_tokens, max_frames, max_diffusion_steps)
+    export_variant(model, model_config, output / "cpu", "cpu", torch.float32, max_tokens, max_diffusion_steps)
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA ONNX export requires an available CUDA device")
-    export_variant(model, model_config, output / "cuda", "cuda", torch.float16, max_tokens, max_frames, max_diffusion_steps)
+    export_variant(model, model_config, output / "cuda", "cuda", torch.float16, max_tokens, max_diffusion_steps)
 
 
 def export_variant(
@@ -42,12 +41,11 @@ def export_variant(
     device: str,
     dtype: torch.dtype,
     max_tokens: int,
-    max_frames: int,
     max_diffusion_steps: int,
 ) -> None:
     output.mkdir(parents=True)
     token_count = min(32, max_tokens)
-    frame_count = min(128, max_frames)
+    frame_count = 128
     wrappers = (EngineA(model, max_diffusion_steps), EngineB(model.predictor), EngineC(model.decoder))
     for wrapper in wrappers:
         strip_weight_norm(wrapper)
@@ -129,8 +127,8 @@ def _export_b(
 ) -> None:
     inputs = (torch.randn(1, channels, frames, device=device, dtype=dtype), torch.randn(1, 128, device=device, dtype=dtype))
     splits = [f"split{index}" for index in range(6)]
-    dynamic = {"en": {0: "B", 2: "L"}, "s": {0: "B"}, "f0": {0: "B", 1: "F"}, "noise": {0: "B", 1: "F"}}
-    dynamic.update({name: {0: "B", 2: "S"} for name in splits})
+    dynamic = {"en": {0: "B"}, "s": {0: "B"}, "f0": {0: "B"}, "noise": {0: "B"}}
+    dynamic.update({name: {0: "B"} for name in splits})
     _save_weight_input_graph(wrapper, inputs, ["en", "s"], ["f0", "noise", *splits], dynamic, output, "B")
 
 
@@ -151,10 +149,10 @@ def _export_c(
     )
     splits = [f"split{index}" for index in range(7)]
     dynamic = {
-        "asr": {0: "B", 2: "L"}, "f0": {0: "B", 1: "F"}, "noise": {0: "B", 1: "F"}, "style": {0: "B"},
-        "har": {0: "B", 2: "H"}, "audio": {0: "B", 2: "T"},
+        "asr": {0: "B"}, "f0": {0: "B"}, "noise": {0: "B"}, "style": {0: "B"},
+        "har": {0: "B"}, "audio": {0: "B"},
     }
-    dynamic.update({name: {0: "B", 2: "S"} for name in splits})
+    dynamic.update({name: {0: "B"} for name in splits})
     _save_weight_input_graph(wrapper, inputs, ["asr", "f0", "noise", "style", "har"], ["audio", *splits], dynamic, output, "C")
 
 

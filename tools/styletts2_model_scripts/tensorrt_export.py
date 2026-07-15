@@ -16,7 +16,6 @@ def profile_shapes(
     shape: tuple[int, ...],
     max_batch: int,
     max_tokens: int,
-    max_frames: int,
     max_steps: int,
 ) -> tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]]:
     if all(dimension > 0 for dimension in shape):
@@ -36,18 +35,18 @@ def profile_shapes(
         return (1,), (1,), (max_batch,)
     if stage == "B" and name == "en":
         channels = shape[1]
-        return (1, channels, 32), (1, channels, min(128, max_frames)), (max_batch, channels, max_frames)
+        return (1, channels, 128), (1, channels, 128), (max_batch, channels, 128)
     if stage == "B" and name == "s":
         return (1, 128), (1, 128), (max_batch, 128)
     if stage == "C" and name == "asr":
         channels = shape[1]
-        return (1, channels, 128), (1, channels, min(128, max_frames)), (max_batch, channels, max_frames)
+        return (1, channels, 128), (1, channels, 128), (max_batch, channels, 128)
     if stage == "C" and name in ("f0", "noise"):
-        return (1, 256), (1, min(128, max_frames) * 2), (max_batch, max_frames * 2)
+        return (1, 256), (1, 256), (max_batch, 256)
     if stage == "C" and name == "style":
         return (1, 128), (1, 128), (max_batch, 128)
     if stage == "C" and name == "har":
-        return (1, 22, 15361), (1, 22, min(128, max_frames) * 120 + 1), (max_batch, 22, max_frames * 120 + 1)
+        return (1, 22, 15361), (1, 22, 15361), (max_batch, 22, 15361)
     raise ValueError(f"no TensorRT profile for dynamic input {stage}.{name} with shape {shape}")
 
 
@@ -57,13 +56,12 @@ def export_tensorrt(
     output: Path,
     max_batch: int,
     max_tokens: int,
-    max_frames: int,
     max_steps: int,
     workspace_gb: int,
 ) -> None:
     with TemporaryDirectory(prefix="tinfer-styletts2-trt-") as temporary:
         graphs = Path(temporary) / "onnx"
-        export_variant(model, model_config, graphs, "cuda", torch.float16, max_tokens, max_frames, max_steps)
+        export_variant(model, model_config, graphs, "cuda", torch.float16, max_tokens, max_steps)
         for stage in ("A", "B", "C"):
             _build_engine(
                 graphs / f"{stage}.onnx",
@@ -71,7 +69,6 @@ def export_tensorrt(
                 stage,
                 max_batch,
                 max_tokens,
-                max_frames,
                 max_steps,
                 workspace_gb,
             )
@@ -85,7 +82,6 @@ def _build_engine(
     stage: str,
     max_batch: int,
     max_tokens: int,
-    max_frames: int,
     max_steps: int,
     workspace_gb: int,
 ) -> None:
@@ -100,11 +96,12 @@ def _build_engine(
 
     config = builder.create_builder_config()
     config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, workspace_gb * 1024**3)
+    config.builder_optimization_level = 1
     profile = builder.create_optimization_profile()
     for index in range(network.num_inputs):
         tensor = network.get_input(index)
         shape = tuple(int(dimension) for dimension in tensor.shape)
-        minimum, optimum, maximum = profile_shapes(stage, tensor.name, shape, max_batch, max_tokens, max_frames, max_steps)
+        minimum, optimum, maximum = profile_shapes(stage, tensor.name, shape, max_batch, max_tokens, max_steps)
         profile.set_shape(tensor.name, minimum, optimum, maximum)
     if not profile or config.add_optimization_profile(profile) < 0:
         raise RuntimeError(f"TensorRT rejected the {stage} optimization profile")

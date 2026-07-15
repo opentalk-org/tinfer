@@ -90,7 +90,8 @@ void align_expand(const float* text, const float* encoding,
 std::vector<float> source_to_har(const float* f0, const float* weights,
                                  float bias, std::int32_t batch,
                                  std::int32_t frames, const std::uint64_t* seeds,
-                                 bool randomize) {
+                                 bool randomize, const std::int32_t* advances,
+                                 float* phase_state) {
   const auto f0_frames = frames * 2;
   const auto samples = f0_frames * kUpsample;
   const auto stft_frames = samples / kHop + 1;
@@ -99,10 +100,14 @@ std::vector<float> source_to_har(const float* f0, const float* weights,
   std::vector<float> source(samples);
   for (std::int32_t item = 0; item < batch; ++item) {
     for (int harmonic = 0; harmonic < kHarmonics; ++harmonic) {
-      float phase = 0.0F;
+      float phase = phase_state[static_cast<std::size_t>(item) * kHarmonics + harmonic];
       for (std::int32_t frame = 0; frame < f0_frames; ++frame) {
         phase += 2.0F * kPi * std::fmod(f0[static_cast<std::size_t>(item) * f0_frames + frame] * (harmonic + 1) / kSampleRate, 1.0F);
         phases[static_cast<std::size_t>(harmonic) * f0_frames + frame] = phase;
+        if (frame + 1 == advances[item] * 2) {
+          phase_state[static_cast<std::size_t>(item) * kHarmonics + harmonic] =
+              std::fmod(phase, 2.0F * kPi);
+        }
       }
     }
     for (std::int32_t sample = 0; sample < samples; ++sample) {

@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use super::base::Model;
 use super::base::native::{Handle, ffi, tensor};
-use crate::{Alignment, AlignmentItem, AlignmentType, Error, ModelConfig, ModelInfo, ModelOutput, ModelRequest, Result};
+use crate::{Alignment, AlignmentItem, AlignmentType, Error, ModelConfig, ModelInfo, ModelOperation, ModelOutput, ModelRequest, Result};
 
 #[derive(Deserialize)]
 struct Id {
@@ -62,9 +62,21 @@ impl Model for Stub {
     fn generate_batch(&self, batch: &[ModelRequest]) -> Result<Vec<ModelOutput>> {
         let mut values = Vec::new();
         let mut offsets = vec![0];
+        let mut ranges = Vec::with_capacity(batch.len());
         for request in batch {
-            values.extend(request.text.chars().map(|character| i64::from(u32::from(character))));
+            let start = match request.operation {
+                ModelOperation::Start => 0,
+                ModelOperation::Continue => request.state["stub_character_offset"]
+                    .as_u64()
+                    .ok_or_else(|| Error::Validation("stub continuation is missing its character offset".into()))?
+                    as usize,
+            };
+            let limit = request.params["characters_per_call"].as_u64().map_or(usize::MAX, |value| value as usize);
+            let characters = request.text.chars().skip(start).take(limit).collect::<Vec<_>>();
+            let end = start + characters.len();
+            values.extend(characters.into_iter().map(|character| i64::from(u32::from(character))));
             offsets.push(u32::try_from(values.len()).map_err(|_| Error::Validation("native batch contains too many characters".into()))?);
+            ranges.push((start, end, end == request.text.chars().count()));
         }
         let value_bytes = values.iter().flat_map(|value| value.to_ne_bytes()).collect();
         let offset_bytes = offsets.iter().flat_map(|offset| offset.to_ne_bytes()).collect();
@@ -83,7 +95,8 @@ impl Model for Stub {
         batch
             .iter()
             .enumerate()
-            .map(|(batch_index, request)| {
+            .zip(ranges)
+            .map(|((batch_index, request), (character_start, character_end, complete))| {
                 if !self.voices.contains(&request.voice_id) {
                     return Err(Error::Validation(format!("voice not found: {}", request.voice_id)));
                 }
@@ -94,7 +107,9 @@ impl Model for Stub {
                     items: request
                         .text
                         .char_indices()
-                        .map(|(start, character)| AlignmentItem {
+                        .enumerate()
+                        .filter(|(index, _)| *index >= character_start && *index < character_end)
+                        .map(|(_, (start, character))| AlignmentItem {
                             item: character.to_string(),
                             char_start: start,
                             char_end: start + character.len_utf8(),
@@ -107,9 +122,18 @@ impl Model for Stub {
                     audio: audio[start..end].to_vec(),
                     sample_rate: self.sample_rate,
                     alignment,
-                    state: serde_json::json!({"text": request.text}),
+                    state: if complete {
+                        serde_json::json!({"text": request.text})
+                    } else {
+                        serde_json::json!({"text": request.text, "stub_character_offset": character_end})
+                    },
+                    complete,
                 })
             })
             .collect()
+    }
+
+    fn close_stream(&self, _stream_id: u64) -> Result<()> {
+        Ok(())
     }
 }

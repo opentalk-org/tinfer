@@ -65,14 +65,19 @@ __global__ void expand_kernel(const __half* text, const __half* encoding,
 }
 
 __global__ void phase_kernel(const __half* f0, float* phases,
+                             float* phase_state,
+                             const std::int32_t* advances,
                              std::int32_t batch, std::int32_t f0_frames) {
   const auto harmonic = blockIdx.x * blockDim.x + threadIdx.x;
   const auto item = blockIdx.y;
   if (harmonic >= kHarmonics || item >= batch) return;
-  float phase = 0.0F;
+  float phase = phase_state[item * kHarmonics + harmonic];
   for (std::int32_t frame = 0; frame < f0_frames; ++frame) {
     phase += 2.0F * kPi * fmodf(__half2float(f0[item * f0_frames + frame]) * (harmonic + 1) / kSampleRate, 1.0F);
     phases[(item * kHarmonics + harmonic) * f0_frames + frame] = phase;
+    if (frame + 1 == advances[item] * 2) {
+      phase_state[item * kHarmonics + harmonic] = fmodf(phase, 2.0F * kPi);
+    }
   }
 }
 
@@ -167,11 +172,14 @@ void align_expand(const __half* text, const __half* encoding,
 
 void source_to_har(const __half* f0, const __half* weights,
                    const __half* bias, const std::uint64_t* seeds, __half* har,
-                   float* phases, float* source, std::int32_t batch,
-                   std::int32_t frames, bool randomize, cudaStream_t stream) {
+                   float* phases, float* phase_state,
+                   const std::int32_t* advances, float* source,
+                   std::int32_t batch, std::int32_t frames, bool randomize,
+                   cudaStream_t stream) {
   const auto f0_frames = frames * 2;
   const auto samples = f0_frames * kUpsample;
-  phase_kernel<<<dim3(1, batch), 32, 0, stream>>>(f0, phases, batch, f0_frames);
+  phase_kernel<<<dim3(1, batch), 32, 0, stream>>>(
+      f0, phases, phase_state, advances, batch, f0_frames);
   source_kernel<<<dim3((samples + 255) / 256, batch), 256, 0, stream>>>(f0, phases, weights, bias, seeds, source, f0_frames, randomize);
   stft_kernel<<<dim3((samples / kHop + 128) / 128, batch), 128, 0, stream>>>(source, har, batch, samples);
 }
