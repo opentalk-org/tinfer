@@ -1,0 +1,41 @@
+engine:
+  engine_timeout_ms: 5
+  queue_capacity: 64
+
+defaults:
+  chunk_length_schedule: [200]
+  inactivity_timeout_ms: 80
+  alignment_type: word
+
+grpc:
+  enabled: true
+  address: 0.0.0.0:50051
+
+web:
+  enabled: true
+  websocket_enabled: true
+  address: 0.0.0.0:8000
+  output_format: mp3_44100_128
+  websocket_inactivity_timeout_seconds: 20
+  sync_alignment: false
+  auto_mode: false
+
+models:
+  - id: olam
+    model: styletts2
+    path: /home/models/olam_tinfer_bc
+    backend: tensorrt
+    device: cuda:0
+    max_batch: 16
+    settings:
+      use_diffusion: true
+      diffusion_steps: 5
+      embedding_scale: 1.0
+      style_interpolation_factor: 0.7
+      alpha: 0.3
+      beta: 0.7
+      speed: 1.0
+      phonemized: false
+      seed: null
+      apply_text_normalization: auto
+      language: ""

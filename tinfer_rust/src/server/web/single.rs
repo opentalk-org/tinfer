@@ -18,7 +18,7 @@ pub(super) async fn upgrade(
     Path(voice): Path<String>,
     Query(values): Query<HashMap<String, String>>,
 ) -> Result<Response, WebError> {
-    let mut query = parse_query(&values, Transport::WebSocket)?;
+    let mut query = parse_query(&values, Transport::WebSocket, &app.settings)?;
     let model = resolve_model(&app.engine, values.get("model_id").cloned()).await?;
     if !app.engine.get_voice_ids(&model).await?.contains(&voice) {
         return Err(Error::Catalog(format!("unknown voice: {voice}")).into());
@@ -118,8 +118,11 @@ async fn initialize(
     }
     let speech = parse_speech(Value::Object(object)).map_err(validation_message)?;
     let alignment = if query.sync_alignment { AlignmentType::Char } else { AlignmentType::None };
-    let stream =
-        app.engine.create_stream(model, voice, query.stream_params(&speech, alignment)).await.map_err(|error| error.to_string())?;
+    let stream = app
+        .engine
+        .create_stream(model, voice, query.stream_params(&speech, app.engine.stream_params(), alignment))
+        .await
+        .map_err(|error| error.to_string())?;
     let audio_stream = stream.clone();
     let output = output.clone();
     let pump = tokio::spawn(async move {

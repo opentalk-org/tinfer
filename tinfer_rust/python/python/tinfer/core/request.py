@@ -14,7 +14,7 @@ class AlignmentType(Enum):
 
 class StreamParams(TypedDict, total=False):
     chunk_length_schedule: list[int]
-    timeout_trigger_ms: float
+    inactivity_timeout_ms: float
     alignment_type: AlignmentType
     target_sample_rate: int | None
     target_encoding: str | None

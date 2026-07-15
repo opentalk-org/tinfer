@@ -1,5 +1,4 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -9,10 +8,12 @@ use tinfer_rust::server::pb::{
     incremental_synthesize_request,
 };
 use tinfer_rust::server::{GrpcConfig, GrpcServer, HealthState};
-use tinfer_rust::{AsyncEngine, Backend, Config, Device, Engine, ModelConfig};
+use tinfer_rust::{AsyncEngine, Engine};
 use tonic::Code;
 use tonic_health::pb::health_client::HealthClient;
 use tonic_health::pb::{HealthCheckRequest, health_check_response};
+
+mod common;
 
 fn config() -> SynthesisConfig {
     SynthesisConfig { model_id: "stub".into(), voice_id: "default".into(), sample_rate_hz: 24_000, language: "en-us".into() }
@@ -20,18 +21,7 @@ fn config() -> SynthesisConfig {
 
 #[tokio::test]
 async fn grpc_surface_and_lifecycle_work_over_loopback() {
-    let engine = Engine::new(Config {
-        models: vec![ModelConfig {
-            id: "stub".into(),
-            model: "stub".into(),
-            path: Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/artifacts/stub"),
-            backend: Backend::Onnx,
-            device: Device::Cpu,
-            max_batch: 4,
-        }],
-        ..Config::default()
-    })
-    .unwrap();
+    let engine = Engine::new(common::config(vec![common::stub_model()])).unwrap();
     let health = Arc::new(HealthState::new());
     let server = Arc::new(GrpcServer::new(
         AsyncEngine::new(engine.clone()),

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Mutex;
 
 use espeak_align_core::{AlignmentSpan, Engine};
@@ -20,25 +20,52 @@ pub(super) struct MappedItem {
     pub phoneme_count: usize,
 }
 
-pub(super) fn prepare_text(
-    text: &str,
-    phonemized: bool,
-    language: &str,
+pub(super) fn prepare_texts(
+    texts: &[&str],
+    phonemized: &[bool],
+    languages: &[&str],
+    normalization: &[&str],
     symbols: &[String],
     phonemizers: &Mutex<HashMap<String, Engine>>,
-) -> Result<PreparedText> {
-    if phonemized {
-        let phonemes = filter_to_vocab(text.trim(), symbols);
-        return Ok(PreparedText {
-            mapping: vec![MappedItem { original_start: 0, original_end: text.len(), phoneme_count: phonemes.chars().count() }],
-            phonemes,
-        });
+) -> Result<Vec<PreparedText>> {
+    assert_eq!(texts.len(), phonemized.len(), "text preparation flags must match the batch");
+    assert_eq!(texts.len(), languages.len(), "text preparation languages must match the batch");
+    assert_eq!(texts.len(), normalization.len(), "text normalization modes must match the batch");
+    let mut output = vec![None; texts.len()];
+    let mut normalized = vec![None; texts.len()];
+    let mut groups = BTreeMap::<&str, Vec<usize>>::new();
+    for index in 0..texts.len() {
+        if phonemized[index] {
+            let phonemes = filter_to_vocab(texts[index].trim(), symbols);
+            output[index] = Some(PreparedText {
+                mapping: vec![MappedItem { original_start: 0, original_end: texts[index].len(), phoneme_count: phonemes.chars().count() }],
+                phonemes,
+            });
+        } else {
+            normalized[index] = Some(if normalization[index] == "off" {
+                identity_with_mapping(texts[index])
+            } else {
+                normalize_with_mapping(texts[index])
+            });
+            groups.entry(languages[index]).or_default().push(index);
+        }
     }
-    let (normalized, spans) = normalize_with_mapping(text);
     let mut engines = phonemizers.lock().expect("StyleTTS2 phonemizer lock poisoned");
-    let engine = engines.entry(language.to_owned()).or_insert_with(|| Engine::new(language, true, 4));
-    let aligned = engine.align_with_spans(&normalized, PUNCTUATION, 8).map_err(|error| Error::Validation(error.to_string()))?;
-    Ok(mapped_text(text, &spans, aligned, symbols))
+    for (language, indices) in groups {
+        let batch =
+            indices.iter().map(|index| normalized[*index].as_ref().expect("unphonemized text is normalized").0.clone()).collect::<Vec<_>>();
+        let engine = engines.entry(language.to_owned()).or_insert_with(|| Engine::new(language, true, 16));
+        let aligned = engine.align_batch_with_spans(&batch, PUNCTUATION, 16).map_err(|error| Error::Validation(error.to_string()))?;
+        for (index, items) in indices.into_iter().zip(aligned) {
+            let (_, spans) = normalized[index].take().expect("unphonemized text is normalized");
+            output[index] = Some(mapped_text(texts[index], &spans, items, symbols));
+        }
+    }
+    Ok(output.into_iter().map(|item| item.expect("every text is prepared")).collect())
+}
+
+fn identity_with_mapping(text: &str) -> (String, Vec<(usize, usize)>) {
+    (text.to_owned(), text.char_indices().map(|(start, character)| (start, start + character.len_utf8())).collect())
 }
 
 pub(super) fn tokenize<S: AsRef<str>>(text: &str, symbols: &[S]) -> Vec<i64> {

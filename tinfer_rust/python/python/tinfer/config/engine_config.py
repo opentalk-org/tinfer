@@ -1,4 +1,4 @@
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -7,12 +7,11 @@ import yaml
 
 @dataclass
 class StreamingTTSConfig:
-    models: list[dict[str, Any]] = field(default_factory=list)
-    chunk_length_schedule: list[int] = field(default_factory=lambda: [80, 160, 250, 290])
-    timeout_ms: int = 80
-    queue_capacity: int = 64
-    grpc_address: str = "127.0.0.1:50051"
-    http_address: str = "127.0.0.1:8000"
+    engine: dict[str, Any]
+    defaults: dict[str, Any]
+    grpc: dict[str, Any]
+    web: dict[str, Any]
+    models: list[dict[str, Any]]
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "StreamingTTSConfig":

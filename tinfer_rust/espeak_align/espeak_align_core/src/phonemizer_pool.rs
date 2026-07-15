@@ -43,10 +43,7 @@ impl ForkedEspeakPool {
             out.push(spawn_worker(cfg)?);
         }
 
-        Ok(Self {
-            workers: out,
-            rr: AtomicUsize::new(0),
-        })
+        Ok(Self { workers: out, rr: AtomicUsize::new(0) })
     }
 
     fn acquire(&self) -> Result<MutexGuard<'_, WorkerIo>, AlignrustError> {
@@ -57,10 +54,7 @@ impl ForkedEspeakPool {
                 return Ok(g);
             }
         }
-        self.workers[start]
-            .io
-            .lock()
-            .map_err(|_| AlignrustError::Message("worker io mutex poisoned".to_owned()))
+        self.workers[start].io.lock().map_err(|_| AlignrustError::Message("worker io mutex poisoned".to_owned()))
     }
 }
 
@@ -69,31 +63,17 @@ impl Phonemizer for ForkedEspeakPool {
         let mut io = self.acquire()?;
 
         let bytes = text.as_bytes();
-        let len: u32 = bytes
-            .len()
-            .try_into()
-            .map_err(|_| AlignrustError::Message("input too large".to_owned()))?;
-        io.write
-            .write_all(&len.to_le_bytes())
-            .map_err(|e| AlignrustError::Message(format!("worker write failed: {e}")))?;
-        io.write
-            .write_all(bytes)
-            .map_err(|e| AlignrustError::Message(format!("worker write failed: {e}")))?;
-        io.write
-            .flush()
-            .map_err(|e| AlignrustError::Message(format!("worker flush failed: {e}")))?;
+        let len: u32 = bytes.len().try_into().map_err(|_| AlignrustError::Message("input too large".to_owned()))?;
+        io.write.write_all(&len.to_le_bytes()).map_err(|e| AlignrustError::Message(format!("worker write failed: {e}")))?;
+        io.write.write_all(bytes).map_err(|e| AlignrustError::Message(format!("worker write failed: {e}")))?;
+        io.write.flush().map_err(|e| AlignrustError::Message(format!("worker flush failed: {e}")))?;
 
         let mut len_buf = [0u8; 4];
-        io.read
-            .read_exact(&mut len_buf)
-            .map_err(|e| AlignrustError::Message(format!("worker read failed: {e}")))?;
+        io.read.read_exact(&mut len_buf).map_err(|e| AlignrustError::Message(format!("worker read failed: {e}")))?;
         let out_len = u32::from_le_bytes(len_buf) as usize;
         let mut out = vec![0u8; out_len];
-        io.read
-            .read_exact(&mut out)
-            .map_err(|e| AlignrustError::Message(format!("worker read failed: {e}")))?;
-        String::from_utf8(out)
-            .map_err(|_| AlignrustError::Message("worker returned non-utf8".to_owned()))
+        io.read.read_exact(&mut out).map_err(|e| AlignrustError::Message(format!("worker read failed: {e}")))?;
+        String::from_utf8(out).map_err(|_| AlignrustError::Message("worker returned non-utf8".to_owned()))
     }
 }
 
@@ -200,8 +180,5 @@ fn spawn_worker(cfg: &EngineConfig) -> Result<Worker, AlignrustError> {
     let write = unsafe { File::from_raw_fd(p2c[1]) };
     let read = unsafe { File::from_raw_fd(c2p[0]) };
 
-    Ok(Worker {
-        pid,
-        io: Mutex::new(WorkerIo { write, read }),
-    })
+    Ok(Worker { pid, io: Mutex::new(WorkerIo { write, read }) })
 }

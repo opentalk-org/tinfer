@@ -21,12 +21,9 @@ StyleTts2Model::StyleTts2Model(const std::string& root,
   else backend_dir /= "tensorrt";
   const auto extension = backend == Backend::Onnx ? ".onnx" : ".engine";
   program_a_ = load_program(architecture, "A", (backend_dir / ("A" + std::string(extension))).string(), backend, device);
-  program_b_ = load_program(architecture, "B", (backend_dir / ("B" + std::string(extension))).string(), backend, device);
-  program_c_ = load_program(architecture, "C", (backend_dir / ("C" + std::string(extension))).string(), backend, device);
+  program_bc_ = load_program(architecture, "BC", (backend_dir / ("BC" + std::string(extension))).string(), backend, device);
   weights_a_ = load_bundle((backend_dir / "A.tinf").string(), device);
-  weights_b_ = load_bundle((backend_dir / "B.tinf").string(), device);
-  weights_c_ = load_bundle((backend_dir / "C.tinf").string(), device);
-  glue_weights_ = load_bundle((backend_dir / "glue.tinf").string(), device);
+  weights_bc_ = load_bundle((backend_dir / "BC.tinf").string(), device);
   if (device >= 0) {
 #ifdef TINFER_CUDA
     if (cudaSetDevice(device) != cudaSuccess || cudaStreamCreate(reinterpret_cast<cudaStream_t*>(&stream_)) != cudaSuccess) {
@@ -37,8 +34,7 @@ StyleTts2Model::StyleTts2Model(const std::string& root,
 #endif
   }
   execution_a_ = program_a_->create_execution(stream_);
-  execution_b_ = program_b_->create_execution(stream_);
-  execution_c_ = program_c_->create_execution(stream_);
+  execution_bc_ = program_bc_->create_execution(stream_);
 }
 
 Output StyleTts2Model::run(const Batch& batch) const {
@@ -77,8 +73,7 @@ StyleTts2Model::~StyleTts2Model() {
     cudaSetDevice(device_);
     cudaStreamSynchronize(static_cast<cudaStream_t>(stream_));
     if (download_staging_ != nullptr) cudaFreeHost(download_staging_);
-    execution_c_.reset();
-    execution_b_.reset();
+    execution_bc_.reset();
     execution_a_.reset();
     cudaStreamDestroy(static_cast<cudaStream_t>(stream_));
   }

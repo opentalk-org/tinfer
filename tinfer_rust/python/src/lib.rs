@@ -23,7 +23,7 @@ struct NativeChunk {
 #[derive(Default, Deserialize)]
 struct Params {
     chunk_length_schedule: Option<Vec<usize>>,
-    timeout_trigger_ms: Option<f64>,
+    inactivity_timeout_ms: Option<f64>,
     alignment_type: Option<String>,
     tts_params: Option<serde_json::Value>,
 }
@@ -61,11 +61,11 @@ impl NativeEngine {
     }
 
     fn create_stream(&self, model: &str, voice: &str, params: &str) -> PyResult<NativeStream> {
-        self.0.create_stream(model, voice, parse_params(params)?).map(NativeStream).map_err(runtime_error)
+        self.0.create_stream(model, voice, parse_params(&self.0, params)?).map(NativeStream).map_err(runtime_error)
     }
 
     fn generate_full(&self, model: &str, voice: &str, text: &str, params: &str) -> PyResult<NativeChunk> {
-        self.0.generate_full(model, voice, text, parse_params(params)?).map(NativeChunk::from).map_err(runtime_error)
+        self.0.generate_full(model, voice, text, parse_params(&self.0, params)?).map(NativeChunk::from).map_err(runtime_error)
     }
 
     fn stop(&self) -> PyResult<()> {
@@ -119,13 +119,13 @@ impl From<AudioChunk> for NativeChunk {
     }
 }
 
-fn parse_params(json: &str) -> PyResult<StreamParams> {
+fn parse_params(engine: &Engine, json: &str) -> PyResult<StreamParams> {
     let value: Params = serde_json::from_str(json).map_err(value_error)?;
-    let mut params = StreamParams::default();
+    let mut params = engine.stream_params();
     if let Some(schedule) = value.chunk_length_schedule {
         params.chunk_length_schedule = schedule;
     }
-    if let Some(timeout) = value.timeout_trigger_ms {
+    if let Some(timeout) = value.inactivity_timeout_ms {
         params.timeout = Duration::from_secs_f64(timeout / 1000.0);
     }
     if let Some(alignment) = value.alignment_type {

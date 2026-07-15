@@ -5,8 +5,22 @@ use super::preprocessing::{StyleTts2Params, diffusion_schedule};
 use super::text::{normalize_text, tokenize};
 
 #[test]
-fn params_match_the_python_model_defaults() {
-    let params: StyleTts2Params = serde_json::from_value(serde_json::json!({})).unwrap();
+fn every_model_setting_is_explicit() {
+    assert!(serde_json::from_value::<StyleTts2Params>(serde_json::json!({})).is_err());
+    let params: StyleTts2Params = serde_json::from_value(serde_json::json!({
+        "use_diffusion": true,
+        "phonemized": false,
+        "language": "",
+        "embedding_scale": 1.0,
+        "diffusion_steps": 5,
+        "style_interpolation_factor": 0.7,
+        "alpha": 0.3,
+        "beta": 0.7,
+        "speed": 1.0,
+        "seed": null,
+        "apply_text_normalization": "auto"
+    }))
+    .unwrap();
     assert!(params.use_diffusion);
     assert!(!params.phonemized);
     assert_eq!(params.diffusion_steps, 5);

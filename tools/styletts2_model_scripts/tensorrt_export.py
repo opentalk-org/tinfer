@@ -20,33 +20,27 @@ def profile_shapes(
 ) -> tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]]:
     if all(dimension > 0 for dimension in shape):
         return shape, shape, shape
-    batch = (1, 1, max_batch)
+    batch = (1, min(8, max_batch), max_batch)
     if stage == "A" and name in ("tokens", "mask"):
-        return (1, 8), (1, min(32, max_tokens)), (max_batch, max_tokens)
+        return (1, 8), (batch[1], min(128, max_tokens)), (max_batch, max_tokens)
     if stage == "A" and name in ("ref_s", "previous_s"):
-        return (1, 256), (1, 256), (max_batch, 256)
+        return (1, 256), (batch[1], 256), (max_batch, 256)
     if stage == "A" and name == "noise":
-        return (1, 1, 256), (1, 1, 256), (max_batch, 1, 256)
+        return (1, 1, 256), (batch[1], 1, 256), (max_batch, 1, 256)
     if stage == "A" and name == "step_noise":
-        return (1, max_steps - 1, 1, 256), (1, max_steps - 1, 1, 256), (max_batch, max_steps - 1, 1, 256)
+        return (1, max_steps - 1, 1, 256), (batch[1], max_steps - 1, 1, 256), (max_batch, max_steps - 1, 1, 256)
     if stage == "A" and name in ("alpha", "beta"):
-        return (1, 1), (1, 1), (max_batch, 1)
+        return (1, 1), (batch[1], 1), (max_batch, 1)
     if stage == "A" and name in ("scale", "use_diffusion", "has_previous", "style_interpolation"):
-        return (1,), (1,), (max_batch,)
-    if stage == "B" and name == "en":
+        return (1,), (batch[1],), (max_batch,)
+    if stage == "BC" and name in ("en", "asr"):
         channels = shape[1]
-        return (1, channels, 128), (1, channels, 128), (max_batch, channels, 128)
-    if stage == "B" and name == "s":
-        return (1, 128), (1, 128), (max_batch, 128)
-    if stage == "C" and name == "asr":
+        return (1, channels, 176), (batch[1], channels, 176), (max_batch, channels, 176)
+    if stage == "BC" and name in ("s", "ref", "phase"):
         channels = shape[1]
-        return (1, channels, 128), (1, channels, 128), (max_batch, channels, 128)
-    if stage == "C" and name in ("f0", "noise"):
-        return (1, 256), (1, 256), (max_batch, 256)
-    if stage == "C" and name == "style":
-        return (1, 128), (1, 128), (max_batch, 128)
-    if stage == "C" and name == "har":
-        return (1, 22, 15361), (1, 22, 15361), (max_batch, 22, 15361)
+        return (1, channels), (batch[1], channels), (max_batch, channels)
+    if stage == "BC" and name == "source_noise":
+        return (1, 105600, 9), (batch[1], 105600, 9), (max_batch, 105600, 9)
     raise ValueError(f"no TensorRT profile for dynamic input {stage}.{name} with shape {shape}")
 
 
@@ -62,7 +56,7 @@ def export_tensorrt(
     with TemporaryDirectory(prefix="tinfer-styletts2-trt-") as temporary:
         graphs = Path(temporary) / "onnx"
         export_variant(model, model_config, graphs, "cuda", torch.float16, max_tokens, max_steps)
-        for stage in ("A", "B", "C"):
+        for stage in ("A", "BC"):
             _build_engine(
                 graphs / f"{stage}.onnx",
                 output / f"{stage}.engine",
@@ -73,7 +67,6 @@ def export_tensorrt(
                 workspace_gb,
             )
             shutil.copy2(graphs / f"{stage}.tinf", output / f"{stage}.tinf")
-        shutil.copy2(graphs / "glue.tinf", output / "glue.tinf")
 
 
 def _build_engine(
@@ -96,7 +89,7 @@ def _build_engine(
 
     config = builder.create_builder_config()
     config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, workspace_gb * 1024**3)
-    config.builder_optimization_level = 1
+    config.builder_optimization_level = 5
     profile = builder.create_optimization_profile()
     for index in range(network.num_inputs):
         tensor = network.get_input(index)

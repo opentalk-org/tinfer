@@ -177,9 +177,7 @@ fn build_transitions(
                 let ph = match phonemizer.text_to_phonemes(&ngram_text) {
                     Ok(value) => value,
                     Err(err) => {
-                        eprintln!(
-                            "ERROR espeak_align_ngram_phonemize_failed text={ngram_text:?} error={err}"
-                        );
+                        eprintln!("ERROR espeak_align_ngram_phonemize_failed text={ngram_text:?} error={err}");
                         String::new()
                     }
                 };
@@ -303,11 +301,7 @@ fn phoneme_consumption_candidates(tr: &Transition, remaining: u32, is_last_step:
     out
 }
 
-fn seed_complete_cover_path(
-    nodes: &mut Vec<Node>,
-    words_len: usize,
-    phon_words_len: usize,
-) -> usize {
+fn seed_complete_cover_path(nodes: &mut Vec<Node>, words_len: usize, phon_words_len: usize) -> usize {
     let mut prev = 0usize;
     let mut prev_phon = 0usize;
     for word_idx in 0..words_len {
@@ -318,12 +312,7 @@ fn seed_complete_cover_path(
             word_i: (word_idx + 1) as u32,
             phon_i: next_phon as u32,
             prev: Some(prev),
-            step: Some(PathStep {
-                word_start: word_idx,
-                word_end: word_idx + 1,
-                phon_start: prev_phon,
-                phon_end: next_phon,
-            }),
+            step: Some(PathStep { word_start: word_idx, word_end: word_idx + 1, phon_start: prev_phon, phon_end: next_phon }),
         });
         prev = node;
         prev_phon = next_phon;
@@ -332,40 +321,21 @@ fn seed_complete_cover_path(
 }
 
 // Beam search over chunks with top-k beams. (instead of dp viterbi because to slow and scales O(n^2) in memory)
-fn beam_search_chunk(
-    words: &[String],
-    chunk_phonemes: &str,
-    transitions: &[[Vec<Transition>; 3]],
-    beam_width: usize,
-) -> Vec<PathStep> {
+fn beam_search_chunk(words: &[String], chunk_phonemes: &str, transitions: &[[Vec<Transition>; 3]], beam_width: usize) -> Vec<PathStep> {
     if words.is_empty() {
         return Vec::new();
     }
     let remaining_phon_words = split_phoneme_words(chunk_phonemes);
 
     let mut nodes: Vec<Node> = Vec::new();
-    nodes.push(Node {
-        cost: 0.0,
-        word_i: 0,
-        phon_i: 0,
-        prev: None,
-        step: None,
-    });
+    nodes.push(Node { cost: 0.0, word_i: 0, phon_i: 0, prev: None, step: None });
 
-    let mut beams: Vec<BeamKey> = vec![BeamKey {
-        cost: 0.0,
-        order: 0,
-        node: 0,
-    }];
+    let mut beams: Vec<BeamKey> = vec![BeamKey { cost: 0.0, order: 0, node: 0 }];
     let mut next_order: u64 = 1;
 
     let mut best_cost_for_state: HashMap<u64, f64> = HashMap::new();
     best_cost_for_state.insert(((0u64) << 32) | 0u64, 0.0);
-    let mut best_complete: Option<usize> = Some(seed_complete_cover_path(
-        &mut nodes,
-        words.len(),
-        remaining_phon_words.len(),
-    ));
+    let mut best_complete: Option<usize> = Some(seed_complete_cover_path(&mut nodes, words.len(), remaining_phon_words.len()));
 
     while !beams.is_empty() {
         beams.sort_by(|a, b| {
@@ -385,10 +355,7 @@ fn beam_search_chunk(
             };
 
             if (word_i as usize) >= words.len() && (phon_i as usize) >= remaining_phon_words.len() {
-                if best_complete
-                    .map(|bi| cost < nodes[bi].cost)
-                    .unwrap_or(true)
-                {
+                if best_complete.map(|bi| cost < nodes[bi].cost).unwrap_or(true) {
                     best_complete = Some(node);
                 }
                 continue;
@@ -408,18 +375,10 @@ fn beam_search_chunk(
                     for consume_len in phoneme_consumption_candidates(tr, remaining, is_last_step) {
                         let new_phon_i = phon_i + consume_len;
 
-                        let target_segment = join_phoneme_words(
-                            &remaining_phon_words,
-                            phon_i as usize,
-                            new_phon_i as usize,
-                        );
+                        let target_segment = join_phoneme_words(&remaining_phon_words, phon_i as usize, new_phon_i as usize);
                         let target_cost = phoneme_segment_mismatch_cost(&tr.to, &target_segment);
                         let len_delta = (consume_len as i32 - tr.phon_len).abs() as f64;
-                        let new_cost = cost
-                            + tr.base_cost
-                            + target_cost
-                            + len_delta
-                            + 0.8 * ((tr.gram_len - 1) as f64);
+                        let new_cost = cost + tr.base_cost + target_cost + len_delta + 0.8 * ((tr.gram_len - 1) as f64);
                         let state_key = ((new_word_i as u64) << 32) | (new_phon_i as u64);
                         if let Some(best) = best_cost_for_state.get(&state_key) {
                             if *best <= new_cost {
@@ -443,17 +402,11 @@ fn beam_search_chunk(
                         });
                         if (new_word_i as usize) == words.len()
                             && (new_phon_i as usize) == remaining_phon_words.len()
-                            && best_complete
-                                .map(|bi| new_cost < nodes[bi].cost)
-                                .unwrap_or(true)
+                            && best_complete.map(|bi| new_cost < nodes[bi].cost).unwrap_or(true)
                         {
                             best_complete = Some(new_node);
                         }
-                        new_beams.push(BeamKey {
-                            cost: new_cost,
-                            order: next_order,
-                            node: new_node,
-                        });
+                        new_beams.push(BeamKey { cost: new_cost, order: next_order, node: new_node });
                         next_order += 1;
                     }
                 }
@@ -517,11 +470,7 @@ fn round_half_to_even(x: f64) -> i32 {
     if frac > 0.5 {
         return fl as i32 + 1;
     }
-    if (fl % 2.0) == 0.0 {
-        fl as i32
-    } else {
-        (fl + 1.0) as i32
-    }
+    if (fl % 2.0) == 0.0 { fl as i32 } else { (fl + 1.0) as i32 }
 }
 
 fn rstrip_len_ascii_ws(s: &str) -> usize {
@@ -785,8 +734,7 @@ pub fn align_texts_batch_with_threads(
             .map(|&(ti, ci)| Some(align_chunk(phonemizer, &plans[ti].chunks[ci])))
             .collect::<Vec<Option<(Vec<String>, Vec<String>)>>>()
     } else {
-        let chunk_results: Mutex<Vec<Option<(Vec<String>, Vec<String>)>>> =
-            Mutex::new((0..jobs.len()).map(|_| None).collect());
+        let chunk_results: Mutex<Vec<Option<(Vec<String>, Vec<String>)>>> = Mutex::new((0..jobs.len()).map(|_| None).collect());
         let next = AtomicUsize::new(0);
         thread::scope(|s| {
             let jobs = &jobs;
@@ -810,13 +758,10 @@ pub fn align_texts_batch_with_threads(
                 });
             }
         });
-        chunk_results
-            .into_inner()
-            .unwrap_or_else(|e| e.into_inner())
+        chunk_results.into_inner().unwrap_or_else(|e| e.into_inner())
     };
 
-    let mut per_text_chunks: Vec<Vec<Option<(Vec<String>, Vec<String>)>>> =
-        plans.iter().map(|p| vec![None; p.chunks.len()]).collect();
+    let mut per_text_chunks: Vec<Vec<Option<(Vec<String>, Vec<String>)>>> = plans.iter().map(|p| vec![None; p.chunks.len()]).collect();
     for (ji, (ti, ci)) in jobs.iter().copied().enumerate() {
         if let Some(v) = chunk_results[ji].clone() {
             per_text_chunks[ti][ci] = Some(v);
@@ -836,21 +781,13 @@ pub fn align_texts_batch_with_threads(
     out
 }
 
-fn align_chunks_parallel(
-    phonemizer: &dyn Phonemizer,
-    chunks: &[String],
-    threads: usize,
-) -> Vec<Option<(Vec<String>, Vec<String>)>> {
+fn align_chunks_parallel(phonemizer: &dyn Phonemizer, chunks: &[String], threads: usize) -> Vec<Option<(Vec<String>, Vec<String>)>> {
     let n_chunks = chunks.len();
     let worker_threads = threads.min(n_chunks);
     if worker_threads == 0 {
-        return chunks
-            .iter()
-            .map(|c| Some(align_chunk(phonemizer, c)))
-            .collect();
+        return chunks.iter().map(|c| Some(align_chunk(phonemizer, c))).collect();
     } else {
-        let results: Mutex<Vec<Option<(Vec<String>, Vec<String>)>>> =
-            Mutex::new((0..n_chunks).map(|_| None).collect());
+        let results: Mutex<Vec<Option<(Vec<String>, Vec<String>)>>> = Mutex::new((0..n_chunks).map(|_| None).collect());
         let next = AtomicUsize::new(0);
         thread::scope(|s| {
             let worker_threads = worker_threads;

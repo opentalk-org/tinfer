@@ -10,6 +10,7 @@
 #endif
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <stdexcept>
 
@@ -108,7 +109,8 @@ Tensors StyleTts2Model::upload(const Batch& batch,
 
 Buffer StyleTts2Model::upload_floats(const std::string& name,
                                      const std::vector<float>& values,
-                                     std::vector<std::int64_t> shape) const {
+                                     std::vector<std::int64_t> shape,
+                                     DType device_dtype) const {
   auto capacity = shape;
   if (!capacity.empty()) capacity[0] = max_batch_;
   if (device_ < 0) {
@@ -121,6 +123,24 @@ Buffer StyleTts2Model::upload_floats(const std::string& name,
     return output;
   }
 #ifdef TINFER_CUDA
+  if (device_dtype == DType::F32) {
+    auto output = workspace(name, DType::F32, std::move(shape),
+                            std::move(capacity));
+    const auto capacity_bytes = values.size() * sizeof(float) /
+                                static_cast<std::size_t>(output.shape[0]) *
+                                static_cast<std::size_t>(max_batch_);
+    auto* staging = pinned(name, output.bytes, capacity_bytes);
+    std::memcpy(staging, values.data(), output.bytes);
+    if (cudaMemcpyAsync(output.data(), staging, output.bytes,
+                        cudaMemcpyHostToDevice,
+                        static_cast<cudaStream_t>(stream_)) != cudaSuccess) {
+      throw std::runtime_error("StyleTTS2 CUDA state upload failed");
+    }
+    return output;
+  }
+  if (device_dtype != DType::F16) {
+    throw std::runtime_error("StyleTTS2 CUDA state must be floating point");
+  }
   const auto capacity_bytes = values.size() * sizeof(__half) /
                               static_cast<std::size_t>(shape[0]) *
                               static_cast<std::size_t>(max_batch_);
@@ -224,27 +244,53 @@ std::vector<float> StyleTts2Model::download_floats(
 #endif
 }
 
-Buffer StyleTts2Model::harmonic(const std::vector<float>& f0,
-                                const std::vector<std::uint64_t>& seeds,
-                                const std::vector<float>& phases) const {
+Buffer StyleTts2Model::source_noise(
+    const std::vector<std::uint64_t>& seeds) const {
   const auto batch = static_cast<std::int32_t>(seeds.size());
-  if (f0.size() != static_cast<std::size_t>(batch) * kWindowFrames * 2 ||
-      phases.size() != static_cast<std::size_t>(batch) * 9) {
-    throw std::runtime_error("StyleTTS2 harmonic inputs differ from batch");
+  constexpr std::int32_t samples = kWindowFrames * 600;
+  auto output = workspace("bc.source_noise", device_ < 0 ? DType::F32 : DType::F16,
+                          {batch, samples, 9}, {max_batch_, samples, 9});
+  if (device_ < 0) {
+    constexpr float pi = 3.14159265358979323846F;
+    const auto values = static_cast<std::size_t>(batch) * samples * 9;
+    source_noise_cpu_.resize(values);
+    const auto hash = [](std::uint32_t value) {
+      value ^= value >> 16;
+      value *= 0x7feb352dU;
+      value ^= value >> 15;
+      value *= 0x846ca68bU;
+      return value ^ (value >> 16);
+    };
+    for (std::int32_t item = 0; item < batch; ++item) {
+      for (std::int32_t sample = 0; sample < samples; ++sample) {
+        for (std::int32_t harmonic = 0; harmonic < 9; ++harmonic) {
+          const auto index = static_cast<std::size_t>(item) * samples * 9 +
+                             sample * 9 + harmonic;
+          const auto seed = static_cast<std::uint32_t>(
+              seeds[item] + static_cast<std::uint64_t>(sample) * 9 + harmonic);
+          const auto first = static_cast<float>(hash(seed) & 0xFFFFFF) /
+                                 16777216.0F +
+                             1e-7F;
+          const auto second = static_cast<float>(
+                                  hash(seed * 2654435761U + 1) & 0xFFFFFF) /
+                              16777216.0F;
+          source_noise_cpu_[index] =
+              std::sqrt(-2.0F * std::log(first)) *
+              std::cos(2.0F * pi * second);
+        }
+      }
+    }
+    std::memcpy(output.data(), source_noise_cpu_.data(), output.bytes);
+    return output;
   }
-  if (device_ >= 0) {
-    throw std::runtime_error("host harmonic generation used for CUDA");
-  }
-  std::vector<std::int32_t> advances(batch, kWindowFrames);
-  const auto weight = glue_weights_.at("linW");
-  const auto bias = glue_weights_.at("linB");
-  auto phase_state = phases;
-  auto values = styletts2::cpu::source_to_har(
-      f0.data(), static_cast<const float*>(weight.data()),
-      *static_cast<const float*>(bias.data()), batch, kWindowFrames,
-      seeds.data(), true, advances.data(), phase_state.data());
-  return upload_floats("c.harmonic", values,
-                       {batch, 22, kWindowFrames * 120 + 1});
+#ifdef TINFER_CUDA
+  styletts2::cuda::fill_noise(static_cast<__half*>(output.data()), seeds.data(),
+                              batch, samples,
+                              static_cast<cudaStream_t>(stream_));
+  return output;
+#else
+  throw std::runtime_error("CUDA support is not enabled in this build");
+#endif
 }
 
 }  // namespace tinfer::native

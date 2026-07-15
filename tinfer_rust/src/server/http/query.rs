@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
 
+use crate::WebSettings;
 use crate::audio::{AudioEncoding, AudioFormat};
 use crate::server::web::wire::WebError;
 
@@ -18,10 +19,10 @@ pub(crate) struct SpeechQuery {
     pub language_code: Option<String>,
     pub auto_mode: bool,
     pub seed: Option<u64>,
-    pub apply_text_normalization: String,
+    pub apply_text_normalization: Option<String>,
 }
 
-pub(crate) fn parse_query(values: &HashMap<String, String>, transport: Transport) -> Result<SpeechQuery, WebError> {
+pub(crate) fn parse_query(values: &HashMap<String, String>, transport: Transport, defaults: &WebSettings) -> Result<SpeechQuery, WebError> {
     let allowed = match transport {
         Transport::Http => &["output_format", "enable_logging", "optimize_streaming_latency"][..],
         Transport::WebSocket => &[
@@ -54,8 +55,8 @@ pub(crate) fn parse_query(values: &HashMap<String, String>, transport: Transport
     if values.get("apply_text_normalization").is_some_and(|mode| !matches!(mode.as_str(), "auto" | "on" | "off")) {
         return Err(WebError::Validation("apply_text_normalization must be auto, on, or off".into()));
     }
-    let timeout = bounded_u64(values, "inactivity_timeout", 1, 180)?.unwrap_or(20);
-    let format = AudioFormat::from_str(values.get("output_format").map_or("mp3_44100_128", String::as_str))
+    let timeout = bounded_u64(values, "inactivity_timeout", 1, 180)?.unwrap_or(defaults.websocket_inactivity_timeout_seconds);
+    let format = AudioFormat::from_str(values.get("output_format").map_or(defaults.output_format.as_str(), String::as_str))
         .map_err(|error| WebError::Validation(error.to_string()))?;
     if transport == Transport::WebSocket
         && (format.encoding == AudioEncoding::WavPcm16
@@ -64,11 +65,11 @@ pub(crate) fn parse_query(values: &HashMap<String, String>, transport: Transport
     {
         return Err(WebError::Validation("unsupported output_format for WebSocket".into()));
     }
-    let sync_alignment = values.get("sync_alignment").is_some_and(|value| value.eq_ignore_ascii_case("true"));
+    let sync_alignment = values.get("sync_alignment").map_or(defaults.sync_alignment, |value| value.eq_ignore_ascii_case("true"));
     let language_code = optional_string(values, "language_code")?;
-    let auto_mode = values.get("auto_mode").is_some_and(|value| value.eq_ignore_ascii_case("true"));
+    let auto_mode = values.get("auto_mode").map_or(defaults.auto_mode, |value| value.eq_ignore_ascii_case("true"));
     let seed = bounded_u64(values, "seed", 0, u32::MAX as u64)?;
-    let apply_text_normalization = values.get("apply_text_normalization").cloned().unwrap_or_else(|| "auto".into());
+    let apply_text_normalization = values.get("apply_text_normalization").cloned();
     Ok(SpeechQuery {
         output_format: format,
         inactivity_timeout: Duration::from_secs(timeout),
@@ -81,15 +82,24 @@ pub(crate) fn parse_query(values: &HashMap<String, String>, transport: Transport
 }
 
 impl SpeechQuery {
-    pub(crate) fn stream_params(&self, speech: &super::Speech, alignment_type: crate::AlignmentType) -> crate::StreamParams {
-        let mut params = speech.stream_params(alignment_type);
-        params.timeout = if self.auto_mode { Duration::ZERO } else { Duration::from_millis(80) };
+    pub(crate) fn stream_params(
+        &self,
+        speech: &super::Speech,
+        defaults: crate::StreamParams,
+        alignment_type: crate::AlignmentType,
+    ) -> crate::StreamParams {
+        let mut params = speech.stream_params(defaults, alignment_type);
+        if self.auto_mode {
+            params.timeout = Duration::ZERO;
+        }
         let model = params.model.as_object_mut().expect("speech parameters are an object");
         if let (None, Some(seed)) = (speech.seed, self.seed) {
             model.insert("seed".into(), serde_json::json!(seed));
         }
-        if speech.apply_text_normalization.is_none() {
-            model.insert("apply_text_normalization".into(), serde_json::json!(self.apply_text_normalization));
+        if speech.apply_text_normalization.is_none()
+            && let Some(normalization) = &self.apply_text_normalization
+        {
+            model.insert("apply_text_normalization".into(), serde_json::json!(normalization));
         }
         if let Some(language) = &self.language_code {
             model.insert("language".into(), serde_json::json!(language));

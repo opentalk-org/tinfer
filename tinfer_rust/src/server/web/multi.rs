@@ -21,7 +21,7 @@ pub(super) async fn upgrade(
     Path(voice): Path<String>,
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<Response, WebError> {
-    let mut parsed = parse_query(&query, Transport::WebSocket)?;
+    let mut parsed = parse_query(&query, Transport::WebSocket, &app.settings)?;
     let model = resolve_model(&app.engine, query.get("model_id").cloned()).await?;
     if !app.engine.get_voice_ids(&model).await?.contains(&voice) {
         return Err(Error::Catalog(format!("unknown voice: {voice}")).into());
@@ -186,8 +186,11 @@ async fn create_context(
         return Err("text must end in a space".into());
     }
     let alignment = if query.sync_alignment { AlignmentType::Char } else { AlignmentType::None };
-    let stream =
-        app.engine.create_stream(model, voice, query.stream_params(&speech, alignment)).await.map_err(|error| error.to_string())?;
+    let stream = app
+        .engine
+        .create_stream(model, voice, query.stream_params(&speech, app.engine.stream_params(), alignment))
+        .await
+        .map_err(|error| error.to_string())?;
     pump(id.to_owned(), stream.clone(), output.clone());
     if !matches!(speech.text.as_str(), "" | " ") {
         stream.add_text(&speech.text).await.map_err(|error| error.to_string())?;

@@ -1,6 +1,7 @@
 use std::ops::Range;
 use std::time::Duration;
 
+use serde::Deserialize;
 use thiserror::Error;
 
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
@@ -18,7 +19,8 @@ pub enum Error {
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
 pub enum AlignmentType {
     #[default]
     Word,
@@ -75,17 +77,6 @@ pub struct StreamParams {
     pub timeout: Duration,
     pub alignment_type: AlignmentType,
     pub model: serde_json::Value,
-}
-
-impl Default for StreamParams {
-    fn default() -> Self {
-        Self {
-            chunk_length_schedule: vec![120, 160, 250, 290],
-            timeout: Duration::from_millis(80),
-            alignment_type: AlignmentType::Word,
-            model: serde_json::Value::Object(Default::default()),
-        }
-    }
 }
 
 #[derive(Clone, Debug)]

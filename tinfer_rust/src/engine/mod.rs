@@ -5,6 +5,7 @@ mod caller;
 mod chunker;
 #[cfg(test)]
 mod chunker_tests;
+mod coordinator;
 mod engine;
 mod registry;
 mod scheduler;

@@ -31,45 +31,25 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(language: &str, tie: bool, espeak_workers: usize) -> Self {
-        Self {
-            cfg: EngineConfig {
-                language: language.to_owned(),
-                tie,
-            },
-            phonemizer: None,
-            espeak_workers: espeak_workers.max(1),
-        }
+        Self { cfg: EngineConfig { language: language.to_owned(), tie }, phonemizer: None, espeak_workers: espeak_workers.max(1) }
     }
 
     fn ensure_phonemizer(&mut self) -> Result<(), AlignrustError> {
         if self.phonemizer.is_none() {
-            self.phonemizer = Some(phonemizer_pool::ForkedEspeakPool::new(
-                &self.cfg,
-                self.espeak_workers,
-            )?);
+            self.phonemizer = Some(phonemizer_pool::ForkedEspeakPool::new(&self.cfg, self.espeak_workers)?);
         }
         Ok(())
     }
 
     pub fn text_to_phonemes(&mut self, text: &str) -> Result<String, AlignrustError> {
         self.ensure_phonemizer()?;
-        self.phonemizer
-            .as_mut()
-            .ok_or_else(|| AlignrustError::Message("phonemizer missing".to_owned()))?
-            .text_to_phonemes(text)
+        self.phonemizer.as_mut().ok_or_else(|| AlignrustError::Message("phonemizer missing".to_owned()))?.text_to_phonemes(text)
     }
 
-    pub fn align(
-        &mut self,
-        text: &str,
-        punctuation: &str,
-        threads: usize,
-    ) -> Result<(Vec<String>, Vec<String>), AlignrustError> {
+    pub fn align(&mut self, text: &str, punctuation: &str, threads: usize) -> Result<(Vec<String>, Vec<String>), AlignrustError> {
         self.ensure_phonemizer()?;
         let (t, p) = align::align_text_with_threads(
-            self.phonemizer
-                .as_ref()
-                .ok_or_else(|| AlignrustError::Message("phonemizer missing".to_owned()))?,
+            self.phonemizer.as_ref().ok_or_else(|| AlignrustError::Message("phonemizer missing".to_owned()))?,
             text,
             punctuation,
             |a, b| split::split_by_punctuation_impl(a, b),
@@ -78,12 +58,7 @@ impl Engine {
         Ok((t, p))
     }
 
-    pub fn align_with_spans(
-        &mut self,
-        text: &str,
-        punctuation: &str,
-        threads: usize,
-    ) -> Result<Vec<align::AlignmentSpan>, AlignrustError> {
+    pub fn align_with_spans(&mut self, text: &str, punctuation: &str, threads: usize) -> Result<Vec<align::AlignmentSpan>, AlignrustError> {
         let (tokens, phonemes) = self.align(text, punctuation, threads)?;
         Ok(align::add_spans(text, &tokens, &phonemes))
     }
@@ -95,10 +70,7 @@ impl Engine {
         threads: usize,
     ) -> Result<Vec<(Vec<String>, Vec<String>)>, AlignrustError> {
         self.ensure_phonemizer()?;
-        let phonemizer = self
-            .phonemizer
-            .as_ref()
-            .ok_or_else(|| AlignrustError::Message("phonemizer missing".to_owned()))?;
+        let phonemizer = self.phonemizer.as_ref().ok_or_else(|| AlignrustError::Message("phonemizer missing".to_owned()))?;
 
         Ok(align::align_texts_batch_with_threads(
             phonemizer,
@@ -108,11 +80,40 @@ impl Engine {
             threads.max(1),
         ))
     }
+
+    pub fn align_batch_with_spans(
+        &mut self,
+        texts: &[String],
+        punctuation: &str,
+        threads: usize,
+    ) -> Result<Vec<Vec<AlignmentSpan>>, AlignrustError> {
+        let aligned = self.align_batch(texts, punctuation, threads)?;
+        Ok(texts.iter().zip(aligned).map(|(text, (tokens, phonemes))| align::add_spans(text, &tokens, &phonemes)).collect())
+    }
 }
 
-pub fn split_by_punctuation(
-    text: &str,
-    punctuation: &str,
-) -> Result<(Vec<String>, Vec<(i32, String)>), AlignrustError> {
+pub fn split_by_punctuation(text: &str, punctuation: &str) -> Result<(Vec<String>, Vec<(i32, String)>), AlignrustError> {
     Ok(split::split_by_punctuation_impl(text, punctuation))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Engine;
+
+    #[test]
+    fn batch_spans_match_individual_alignment() {
+        let texts = vec!["Ala ma kota.".to_owned(), "Kot ma Alę!".to_owned()];
+        let mut engine = Engine::new("pl", true, 2);
+        let expected = texts.iter().map(|text| engine.align_with_spans(text, ";:,.!?", 2).unwrap()).collect::<Vec<_>>();
+        let actual = engine.align_batch_with_spans(&texts, ";:,.!?", 2).unwrap();
+
+        for (expected_text, actual_text) in expected.iter().zip(actual) {
+            assert_eq!(expected_text.len(), actual_text.len());
+            for (expected_span, actual_span) in expected_text.iter().zip(actual_text) {
+                assert_eq!(expected_span.token, actual_span.token);
+                assert_eq!(expected_span.phonemes, actual_span.phonemes);
+                assert_eq!((expected_span.start, expected_span.end), (actual_span.start, actual_span.end));
+            }
+        }
+    }
 }

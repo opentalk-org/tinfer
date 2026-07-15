@@ -3,8 +3,6 @@ use serde_json::{Map, Value, json};
 use crate::StreamParams;
 use crate::server::web::wire::WebError;
 
-const DEFAULT_SCHEDULE: [usize; 4] = [120, 160, 250, 290];
-
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct VoiceSettings {
     speed: Option<f64>,
@@ -22,13 +20,13 @@ pub(crate) struct Speech {
     pub model_id: Option<String>,
     pub language_code: Option<String>,
     pub(crate) voice_settings: VoiceSettings,
-    pub(crate) chunk_length_schedule: Vec<usize>,
+    pub(crate) chunk_length_schedule: Option<Vec<usize>>,
     pub(crate) seed: Option<u64>,
     pub(crate) apply_text_normalization: Option<String>,
 }
 
 impl Speech {
-    pub(crate) fn stream_params(&self, alignment_type: crate::AlignmentType) -> StreamParams {
+    pub(crate) fn stream_params(&self, mut params: StreamParams, alignment_type: crate::AlignmentType) -> StreamParams {
         let mut model = Map::new();
         for (field, value) in [
             ("speed", self.voice_settings.speed),
@@ -50,12 +48,12 @@ impl Speech {
         if let Some(normalization) = &self.apply_text_normalization {
             model.insert("apply_text_normalization".into(), json!(normalization));
         }
-        StreamParams {
-            chunk_length_schedule: self.chunk_length_schedule.clone(),
-            alignment_type,
-            model: Value::Object(model),
-            ..StreamParams::default()
+        if let Some(schedule) = &self.chunk_length_schedule {
+            params.chunk_length_schedule.clone_from(schedule);
         }
+        params.alignment_type = alignment_type;
+        params.model = Value::Object(model);
+        params
     }
 }
 
@@ -116,9 +114,9 @@ fn parse_voice(object: &Map<String, Value>) -> Result<VoiceSettings, WebError> {
     })
 }
 
-fn parse_schedule(object: &Map<String, Value>) -> Result<Vec<usize>, WebError> {
+fn parse_schedule(object: &Map<String, Value>) -> Result<Option<Vec<usize>>, WebError> {
     reject_unknown(object, &["chunk_length_schedule"], "generation_config")?;
-    let Some(value) = object.get("chunk_length_schedule") else { return Ok(DEFAULT_SCHEDULE.to_vec()) };
+    let Some(value) = object.get("chunk_length_schedule") else { return Ok(None) };
     let array = value
         .as_array()
         .filter(|array| !array.is_empty())
@@ -132,7 +130,8 @@ fn parse_schedule(object: &Map<String, Value>) -> Result<Vec<usize>, WebError> {
             }
             Ok(value as usize)
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
 }
 
 fn validate_dictionaries(object: &Map<String, Value>) -> Result<(), WebError> {

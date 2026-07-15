@@ -1,22 +1,12 @@
-use std::path::Path;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use tinfer_rust::{AudioChunk, Backend, Config, Device, Engine, ModelConfig, StreamParams};
+use tinfer_rust::{AudioChunk, Engine, StreamParams};
+
+mod common;
 
 fn engine() -> Engine {
-    Engine::new(Config {
-        models: vec![ModelConfig {
-            id: "stub".into(),
-            model: "stub".into(),
-            path: Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/artifacts/stub"),
-            backend: Backend::Onnx,
-            device: Device::Cpu,
-            max_batch: 4,
-        }],
-        ..Config::default()
-    })
-    .unwrap()
+    Engine::new(common::config(vec![common::stub_model()])).unwrap()
 }
 
 #[test]
@@ -26,7 +16,7 @@ fn normal_engine_matches_tinfer_stream_flow() {
     assert_eq!(engine.get_model_ids().unwrap(), vec!["stub"]);
     assert_eq!(engine.get_voice_ids("stub").unwrap(), vec!["default"]);
 
-    let stream = engine.create_stream("stub", "default", StreamParams::default()).unwrap();
+    let stream = engine.create_stream("stub", "default", engine.stream_params()).unwrap();
     stream.add_text("hello ").unwrap();
     stream.force_generate().unwrap();
     let chunks = stream.collect_audio().unwrap();
@@ -44,7 +34,7 @@ fn normal_engine_matches_tinfer_stream_flow() {
 #[test]
 fn stream_can_generate_more_than_once() {
     let engine = engine();
-    let stream = engine.create_stream("stub", "default", StreamParams::default()).unwrap();
+    let stream = engine.create_stream("stub", "default", engine.stream_params()).unwrap();
 
     stream.add_text("first ").unwrap();
     stream.force_generate().unwrap();
@@ -62,7 +52,7 @@ fn stream_can_generate_more_than_once() {
 fn model_continuations_yield_audio_without_blocking_the_stream() {
     let engine = engine();
     let stream = engine
-        .create_stream("stub", "default", StreamParams { model: serde_json::json!({"characters_per_call": 2}), ..StreamParams::default() })
+        .create_stream("stub", "default", StreamParams { model: serde_json::json!({"characters_per_call": 2}), ..engine.stream_params() })
         .unwrap();
 
     stream.add_text("first").unwrap();
@@ -86,7 +76,7 @@ fn model_continuations_yield_audio_without_blocking_the_stream() {
 #[test]
 fn a_new_stream_joins_between_acoustic_continuations() {
     let engine = engine();
-    let params = StreamParams { model: serde_json::json!({"characters_per_call": 1}), ..StreamParams::default() };
+    let params = StreamParams { model: serde_json::json!({"characters_per_call": 1}), ..engine.stream_params() };
     let long = engine.create_stream("stub", "default", params.clone()).unwrap();
     long.add_text("abcdefghijkl").unwrap();
     long.force_generate().unwrap();
@@ -120,7 +110,7 @@ fn a_new_stream_joins_between_acoustic_continuations() {
 #[test]
 fn cancellation_is_delivered_to_the_stream() {
     let engine = engine();
-    let stream = engine.create_stream("stub", "default", StreamParams::default()).unwrap();
+    let stream = engine.create_stream("stub", "default", engine.stream_params()).unwrap();
     stream.add_text("cancel me").unwrap();
     stream.cancel().unwrap();
     assert!(stream.recv().is_err());
@@ -130,7 +120,7 @@ fn cancellation_is_delivered_to_the_stream() {
 #[test]
 fn full_generation_merges_chunks() {
     let engine = engine();
-    let chunk: AudioChunk = engine.generate_full("stub", "default", "hello", StreamParams::default()).unwrap();
+    let chunk: AudioChunk = engine.generate_full("stub", "default", "hello", engine.stream_params()).unwrap();
     assert!(!chunk.audio.is_empty());
     assert_eq!(chunk.text_span, 0..5);
     engine.stop().unwrap();
@@ -138,9 +128,10 @@ fn full_generation_merges_chunks() {
 
 #[test]
 fn pending_text_runs_when_its_generation_window_expires() {
-    let engine = engine();
-    let stream =
-        engine.create_stream("stub", "default", StreamParams { timeout: Duration::from_millis(5), ..StreamParams::default() }).unwrap();
+    let mut config = common::config(vec![common::stub_model()]);
+    config.defaults.inactivity_timeout_ms = 5;
+    let engine = Engine::new(config).unwrap();
+    let stream = engine.create_stream("stub", "default", engine.stream_params()).unwrap();
     stream.add_text("short").unwrap();
     assert!(!stream.collect_audio().unwrap()[0].audio.is_empty());
     engine.stop().unwrap();
@@ -148,9 +139,10 @@ fn pending_text_runs_when_its_generation_window_expires() {
 
 #[test]
 fn forced_long_text_uses_language_sentence_boundaries() {
-    let engine = engine();
-    let stream =
-        engine.create_stream("stub", "default", StreamParams { chunk_length_schedule: vec![18], ..StreamParams::default() }).unwrap();
+    let mut config = common::config(vec![common::stub_model()]);
+    config.defaults.chunk_length_schedule = vec![18];
+    let engine = Engine::new(config).unwrap();
+    let stream = engine.create_stream("stub", "default", engine.stream_params()).unwrap();
     stream.add_text("Dr. Smith went home. Another sentence follows.").unwrap();
     stream.force_generate().unwrap();
     let chunks = stream.collect_audio().unwrap();
@@ -161,9 +153,27 @@ fn forced_long_text_uses_language_sentence_boundaries() {
 }
 
 #[test]
+fn model_settings_are_merged_before_request_overrides() {
+    let mut model = common::stub_model();
+    model.settings = serde_json::json!({"characters_per_call": 2});
+    let engine = Engine::new(common::config(vec![model])).unwrap();
+    let stream = engine.create_stream("stub", "default", engine.stream_params()).unwrap();
+    stream.add_text("first").unwrap();
+    stream.force_generate().unwrap();
+    assert_eq!(stream.collect_audio().unwrap().len(), 3);
+
+    let params = StreamParams { model: serde_json::json!({"characters_per_call": 5}), ..engine.stream_params() };
+    let overridden = engine.create_stream("stub", "default", params).unwrap();
+    overridden.add_text("first").unwrap();
+    overridden.force_generate().unwrap();
+    assert_eq!(overridden.collect_audio().unwrap().len(), 1);
+    engine.stop().unwrap();
+}
+
+#[test]
 fn stream_control_and_state_are_owned_by_rust() {
     let engine = engine();
-    let stream = engine.create_stream("stub", "default", StreamParams::default()).unwrap();
+    let stream = engine.create_stream("stub", "default", engine.stream_params()).unwrap();
     assert!(stream.get_audio().unwrap().is_empty());
     assert_eq!(stream.get_state().unwrap(), serde_json::json!({}));
     stream.add_text("state").unwrap();
@@ -179,7 +189,7 @@ fn stream_control_and_state_are_owned_by_rust() {
 #[test]
 fn unloading_fails_queued_streams_instead_of_leaving_them_waiting() {
     let engine = engine();
-    let stream = engine.create_stream("stub", "default", StreamParams::default()).unwrap();
+    let stream = engine.create_stream("stub", "default", engine.stream_params()).unwrap();
     stream.add_text("queued").unwrap();
 
     engine.unload_model("stub").unwrap();

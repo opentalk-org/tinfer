@@ -1,24 +1,17 @@
-use std::path::Path;
-use tinfer_rust::{Backend, Config, Device, Engine, ModelConfig, StreamParams};
+use tinfer_rust::{Config, Engine};
+
+mod common;
 
 fn config() -> Config {
-    Config {
-        models: vec![ModelConfig {
-            id: "voice-a".into(),
-            model: "stub".into(),
-            path: Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/artifacts/stub"),
-            backend: Backend::Onnx,
-            device: Device::Cpu,
-            max_batch: 4,
-        }],
-        ..Config::default()
-    }
+    let mut model = common::stub_model();
+    model.id = "voice-a".into();
+    common::config(vec![model])
 }
 
 #[test]
 fn configured_stub_loads_and_calls_native_generate_batch() {
     let engine = Engine::new(config()).unwrap();
-    let chunk = engine.generate_full("voice-a", "default", "abc", StreamParams::default()).unwrap();
+    let chunk = engine.generate_full("voice-a", "default", "abc", engine.stream_params()).unwrap();
     assert_eq!(chunk.sample_rate, 24_000);
     assert_eq!(chunk.audio.len(), 123);
     assert!(chunk.audio.iter().any(|sample| *sample != 0.0));

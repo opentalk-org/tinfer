@@ -1,20 +1,17 @@
-use std::collections::{HashMap, VecDeque};
-use std::time::{Duration, Instant};
-
-use crossbeam_channel::Sender;
-
 use super::caller::{Call, Dispatch};
 use super::chunker::{Chunker, PreparedChunk};
 use super::engine::Delivery;
 use super::registry::{EntryId, Registry};
 use crate::{Error, ModelOperation, ModelOutput, ModelRequest, Result, StreamParams};
-
+use crossbeam_channel::Sender;
+use rayon::prelude::*;
+use std::collections::{HashMap, VecDeque};
+use std::time::{Duration, Instant};
 pub(crate) struct ActiveChunk {
     pub entry: EntryId,
     pub text: String,
     pub span: std::ops::Range<usize>,
 }
-
 pub(crate) struct Request {
     pub id: u64,
     pub model: String,
@@ -166,8 +163,10 @@ pub(crate) fn dispatch(registry: &mut Registry, requests: &mut [Request], work: 
     let now = Instant::now();
     let mut ready: HashMap<String, Vec<usize>> = HashMap::new();
     let mut model_order = Vec::new();
-    for (index, request) in requests.iter_mut().enumerate() {
-        match request.prepare(now, batch_wait) {
+    let prepared = requests.par_iter_mut().map(|request| request.prepare(now, batch_wait)).collect::<Vec<_>>();
+    for (index, result) in prepared.into_iter().enumerate() {
+        let request = &requests[index];
+        match result {
             Ok(true) => {
                 if !ready.contains_key(&request.model) {
                     model_order.push(request.model.clone());

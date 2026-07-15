@@ -16,7 +16,7 @@ mod text;
 mod tests;
 
 use manifest::Manifest;
-use preprocessing::{bytes, parameters, prepare};
+use preprocessing::{bytes, parameters, prepare, validate_settings};
 
 struct StyleTts2 {
     info: ModelInfo,
@@ -32,6 +32,7 @@ pub fn load(config: &ModelConfig) -> Result<Arc<dyn Model>> {
     if config.backend == Backend::Tensorrt && config.device == Device::Cpu {
         return Err(Error::Validation("StyleTTS2 TensorRT requires a CUDA device".into()));
     }
+    validate_settings(&config.settings)?;
     let manifest = Manifest::load(&config.path)?;
     let device = match config.device {
         Device::Cpu => -1,

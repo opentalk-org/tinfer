@@ -1,0 +1,440 @@
+{
+  "input_characters": 300,
+  "text": "To jest dok\u0142adny test pe\u0142nego potoku syntezy mowy przez serwer gRPC. Mierzymy op\u00f3\u017anienie i przepustowo\u015b\u0107 pod r\u00f3wnoczesnym obci\u0105\u017ceniem. To jest dok\u0142adny test pe\u0142nego potoku syntezy mowy przez serwer gRPC. Mierzymy op\u00f3\u017anienie i przepustowo\u015b\u0107 pod r\u00f3wnoczesnym obci\u0105\u017ceniem. To jest dok\u0142adny test pe\u0142nego.",
+  "warmup_runs_per_point": 1,
+  "measured_runs_per_point": 3,
+  "results": [
+    {
+      "batch_size": 1,
+      "ttfb_mean_ms": 27.41473769613852,
+      "ttfb_p95_ms": 27.54211297724396,
+      "request_rtf_mean": 0.004334175122712187,
+      "batch_wall_rtf_mean": 0.004336202236453811,
+      "throughput_rtf_mean": 0.004336202236453811,
+      "audio_seconds_mean": 20.875
+    },
+    {
+      "batch_size": 2,
+      "ttfb_mean_ms": 30.906218336895108,
+      "ttfb_p95_ms": 31.836670008488,
+      "request_rtf_mean": 0.004775680809608976,
+      "batch_wall_rtf_mean": 0.005377551678293004,
+      "throughput_rtf_mean": 0.0027180724281928924,
+      "audio_seconds_mean": 20.650000000000002
+    },
+    {
+      "batch_size": 3,
+      "ttfb_mean_ms": 32.31963732590278,
+      "ttfb_p95_ms": 34.002223052084446,
+      "request_rtf_mean": 0.0061092597788998575,
+      "batch_wall_rtf_mean": 0.0066498716783797195,
+      "throughput_rtf_mean": 0.0022645362363160958,
+      "audio_seconds_mean": 20.433333333333334
+    },
+    {
+      "batch_size": 4,
+      "ttfb_mean_ms": 35.745493485592306,
+      "ttfb_p95_ms": 36.77450597751886,
+      "request_rtf_mean": 0.005911536588707818,
+      "batch_wall_rtf_mean": 0.006569556023799136,
+      "throughput_rtf_mean": 0.0016852778125567675,
+      "audio_seconds_mean": 20.34375
+    },
+    {
+      "batch_size": 5,
+      "ttfb_mean_ms": 37.381866139670215,
+      "ttfb_p95_ms": 39.72696897108108,
+      "request_rtf_mean": 0.006601409728388434,
+      "batch_wall_rtf_mean": 0.007820827624353464,
+      "throughput_rtf_mean": 0.0016164334322611735,
+      "audio_seconds_mean": 20.2
+    },
+    {
+      "batch_size": 6,
+      "ttfb_mean_ms": 40.61455193570711,
+      "ttfb_p95_ms": 43.146485928446054,
+      "request_rtf_mean": 0.007868828079821859,
+      "batch_wall_rtf_mean": 0.00836666393653302,
+      "throughput_rtf_mean": 0.0014413378145254941,
+      "audio_seconds_mean": 20.195833333333333
+    },
+    {
+      "batch_size": 7,
+      "ttfb_mean_ms": 42.86586452231166,
+      "ttfb_p95_ms": 45.786772039718926,
+      "request_rtf_mean": 0.0076668717149561486,
+      "batch_wall_rtf_mean": 0.007892271840271954,
+      "throughput_rtf_mean": 0.0011641135818101186,
+      "audio_seconds_mean": 20.21785714285714
+    },
+    {
+      "batch_size": 8,
+      "ttfb_mean_ms": 45.046635374698475,
+      "ttfb_p95_ms": 45.8809050032869,
+      "request_rtf_mean": 0.009206035718548113,
+      "batch_wall_rtf_mean": 0.009662158562320316,
+      "throughput_rtf_mean": 0.0012450466665952875,
+      "audio_seconds_mean": 20.25
+    },
+    {
+      "batch_size": 9,
+      "ttfb_mean_ms": 52.50700813269726,
+      "ttfb_p95_ms": 52.927421987988055,
+      "request_rtf_mean": 0.009095323656960324,
+      "batch_wall_rtf_mean": 0.009288308996997193,
+      "throughput_rtf_mean": 0.0010605412296585063,
+      "audio_seconds_mean": 20.31388888888889
+    },
+    {
+      "batch_size": 10,
+      "ttfb_mean_ms": 60.427939041983336,
+      "ttfb_p95_ms": 72.09213403984904,
+      "request_rtf_mean": 0.010257670598829005,
+      "batch_wall_rtf_mean": 0.011176169643591263,
+      "throughput_rtf_mean": 0.0011470134774334694,
+      "audio_seconds_mean": 20.34
+    },
+    {
+      "batch_size": 11,
+      "ttfb_mean_ms": 60.292803682386875,
+      "ttfb_p95_ms": 61.7286569904536,
+      "request_rtf_mean": 0.0107573579784498,
+      "batch_wall_rtf_mean": 0.01049661751791924,
+      "throughput_rtf_mean": 0.0009792933661969348,
+      "audio_seconds_mean": 20.34090909090909
+    },
+    {
+      "batch_size": 12,
+      "ttfb_mean_ms": 61.78448894449199,
+      "ttfb_p95_ms": 64.53087693080306,
+      "request_rtf_mean": 0.01165269472179807,
+      "batch_wall_rtf_mean": 0.012456268613076138,
+      "throughput_rtf_mean": 0.0010644749045050227,
+      "audio_seconds_mean": 20.356250000000003
+    },
+    {
+      "batch_size": 13,
+      "ttfb_mean_ms": 66.11200154293329,
+      "ttfb_p95_ms": 66.81809609290212,
+      "request_rtf_mean": 0.012625118293485572,
+      "batch_wall_rtf_mean": 0.012865285047082725,
+      "throughput_rtf_mean": 0.0010147849059431396,
+      "audio_seconds_mean": 20.357692307692307
+    },
+    {
+      "batch_size": 14,
+      "ttfb_mean_ms": 70.70552268885963,
+      "ttfb_p95_ms": 73.23646906297654,
+      "request_rtf_mean": 0.013289542750774106,
+      "batch_wall_rtf_mean": 0.013568316662531651,
+      "throughput_rtf_mean": 0.0009932968975288382,
+      "audio_seconds_mean": 20.367857142857144
+    },
+    {
+      "batch_size": 15,
+      "ttfb_mean_ms": 73.99583047307614,
+      "ttfb_p95_ms": 75.75976802036166,
+      "request_rtf_mean": 0.014132538032084356,
+      "batch_wall_rtf_mean": 0.013980860405503039,
+      "throughput_rtf_mean": 0.0009555552458537314,
+      "audio_seconds_mean": 20.361666666666665
+    },
+    {
+      "batch_size": 16,
+      "ttfb_mean_ms": 75.3646573551426,
+      "ttfb_p95_ms": 77.84669706597924,
+      "request_rtf_mean": 0.015096701008472416,
+      "batch_wall_rtf_mean": 0.016442910069135015,
+      "throughput_rtf_mean": 0.001054113620554913,
+      "audio_seconds_mean": 20.3515625
+    },
+    {
+      "batch_size": 17,
+      "ttfb_mean_ms": 81.69519373982706,
+      "ttfb_p95_ms": 125.80913491547108,
+      "request_rtf_mean": 0.0162263504682491,
+      "batch_wall_rtf_mean": 0.0176943320717789,
+      "throughput_rtf_mean": 0.0010660774428122796,
+      "audio_seconds_mean": 20.380882352941175
+    },
+    {
+      "batch_size": 18,
+      "ttfb_mean_ms": 84.1089508655757,
+      "ttfb_p95_ms": 127.23552295938134,
+      "request_rtf_mean": 0.01776119029568225,
+      "batch_wall_rtf_mean": 0.021344678179024457,
+      "throughput_rtf_mean": 0.0012146668220190434,
+      "audio_seconds_mean": 20.379166666666666
+    },
+    {
+      "batch_size": 19,
+      "ttfb_mean_ms": 89.49624648799696,
+      "ttfb_p95_ms": 137.47737102676183,
+      "request_rtf_mean": 0.017077983621648685,
+      "batch_wall_rtf_mean": 0.020160823439558346,
+      "throughput_rtf_mean": 0.0010886114570635812,
+      "audio_seconds_mean": 20.347368421052632
+    },
+    {
+      "batch_size": 20,
+      "ttfb_mean_ms": 91.26389044298169,
+      "ttfb_p95_ms": 134.15539101697505,
+      "request_rtf_mean": 0.017679625481369268,
+      "batch_wall_rtf_mean": 0.020147934769784024,
+      "throughput_rtf_mean": 0.0010342119341470253,
+      "audio_seconds_mean": 20.333750000000002
+    },
+    {
+      "batch_size": 21,
+      "ttfb_mean_ms": 94.88198997652424,
+      "ttfb_p95_ms": 135.37182298023254,
+      "request_rtf_mean": 0.018280800822742038,
+      "batch_wall_rtf_mean": 0.02158438931674717,
+      "throughput_rtf_mean": 0.0010562600409941914,
+      "audio_seconds_mean": 20.313095238095237
+    },
+    {
+      "batch_size": 22,
+      "ttfb_mean_ms": 93.62062084961288,
+      "ttfb_p95_ms": 134.063262026757,
+      "request_rtf_mean": 0.018797286940528887,
+      "batch_wall_rtf_mean": 0.02104508609858578,
+      "throughput_rtf_mean": 0.000982480537421398,
+      "audio_seconds_mean": 20.325
+    },
+    {
+      "batch_size": 23,
+      "ttfb_mean_ms": 98.0585950470624,
+      "ttfb_p95_ms": 137.55629502702504,
+      "request_rtf_mean": 0.020006145492078582,
+      "batch_wall_rtf_mean": 0.022900078339714136,
+      "throughput_rtf_mean": 0.0010230359752641004,
+      "audio_seconds_mean": 20.316304347826087
+    },
+    {
+      "batch_size": 24,
+      "ttfb_mean_ms": 101.15003268098614,
+      "ttfb_p95_ms": 141.81826391723007,
+      "request_rtf_mean": 0.020939334937719486,
+      "batch_wall_rtf_mean": 0.02308117018867574,
+      "throughput_rtf_mean": 0.0009883475439766277,
+      "audio_seconds_mean": 20.3125
+    },
+    {
+      "batch_size": 25,
+      "ttfb_mean_ms": 101.64617568875353,
+      "ttfb_p95_ms": 140.7222410198301,
+      "request_rtf_mean": 0.021699070611685207,
+      "batch_wall_rtf_mean": 0.025753867258494368,
+      "throughput_rtf_mean": 0.001057822773419391,
+      "audio_seconds_mean": 20.329
+    },
+    {
+      "batch_size": 26,
+      "ttfb_mean_ms": 105.12551130840363,
+      "ttfb_p95_ms": 144.64916405268013,
+      "request_rtf_mean": 0.022030633169035505,
+      "batch_wall_rtf_mean": 0.026893998066822213,
+      "throughput_rtf_mean": 0.0010614212027128865,
+      "audio_seconds_mean": 20.34326923076923
+    },
+    {
+      "batch_size": 27,
+      "ttfb_mean_ms": 112.19846071491455,
+      "ttfb_p95_ms": 149.16224300395697,
+      "request_rtf_mean": 0.023894458134630085,
+      "batch_wall_rtf_mean": 0.028660567888168398,
+      "throughput_rtf_mean": 0.0010894329761287668,
+      "audio_seconds_mean": 20.339814814814815
+    },
+    {
+      "batch_size": 28,
+      "ttfb_mean_ms": 107.42319179033595,
+      "ttfb_p95_ms": 145.4694130225107,
+      "request_rtf_mean": 0.023473016130319335,
+      "batch_wall_rtf_mean": 0.028672263520712147,
+      "throughput_rtf_mean": 0.0010509806865581495,
+      "audio_seconds_mean": 20.339285714285715
+    },
+    {
+      "batch_size": 29,
+      "ttfb_mean_ms": 113.3335096394943,
+      "ttfb_p95_ms": 150.62459802720696,
+      "request_rtf_mean": 0.025299677451145062,
+      "batch_wall_rtf_mean": 0.02975988656304732,
+      "throughput_rtf_mean": 0.0010523208808395235,
+      "audio_seconds_mean": 20.356896551724137
+    },
+    {
+      "batch_size": 30,
+      "ttfb_mean_ms": 113.29073969714551,
+      "ttfb_p95_ms": 148.63748394418508,
+      "request_rtf_mean": 0.02544148542857639,
+      "batch_wall_rtf_mean": 0.03016863533754846,
+      "throughput_rtf_mean": 0.0010311424685572233,
+      "audio_seconds_mean": 20.358333333333334
+    },
+    {
+      "batch_size": 31,
+      "ttfb_mean_ms": 112.20254444877708,
+      "ttfb_p95_ms": 148.14110298175365,
+      "request_rtf_mean": 0.02676768479913355,
+      "batch_wall_rtf_mean": 0.03117314428500013,
+      "throughput_rtf_mean": 0.0010316096812767563,
+      "audio_seconds_mean": 20.348387096774193
+    },
+    {
+      "batch_size": 32,
+      "ttfb_mean_ms": 119.26105576033781,
+      "ttfb_p95_ms": 153.95233791787177,
+      "request_rtf_mean": 0.02494509814658219,
+      "batch_wall_rtf_mean": 0.03037649036353517,
+      "throughput_rtf_mean": 0.0009736802093493999,
+      "audio_seconds_mean": 20.3515625
+    },
+    {
+      "batch_size": 33,
+      "ttfb_mean_ms": 116.01156103683428,
+      "ttfb_p95_ms": 152.2340530063957,
+      "request_rtf_mean": 0.026327751296260193,
+      "batch_wall_rtf_mean": 0.03203870626556838,
+      "throughput_rtf_mean": 0.000995361079426632,
+      "audio_seconds_mean": 20.361363636363638
+    },
+    {
+      "batch_size": 34,
+      "ttfb_mean_ms": 119.20470301879058,
+      "ttfb_p95_ms": 185.31723995693028,
+      "request_rtf_mean": 0.026815277657129613,
+      "batch_wall_rtf_mean": 0.03322657933663168,
+      "throughput_rtf_mean": 0.0010017762681382,
+      "audio_seconds_mean": 20.363970588235293
+    },
+    {
+      "batch_size": 35,
+      "ttfb_mean_ms": 122.17751962709285,
+      "ttfb_p95_ms": 198.85708205401897,
+      "request_rtf_mean": 0.027363862003178297,
+      "batch_wall_rtf_mean": 0.033423070593210986,
+      "throughput_rtf_mean": 0.000979546661939952,
+      "audio_seconds_mean": 20.350714285714282
+    },
+    {
+      "batch_size": 36,
+      "ttfb_mean_ms": 133.75234275655305,
+      "ttfb_p95_ms": 210.6763549381867,
+      "request_rtf_mean": 0.028913421424047195,
+      "batch_wall_rtf_mean": 0.036765585949053305,
+      "throughput_rtf_mean": 0.0010481141777896727,
+      "audio_seconds_mean": 20.34027777777778
+    },
+    {
+      "batch_size": 37,
+      "ttfb_mean_ms": 127.54465953178435,
+      "ttfb_p95_ms": 205.30114392749965,
+      "request_rtf_mean": 0.028276863050395395,
+      "batch_wall_rtf_mean": 0.03759577350984671,
+      "throughput_rtf_mean": 0.0010434939130674783,
+      "audio_seconds_mean": 20.32702702702703
+    },
+    {
+      "batch_size": 38,
+      "ttfb_mean_ms": 134.88486359659746,
+      "ttfb_p95_ms": 210.5284690624103,
+      "request_rtf_mean": 0.02893560744608504,
+      "batch_wall_rtf_mean": 0.03849302605909859,
+      "throughput_rtf_mean": 0.0010400827349884257,
+      "audio_seconds_mean": 20.330921052631577
+    },
+    {
+      "batch_size": 39,
+      "ttfb_mean_ms": 133.99304466672305,
+      "ttfb_p95_ms": 212.06181508023292,
+      "request_rtf_mean": 0.029809692401725034,
+      "batch_wall_rtf_mean": 0.03833565943151296,
+      "throughput_rtf_mean": 0.001009724169620633,
+      "audio_seconds_mean": 20.32179487179487
+    },
+    {
+      "batch_size": 40,
+      "ttfb_mean_ms": 141.42559866886586,
+      "ttfb_p95_ms": 214.96824698988348,
+      "request_rtf_mean": 0.03015991643916409,
+      "batch_wall_rtf_mean": 0.03901173676849304,
+      "throughput_rtf_mean": 0.001002116538537245,
+      "audio_seconds_mean": 20.31625
+    },
+    {
+      "batch_size": 41,
+      "ttfb_mean_ms": 140.242524428967,
+      "ttfb_p95_ms": 226.71525401528925,
+      "request_rtf_mean": 0.031811911681755595,
+      "batch_wall_rtf_mean": 0.040292242712930526,
+      "throughput_rtf_mean": 0.001008846522093526,
+      "audio_seconds_mean": 20.334756097560977
+    },
+    {
+      "batch_size": 42,
+      "ttfb_mean_ms": 143.08148456297607,
+      "ttfb_p95_ms": 219.27877597045153,
+      "request_rtf_mean": 0.03220851811218385,
+      "batch_wall_rtf_mean": 0.04062281224779978,
+      "throughput_rtf_mean": 0.0009921043646362333,
+      "audio_seconds_mean": 20.351190476190474
+    },
+    {
+      "batch_size": 43,
+      "ttfb_mean_ms": 138.8805434486807,
+      "ttfb_p95_ms": 212.3608220135793,
+      "request_rtf_mean": 0.03270308693016339,
+      "batch_wall_rtf_mean": 0.04162413878236226,
+      "throughput_rtf_mean": 0.0009933168300449411,
+      "audio_seconds_mean": 20.343023255813954
+    },
+    {
+      "batch_size": 44,
+      "ttfb_mean_ms": 148.11907350226784,
+      "ttfb_p95_ms": 230.32444703858346,
+      "request_rtf_mean": 0.03447050835085424,
+      "batch_wall_rtf_mean": 0.04265821103318901,
+      "throughput_rtf_mean": 0.0009949610673942132,
+      "audio_seconds_mean": 20.34090909090909
+    },
+    {
+      "batch_size": 45,
+      "ttfb_mean_ms": 143.49252255633473,
+      "ttfb_p95_ms": 216.59465110860765,
+      "request_rtf_mean": 0.03443905580410629,
+      "batch_wall_rtf_mean": 0.042691101123041614,
+      "throughput_rtf_mean": 0.0009730597105896095,
+      "audio_seconds_mean": 20.352222222222224
+    },
+    {
+      "batch_size": 46,
+      "ttfb_mean_ms": 145.5412930530577,
+      "ttfb_p95_ms": 217.485285946168,
+      "request_rtf_mean": 0.035302806541547584,
+      "batch_wall_rtf_mean": 0.045817586204814104,
+      "throughput_rtf_mean": 0.0010214033661100966,
+      "audio_seconds_mean": 20.356521739130432
+    },
+    {
+      "batch_size": 47,
+      "ttfb_mean_ms": 151.9073415258635,
+      "ttfb_p95_ms": 224.14849000051618,
+      "request_rtf_mean": 0.03588448979021603,
+      "batch_wall_rtf_mean": 0.045537372820540344,
+      "throughput_rtf_mean": 0.0009944998248980273,
+      "audio_seconds_mean": 20.33723404255319
+    },
+    {
+      "batch_size": 48,
+      "ttfb_mean_ms": 154.90467889402578,
+      "ttfb_p95_ms": 251.96120399050415,
+      "request_rtf_mean": 0.03520569977808111,
+      "batch_wall_rtf_mean": 0.04548991161645827,
+      "throughput_rtf_mean": 0.000972081284702307,
+      "audio_seconds_mean": 20.3515625
+    }
+  ]
+}

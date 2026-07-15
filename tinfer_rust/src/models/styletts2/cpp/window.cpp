@@ -53,16 +53,6 @@ void expand_window_at(const native::StyleTts2Session& session,
   }
 }
 
-void copy_prosody(const native::StyleTts2Session& session,
-                  std::int32_t frame_start, float* f0, float* noise) {
-  for (std::int32_t index = 0; index < native::kWindowFrames * 2; ++index) {
-    const auto source = frame_start * 2 + index;
-    if (source < 0 || source >= session.prosody_cursor * 2) continue;
-    f0[index] = session.f0[source];
-    noise[index] = session.noise[source];
-  }
-}
-
 native::StyleTts2Tail retain_tail(const native::StyleTts2Session& session) {
   native::StyleTts2Tail tail;
   tail.channels = session.channels;

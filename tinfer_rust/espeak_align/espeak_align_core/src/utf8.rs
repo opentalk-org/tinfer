@@ -28,11 +28,7 @@ pub fn utf8_next(bytes: &[u8], i: usize) -> (u32, usize) {
     let cp = match len {
         1 => c as u32,
         2 => (((c & 0x1F) as u32) << 6) | ((bytes[i + 1] & 0x3F) as u32),
-        3 => {
-            (((c & 0x0F) as u32) << 12)
-                | (((bytes[i + 1] & 0x3F) as u32) << 6)
-                | ((bytes[i + 2] & 0x3F) as u32)
-        }
+        3 => (((c & 0x0F) as u32) << 12) | (((bytes[i + 1] & 0x3F) as u32) << 6) | ((bytes[i + 2] & 0x3F) as u32),
         _ => {
             // 4 bytes
             (((c & 0x07) as u32) << 18)

@@ -39,10 +39,21 @@ impl AsyncEngine {
         self.call(move |engine| engine.get_voice_ids(&model)).await
     }
 
+    pub fn stream_params(&self) -> StreamParams {
+        self.engine.stream_params()
+    }
+
     pub async fn create_stream(&self, model: &str, voice: &str, params: StreamParams) -> Result<AsyncStream> {
         let model = model.to_owned();
         let voice = voice.to_owned();
         self.call(move |engine| engine.create_stream(&model, &voice, params)).await.map(|stream| AsyncStream { stream: Arc::new(stream) })
+    }
+
+    pub async fn start_stream(&self, model: &str, voice: &str, text: &str, params: StreamParams) -> Result<AsyncStream> {
+        let (model, voice, text) = (model.to_owned(), voice.to_owned(), text.to_owned());
+        self.call(move |engine| engine.start_stream(&model, &voice, &text, params))
+            .await
+            .map(|stream| AsyncStream { stream: Arc::new(stream) })
     }
 
     pub async fn generate_full(&self, model: &str, voice: &str, text: &str, params: StreamParams) -> Result<AudioChunk> {

@@ -12,6 +12,7 @@ pub(crate) struct Loaded {
     pub model: Arc<dyn Model>,
     pub busy: bool,
     pub max_batch: usize,
+    pub settings: serde_json::Map<String, serde_json::Value>,
 }
 
 pub(crate) struct Registry {
@@ -26,10 +27,10 @@ impl Default for Registry {
 }
 
 impl Registry {
-    pub fn add(&mut self, model: Arc<dyn Model>, max_batch: usize) {
+    pub fn add(&mut self, model: Arc<dyn Model>, max_batch: usize, settings: serde_json::Map<String, serde_json::Value>) {
         let id = EntryId(self.next_id);
         self.next_id += 1;
-        self.entries.push(Loaded { id, model, busy: false, max_batch });
+        self.entries.push(Loaded { id, model, busy: false, max_batch, settings });
     }
 
     pub fn unload(&mut self, model: &str) -> Result<()> {
@@ -64,6 +65,14 @@ impl Registry {
 
     pub fn batch_capacity(&self, model: &str) -> Option<usize> {
         self.entries.iter().find(|entry| entry.model.info().model_id == model).map(|entry| entry.max_batch)
+    }
+
+    pub fn settings(&self, model: &str) -> Result<serde_json::Map<String, serde_json::Value>> {
+        self.entries
+            .iter()
+            .find(|entry| entry.model.info().model_id == model)
+            .map(|entry| entry.settings.clone())
+            .ok_or_else(|| Error::Catalog(format!("model not found: {model}")))
     }
 
     pub fn close_stream(&self, model: &str, stream_id: u64) -> Result<()> {

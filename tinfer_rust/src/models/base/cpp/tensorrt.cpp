@@ -133,12 +133,11 @@ Tensors TrtExecution::run(const Tensors& inputs, void* stream) {
     if (!capacity_shape.empty()) capacity_shape[0] = max_batch_;
     const auto output_dtype = dtype(program_->engine_->getTensorDataType(name));
     auto cached = outputs_.find(name);
-    if (cached == outputs_.end()) {
-      cached = outputs_.emplace(name, allocate(output_dtype, std::move(capacity_shape), program_->device_)).first;
-    }
     std::size_t bytes = element_size(output_dtype);
     for (const auto dimension : shape) bytes *= static_cast<std::size_t>(dimension);
-    if (cached->second.bytes < bytes) throw std::runtime_error("TensorRT output exceeds its profile capacity");
+    if (cached == outputs_.end() || cached->second.bytes < bytes) {
+      cached = outputs_.insert_or_assign(name, allocate(output_dtype, std::move(capacity_shape), program_->device_)).first;
+    }
     auto output = Buffer{output_dtype, std::move(shape), cached->second.memory, bytes};
     if (!context_->setTensorAddress(name, output.data())) throw std::runtime_error("cannot bind TensorRT output: " + std::string(name));
     outputs.emplace(name, std::move(output));

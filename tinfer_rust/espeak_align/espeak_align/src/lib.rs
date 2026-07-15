@@ -12,38 +12,20 @@ impl Engine {
     #[new]
     #[pyo3(signature = (language="pl".to_owned(), tie=true, espeak_workers=4))]
     fn new(language: String, tie: bool, espeak_workers: usize) -> Self {
-        Self {
-            inner: espeak_align_core::Engine::new(&language, tie, espeak_workers),
-        }
+        Self { inner: espeak_align_core::Engine::new(&language, tie, espeak_workers) }
     }
 
     fn text_to_phonemes(&mut self, _py: Python<'_>, text: &str) -> PyResult<String> {
-        self.inner
-            .text_to_phonemes(text)
-            .map_err(|e| pyo3::exceptions::PyNotImplementedError::new_err(e.to_string()))
+        self.inner.text_to_phonemes(text).map_err(|e| pyo3::exceptions::PyNotImplementedError::new_err(e.to_string()))
     }
 
     #[pyo3(signature = (text, punctuation = r#";:,.!?¡¿—…\"«»\"\""#.to_owned(), threads=8))]
-    fn align(
-        &mut self,
-        _py: Python<'_>,
-        text: &str,
-        punctuation: String,
-        threads: usize,
-    ) -> PyResult<(Vec<String>, Vec<String>)> {
-        self.inner
-            .align(text, &punctuation, threads)
-            .map_err(|e| pyo3::exceptions::PyNotImplementedError::new_err(e.to_string()))
+    fn align(&mut self, _py: Python<'_>, text: &str, punctuation: String, threads: usize) -> PyResult<(Vec<String>, Vec<String>)> {
+        self.inner.align(text, &punctuation, threads).map_err(|e| pyo3::exceptions::PyNotImplementedError::new_err(e.to_string()))
     }
 
     #[pyo3(signature = (text, punctuation = r#";:,.!?¡¿—…\"«»\"\""#.to_owned(), threads=8))]
-    fn align_with_spans(
-        &mut self,
-        py: Python<'_>,
-        text: &str,
-        punctuation: String,
-        threads: usize,
-    ) -> PyResult<Vec<PyObject>> {
+    fn align_with_spans(&mut self, py: Python<'_>, text: &str, punctuation: String, threads: usize) -> PyResult<Vec<PyObject>> {
         let spans = self
             .inner
             .align_with_spans(text, &punctuation, threads)
@@ -69,19 +51,13 @@ impl Engine {
         punctuation: String,
         threads: usize,
     ) -> PyResult<Vec<(Vec<String>, Vec<String>)>> {
-        self.inner
-            .align_batch(&texts, &punctuation, threads)
-            .map_err(|e| pyo3::exceptions::PyNotImplementedError::new_err(e.to_string()))
+        self.inner.align_batch(&texts, &punctuation, threads).map_err(|e| pyo3::exceptions::PyNotImplementedError::new_err(e.to_string()))
     }
 }
 
 #[pyfunction]
-fn split_by_punctuation(
-    text: &str,
-    punctuation: &str,
-) -> PyResult<(Vec<String>, Vec<(i32, String)>)> {
-    espeak_align_core::split_by_punctuation(text, punctuation)
-        .map_err(|e| pyo3::exceptions::PyNotImplementedError::new_err(e.to_string()))
+fn split_by_punctuation(text: &str, punctuation: &str) -> PyResult<(Vec<String>, Vec<(i32, String)>)> {
+    espeak_align_core::split_by_punctuation(text, punctuation).map_err(|e| pyo3::exceptions::PyNotImplementedError::new_err(e.to_string()))
 }
 
 #[pymodule]

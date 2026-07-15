@@ -30,6 +30,10 @@ pub(crate) fn tensor(name: &str, dtype: ffi::DType, shape: Vec<i64>, data: Vec<u
     ffi::Tensor { name: name.into(), dtype, shape, data }
 }
 
+fn copy_native_bytes(data: &[u8]) -> Vec<u8> {
+    data.to_vec()
+}
+
 #[cxx::bridge(namespace = "tinfer::native")]
 pub(crate) mod ffi {
     #[repr(u8)]
@@ -54,6 +58,10 @@ pub(crate) mod ffi {
 
     struct Output {
         tensors: Vec<Tensor>,
+    }
+
+    extern "Rust" {
+        fn copy_native_bytes(data: &[u8]) -> Vec<u8>;
     }
 
     unsafe extern "C++" {

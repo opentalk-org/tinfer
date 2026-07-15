@@ -28,11 +28,13 @@ use crate::{Alignment, AlignmentType, AsyncEngine, AudioChunk, Error};
 pub(super) struct App {
     pub(super) engine: AsyncEngine,
     pub(super) health: Arc<HealthState>,
+    pub(super) settings: crate::WebSettings,
 }
 
-pub(super) fn router(engine: AsyncEngine, health: Arc<HealthState>) -> Router {
-    let app = App { engine, health };
-    Router::new()
+pub(super) fn router(engine: AsyncEngine, health: Arc<HealthState>, settings: crate::WebSettings) -> Router {
+    let websockets = settings.websocket_enabled;
+    let app = App { engine, health, settings };
+    let router = Router::new()
         .route("/health", get(health_status))
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
@@ -43,10 +45,15 @@ pub(super) fn router(engine: AsyncEngine, health: Arc<HealthState>) -> Router {
         .route("/v1/text-to-speech/{voice}/stream/with-timestamps", post(timing_stream))
         .route("/v1/text-to-speech/{voice}/with-timestamps", post(timing))
         .route("/v1/text-to-speech/{voice}/stream", post(speech_stream))
-        .route("/v1/text-to-speech/{voice}", post(speech))
-        .route("/v1/text-to-speech/{voice}/stream-input", get(single::upgrade))
-        .route("/v1/text-to-speech/{voice}/multi-stream-input", get(multi::upgrade))
-        .with_state(app)
+        .route("/v1/text-to-speech/{voice}", post(speech));
+    if websockets {
+        router
+            .route("/v1/text-to-speech/{voice}/stream-input", get(single::upgrade))
+            .route("/v1/text-to-speech/{voice}/multi-stream-input", get(multi::upgrade))
+            .with_state(app)
+    } else {
+        router.with_state(app)
+    }
 }
 
 async fn health_status(State(app): State<App>) -> Response {
@@ -93,7 +100,7 @@ async fn speech(
 ) -> Result<Response, WebError> {
     let request = parse_speech(value)?;
     let _admission = app.health.admit().ok_or(WebError::Unavailable)?;
-    let format = parse_query(&query, Transport::Http)?.output_format;
+    let format = parse_query(&query, Transport::Http, &app.settings)?.output_format;
     let content_type = match format.encoding {
         AudioEncoding::Mp3 => "audio/mpeg",
         AudioEncoding::Opus => "audio/ogg",
@@ -112,7 +119,7 @@ async fn timing(
 ) -> Result<Json<TimedAudio>, WebError> {
     let request = parse_speech(value)?;
     let _admission = app.health.admit().ok_or(WebError::Unavailable)?;
-    let format = parse_query(&query, Transport::Http)?.output_format;
+    let format = parse_query(&query, Transport::Http, &app.settings)?.output_format;
     let chunk = generate_timed(&app.engine, voice, request).await?;
     let timing = Timing::from(chunk.alignment.clone().unwrap_or_default());
     Ok(Json(TimedAudio {
@@ -128,7 +135,7 @@ async fn generate(engine: &AsyncEngine, voice: String, mut request: Speech) -> R
     }
     let model = resolve_model(engine, request.model_id.clone()).await?;
     request.language_code = Some(resolve_language(engine, &model, request.language_code.as_deref()).await?);
-    let params = request.stream_params(AlignmentType::None);
+    let params = request.stream_params(engine.stream_params(), AlignmentType::None);
     Ok(engine.generate_full(&model, &voice, &request.text, params).await?)
 }
 
@@ -138,7 +145,7 @@ async fn generate_timed(engine: &AsyncEngine, voice: String, mut request: Speech
     }
     let model = resolve_model(engine, request.model_id.clone()).await?;
     request.language_code = Some(resolve_language(engine, &model, request.language_code.as_deref()).await?);
-    let params = request.stream_params(AlignmentType::Char);
+    let params = request.stream_params(engine.stream_params(), AlignmentType::Char);
     let stream = engine.create_stream(&model, &voice, params).await?;
     stream.add_text(&request.text).await?;
     stream.force_generate().await?;

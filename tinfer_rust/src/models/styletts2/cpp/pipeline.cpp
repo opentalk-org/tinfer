@@ -51,10 +51,8 @@ namespace tinfer::native {
       result.dtype = dtype;
       for (const auto dimension : shape) result.shape.push_back(dimension);
       const auto *bytes = reinterpret_cast<const std::uint8_t *>(values.data());
-      result.data.reserve(values.size() * sizeof(T));
-      for (std::size_t index = 0; index < values.size() * sizeof(T); ++index) {
-        result.data.push_back(bytes[index]);
-      }
+      const auto size = values.size() * sizeof(T);
+      result.data = copy_native_bytes(rust::Slice<const std::uint8_t>(bytes, size));
       return result;
     }
 
@@ -62,6 +60,9 @@ namespace tinfer::native {
 
   Output StyleTts2Model::start(const Batch &batch) const
   {
+#ifdef TINFER_CUDA
+    if (device_ >= 0 && backend_ == Backend::TensorRt) return start_cuda(batch);
+#endif
     const auto &token_tensor = host(batch, "tokens", DType::I64);
     const auto batch_size = static_cast<std::int32_t>(token_tensor.shape[0]);
     auto values = upload(batch, *execution_a_);
@@ -150,7 +151,6 @@ namespace tinfer::native {
         session.seed = tail->second.seed;
         session.frame_offset = tail->second.frame_offset;
       }
-      session.phase_frames.assign(session.phase.begin(), session.phase.end());
       std::copy(session.reference.begin(), session.reference.end(),
                 state.begin() + static_cast<std::size_t>(item) * 256);
       std::copy(session.style.begin(), session.style.end(),
@@ -158,12 +158,6 @@ namespace tinfer::native {
       sessions_.emplace(ids[item], std::move(session));
       tails_.erase(ids[item]);
     }
-    std::vector<StyleTts2Session *> initialized(batch_size);
-    for (std::int32_t item = 0; item < batch_size; ++item)
-    {
-      initialized[item] = &sessions_.at(ids[item]);
-    }
-    initialize_device_prosody(initialized);
     Output output;
     output.tensors.push_back(tensor("durations", DType::I32,
                                     {batch_size, token_count}, durations));
@@ -174,106 +168,85 @@ namespace tinfer::native {
 
   Output StyleTts2Model::continue_generation(const Batch &batch) const
   {
+#ifdef TINFER_CUDA
+    if (device_ >= 0 && backend_ == Backend::TensorRt) return continue_cuda(batch);
+#endif
     const auto &id_tensor = host(batch, "stream_ids", DType::I64);
     const auto *ids = reinterpret_cast<const std::int64_t *>(id_tensor.data.data());
     const auto batch_size = static_cast<std::int32_t>(id_tensor.shape[0]);
     std::lock_guard lock(sessions_mutex_);
     std::vector<StyleTts2Session *> sessions(batch_size);
-    std::vector<std::int32_t> targets(batch_size);
     for (std::int32_t item = 0; item < batch_size; ++item)
     {
       auto &session = sessions_.at(ids[item]);
       sessions[item] = &session;
-      const auto window_start = std::max(0, session.cursor - kWindowPre);
-      targets[item] = std::min(session.frames, window_start + kWindowFrames);
     }
-    ensure_prosody(sessions, targets);
 
     std::vector<float> asr(static_cast<std::size_t>(batch_size) * 512 *
                            kWindowFrames);
+    const auto channels = sessions.front()->channels;
+    std::vector<float> encoding(static_cast<std::size_t>(batch_size) *
+                                channels * kWindowFrames);
+    std::vector<float> styles(static_cast<std::size_t>(batch_size) * 128);
     std::vector<float> references(static_cast<std::size_t>(batch_size) * 128);
-    std::vector<float> f0;
-    if (device_ < 0)
-    {
-      f0.resize(static_cast<std::size_t>(batch_size) * kWindowFrames * 2);
-    }
-    std::vector<float> noise(f0.size());
     std::vector<float> phases(static_cast<std::size_t>(batch_size) * 9);
     std::vector<std::uint64_t> seeds(batch_size);
     std::vector<std::int32_t> starts(batch_size), counts(batch_size),
-        complete(batch_size), core_offsets(batch_size), window_starts(batch_size);
+        complete(batch_size);
     for (std::int32_t item = 0; item < batch_size; ++item)
     {
       auto &session = *sessions[item];
       starts[item] = session.cursor;
       counts[item] = std::min(kWindowCore, session.frames - session.cursor);
       complete[item] = session.cursor + counts[item] == session.frames;
-      const auto window_start = std::max(0, session.cursor - kWindowPre);
-      window_starts[item] = window_start;
-      core_offsets[item] = session.cursor - window_start;
+      const auto window_start = session.cursor - kWindowPre;
       styletts2::expand_window_at(
           session, window_start,
           asr.data() + static_cast<std::size_t>(item) * 512 * kWindowFrames,
-          nullptr);
+          encoding.data() + static_cast<std::size_t>(item) * channels *
+                                kWindowFrames);
+      std::copy(session.style.begin(), session.style.end(),
+                styles.begin() + static_cast<std::size_t>(item) * 128);
       std::copy(session.reference.begin(), session.reference.end(),
                 references.begin() + static_cast<std::size_t>(item) * 128);
-      if (device_ < 0)
-      {
-        styletts2::copy_prosody(session, window_start,
-                     f0.data() + static_cast<std::size_t>(item) *
-                                     kWindowFrames * 2,
-                     noise.data() + static_cast<std::size_t>(item) *
-                                        kWindowFrames * 2);
-        std::copy_n(session.phase_frames.begin() +
-                        static_cast<std::size_t>(window_start) * 9,
-                    9, phases.begin() + static_cast<std::size_t>(item) * 9);
-      }
-      seeds[item] = session.seed +
-                    (session.frame_offset + window_start) * 600;
+      std::copy(session.phase.begin(), session.phase.end(),
+                phases.begin() + static_cast<std::size_t>(item) * 9);
+      const auto sample = static_cast<std::int64_t>(session.frame_offset) * 600 +
+                          static_cast<std::int64_t>(window_start) * 600;
+      seeds[item] = session.seed + static_cast<std::uint64_t>(sample * 9);
     }
-    auto inputs = weights_c_;
-    inputs.emplace("asr", upload_floats(
-                              "c.asr", asr, {batch_size, 512, kWindowFrames}));
-    inputs.emplace("style", upload_floats("c.style", references,
-                                           {batch_size, 128}));
-    if (device_ < 0)
-    {
-      inputs.emplace("f0", upload_floats(
-                               "c.f0", f0, {batch_size, kWindowFrames * 2}));
-      inputs.emplace("noise", upload_floats(
-                                  "c.noise", noise, {batch_size, kWindowFrames * 2}));
-      inputs.emplace("har", harmonic(f0, seeds, phases));
-    }
-    else
-    {
-      auto prosody = device_prosody_window(sessions, window_starts);
-      inputs.emplace("har", harmonic(prosody, seeds));
-      inputs.emplace("f0", std::move(prosody.f0));
-      inputs.emplace("noise", std::move(prosody.noise));
-    }
-    const auto output = execution_c_->run(inputs, stream_);
+    const auto model_dtype = device_ < 0 ? DType::F32 : DType::F16;
+    auto inputs = weights_bc_;
+    inputs.emplace("en", upload_floats("bc.en", encoding,
+                                        {batch_size, channels, kWindowFrames},
+                                        model_dtype));
+    inputs.emplace("asr", upload_floats("bc.asr", asr,
+                                         {batch_size, 512, kWindowFrames},
+                                         model_dtype));
+    inputs.emplace("s", upload_floats("bc.s", styles, {batch_size, 128},
+                                       model_dtype));
+    inputs.emplace("ref", upload_floats("bc.ref", references,
+                                          {batch_size, 128}, model_dtype));
+    inputs.emplace("phase", upload_floats("bc.phase", phases,
+                                            {batch_size, 9}, DType::F32));
+    inputs.emplace("source_noise", source_noise(seeds));
+    const auto output = execution_bc_->run(inputs, stream_);
     const auto all_audio = download_floats(need(output, "audio"));
+    const auto next_phases = download_floats(need(output, "next_phase"));
     std::vector<float> audio;
     std::vector<std::int32_t> offsets{0};
     for (std::int32_t item = 0; item < batch_size; ++item)
     {
-      const auto base = static_cast<std::size_t>(item) * kWindowFrames * 600 +
-                        core_offsets[item] * 600;
+      const auto base = static_cast<std::size_t>(item) * kWindowCore * 600;
       audio.insert(audio.end(), all_audio.begin() + base,
                    all_audio.begin() + base + counts[item] * 600);
       offsets.push_back(static_cast<std::int32_t>(audio.size()));
       auto &session = *sessions[item];
+      std::copy_n(next_phases.begin() + static_cast<std::size_t>(item) * 9, 9,
+                  session.phase.begin());
       session.cursor += counts[item];
       if (complete[item])
       {
-        if (device_ < 0)
-        {
-          std::copy_n(session.phase_frames.end() - 9, 9, session.phase.begin());
-        }
-        else
-        {
-          finish_device_prosody(session);
-        }
         tails_.insert_or_assign(ids[item], styletts2::retain_tail(session));
         sessions_.erase(ids[item]);
       }

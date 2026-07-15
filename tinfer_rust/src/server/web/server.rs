@@ -7,9 +7,9 @@ use tokio::sync::{Mutex, watch};
 use super::super::health::{HealthState, ServingState};
 use crate::{AsyncEngine, Engine, Error, Result};
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct WebConfig {
-    pub address: SocketAddr,
+    pub settings: crate::WebSettings,
     pub shutdown_grace: Duration,
 }
 
@@ -38,11 +38,11 @@ impl WebServer {
     pub async fn start(&self) -> Result<SocketAddr> {
         let mut running = self.running.lock().await;
         assert!(running.is_none(), "web server is already running");
-        let listener = tokio::net::TcpListener::bind(self.config.address).await.map_err(io_error)?;
+        let listener = tokio::net::TcpListener::bind(self.config.settings.address).await.map_err(io_error)?;
         let address = listener.local_addr().map_err(io_error)?;
         let (shutdown, mut stop) = watch::channel(false);
         let (finished, done) = watch::channel(false);
-        let app = super::router(self.engine.clone(), self.health.clone());
+        let app = super::router(self.engine.clone(), self.health.clone(), self.config.settings.clone());
         let task = tokio::spawn(async move {
             let result = axum::serve(listener, app)
                 .with_graceful_shutdown(async move { while !*stop.borrow() && stop.changed().await.is_ok() {} })

@@ -22,12 +22,6 @@ void align_expand(const float* text, const float* encoding,
                   const Alignment& alignment, std::int32_t batch,
                   std::int32_t token_count, std::int32_t encoding_channels,
                   std::vector<float>& asr, std::vector<float>& expanded);
-std::vector<float> source_to_har(const float* f0, const float* weights,
-                                 float bias, std::int32_t batch,
-                                 std::int32_t frames, const std::uint64_t* seeds,
-                                 bool randomize, const std::int32_t* advances,
-                                 float* phase_state);
-
 }  // namespace tinfer::styletts2::cpu
 
 namespace tinfer::native {

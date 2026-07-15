@@ -73,17 +73,15 @@ impl pb::style_tts_service_server::StyleTtsService for Service {
 
     async fn synthesize(&self, request: Request<pb::SynthesizeRequest>) -> Result<Response<pb::SynthesizeResponse>, Status> {
         let _admission = self.health.admit().ok_or_else(|| Status::unavailable("server is not accepting synthesis requests"))?;
-        let (text, model, voice, rate, params) = synthesis(request.into_inner())?;
+        let (text, model, voice, rate, params) = synthesis(request.into_inner(), self.engine.stream_params())?;
         let chunk = self.engine.generate_full(&model, &voice, &text, params).await.map_err(status)?;
         Ok(Response::new(response(chunk, rate)?))
     }
 
     async fn synthesize_stream(&self, request: Request<pb::SynthesizeRequest>) -> Result<Response<Self::SynthesizeStreamStream>, Status> {
         let admission = self.health.admit().ok_or_else(|| Status::unavailable("server is not accepting synthesis requests"))?;
-        let (text, model, voice, rate, params) = synthesis(request.into_inner())?;
-        let stream = self.engine.create_stream(&model, &voice, params).await.map_err(status)?;
-        stream.add_text(&text).await.map_err(status)?;
-        stream.force_generate().await.map_err(status)?;
+        let (text, model, voice, rate, params) = synthesis(request.into_inner(), self.engine.stream_params())?;
+        let stream = self.engine.start_stream(&model, &voice, &text, params).await.map_err(status)?;
         Ok(Response::new(output(stream, rate, admission)))
     }
 
@@ -98,7 +96,7 @@ impl pb::style_tts_service_server::StyleTtsService for Service {
             Some(pb::incremental_synthesize_request::Content::Config(config)) => config,
             _ => return Err(Status::failed_precondition("config must be first")),
         };
-        let (model, voice, rate, params) = options(config)?;
+        let (model, voice, rate, params) = options(config, self.engine.stream_params())?;
         let stream = self.engine.create_stream(&model, &voice, params).await.map_err(status)?;
         let (tx, rx) = tokio::sync::mpsc::channel(2);
         let done = Arc::new(AtomicBool::new(false));

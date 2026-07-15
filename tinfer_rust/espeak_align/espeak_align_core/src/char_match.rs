@@ -47,14 +47,7 @@ pub fn is_word_cp(cp: u32) -> bool {
             || (b'0' as u32) <= cp && cp <= (b'9' as u32)
             || cp == (b'_' as u32);
     }
-    if cp == 0xB0
-        || cp == 0xA1
-        || cp == 0xBF
-        || cp == 0xAB
-        || cp == 0xBB
-        || cp == 0x2014
-        || cp == 0x2026
-    {
+    if cp == 0xB0 || cp == 0xA1 || cp == 0xBF || cp == 0xAB || cp == 0xBB || cp == 0x2014 || cp == 0x2026 {
         return false;
     }
     if (0x2000..=0x206F).contains(&cp) {

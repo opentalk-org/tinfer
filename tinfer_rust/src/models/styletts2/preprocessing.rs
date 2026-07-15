@@ -5,14 +5,14 @@ use espeak_align_core::Engine;
 use serde::Deserialize;
 
 use super::manifest::Manifest;
-use super::text::{PreparedText, prepare_text, tokenize};
+use super::text::{PreparedText, prepare_texts, tokenize};
 use crate::models::base::native::{ffi, tensor};
 use crate::{Error, ModelRequest, Result};
 
 const MAX_DIFFUSION_STEPS: usize = 5;
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub(super) struct StyleTts2Params {
     pub use_diffusion: bool,
     pub phonemized: bool,
@@ -32,22 +32,13 @@ pub(super) struct PreparedBatch {
     pub texts: Vec<PreparedText>,
 }
 
-impl Default for StyleTts2Params {
-    fn default() -> Self {
-        Self {
-            use_diffusion: true,
-            phonemized: false,
-            language: String::new(),
-            embedding_scale: 1.0,
-            diffusion_steps: 5,
-            style_interpolation_factor: 0.7,
-            alpha: 0.3,
-            beta: 0.7,
-            speed: 1.0,
-            seed: None,
-            apply_text_normalization: "auto".into(),
-        }
+pub(super) fn validate_settings(value: &serde_json::Value) -> Result<()> {
+    if !value.as_object().is_some_and(|settings| settings.contains_key("seed")) {
+        return Err(Error::Validation("StyleTTS2 setting seed is required; use null for no fixed seed".into()));
     }
+    serde_json::from_value::<StyleTts2Params>(value.clone())
+        .map(|_| ())
+        .map_err(|error| Error::Validation(format!("invalid StyleTTS2 settings: {error}")))
 }
 
 pub(super) fn prepare(
@@ -57,9 +48,6 @@ pub(super) fn prepare(
     phonemizers: &Mutex<HashMap<String, Engine>>,
 ) -> Result<PreparedBatch> {
     let mut params = Vec::with_capacity(requests.len());
-    let mut all_tokens = Vec::with_capacity(requests.len());
-    let mut texts = Vec::with_capacity(requests.len());
-    let mut voice_vectors = Vec::with_capacity(requests.len() * 256);
     for request in requests {
         let mut value = parameters(request)?;
         if value.language.is_empty() {
@@ -73,25 +61,28 @@ pub(super) fn prepare(
             || !value.alpha.is_finite()
             || !value.beta.is_finite()
             || !value.embedding_scale.is_finite()
+            || !matches!(value.apply_text_normalization.as_str(), "auto" | "on" | "off")
         {
             return Err(Error::Validation("invalid StyleTTS2 generation parameters".into()));
         }
-        let prepared_text = prepare_text(&request.text, value.phonemized, &value.language, &manifest.symbols, phonemizers)?;
-        let tokens = tokenize(&prepared_text.phonemes, &manifest.symbols);
-        if tokens.len() < 2 || tokens.len() > 512 {
-            return Err(Error::Validation("StyleTTS2 text must contain 1..511 model tokens".into()));
-        }
-        let voice = {
-            let mut cache = voices.lock().expect("StyleTTS2 voice cache lock poisoned");
-            if !cache.contains_key(&request.voice_id) {
-                cache.insert(request.voice_id.clone(), manifest.load_voice(&request.voice_id)?);
-            }
-            cache[&request.voice_id].clone()
-        };
-        voice_vectors.extend(voice);
-        all_tokens.push(tokens);
-        texts.push(prepared_text);
         params.push(value);
+    }
+    let request_texts = requests.iter().map(|request| request.text.as_str()).collect::<Vec<_>>();
+    let phonemized = params.iter().map(|value| value.phonemized).collect::<Vec<_>>();
+    let languages = params.iter().map(|value| value.language.as_str()).collect::<Vec<_>>();
+    let normalization = params.iter().map(|value| value.apply_text_normalization.as_str()).collect::<Vec<_>>();
+    let texts = prepare_texts(&request_texts, &phonemized, &languages, &normalization, &manifest.symbols, phonemizers)?;
+    let all_tokens = texts.iter().map(|text| tokenize(&text.phonemes, &manifest.symbols)).collect::<Vec<_>>();
+    if all_tokens.iter().any(|tokens| tokens.len() < 2 || tokens.len() > 512) {
+        return Err(Error::Validation("StyleTTS2 text must contain 1..511 model tokens".into()));
+    }
+    let mut voice_vectors = Vec::with_capacity(requests.len() * 256);
+    for request in requests {
+        let mut cache = voices.lock().expect("StyleTTS2 voice cache lock poisoned");
+        if !cache.contains_key(&request.voice_id) {
+            cache.insert(request.voice_id.clone(), manifest.load_voice(&request.voice_id)?);
+        }
+        voice_vectors.extend_from_slice(&cache[&request.voice_id]);
     }
     let batch = requests.len();
     let width = all_tokens.iter().map(Vec::len).max().expect("model batch is non-empty");

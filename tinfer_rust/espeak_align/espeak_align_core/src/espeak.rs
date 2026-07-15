@@ -36,19 +36,10 @@ pub struct espeak_VOICE {
 }
 
 unsafe extern "C" {
-    fn espeak_Initialize(
-        output: espeak_AUDIO_OUTPUT,
-        buflength: c_int,
-        path: *const c_char,
-        options: c_int,
-    ) -> c_int;
+    fn espeak_Initialize(output: espeak_AUDIO_OUTPUT, buflength: c_int, path: *const c_char, options: c_int) -> c_int;
     fn espeak_ListVoices(voice_spec: *mut espeak_VOICE) -> *const *const espeak_VOICE;
     fn espeak_SetVoiceByName(name: *const c_char) -> espeak_ERROR;
-    fn espeak_TextToPhonemes(
-        textptr: *mut *const c_void,
-        textmode: c_int,
-        phonememode: c_int,
-    ) -> *const c_char;
+    fn espeak_TextToPhonemes(textptr: *mut *const c_void, textmode: c_int, phonememode: c_int) -> *const c_char;
 }
 
 pub struct EspeakPhonemizer {
@@ -57,25 +48,14 @@ pub struct EspeakPhonemizer {
 
 impl EspeakPhonemizer {
     pub fn new(cfg: &EngineConfig) -> Result<Self, AlignrustError> {
-        let sr = unsafe {
-            espeak_Initialize(
-                espeak_AUDIO_OUTPUT::AUDIO_OUTPUT_SYNCHRONOUS,
-                0,
-                std::ptr::null(),
-                0,
-            )
-        };
+        let sr = unsafe { espeak_Initialize(espeak_AUDIO_OUTPUT::AUDIO_OUTPUT_SYNCHRONOUS, 0, std::ptr::null(), 0) };
         if sr <= 0 {
-            return Err(AlignrustError::Message(
-                "espeak_Initialize failed".to_owned(),
-            ));
+            return Err(AlignrustError::Message("espeak_Initialize failed".to_owned()));
         }
 
         let voices = unsafe { espeak_ListVoices(std::ptr::null_mut()) };
         if voices.is_null() {
-            return Err(AlignrustError::Message(
-                "espeak_ListVoices failed".to_owned(),
-            ));
+            return Err(AlignrustError::Message("espeak_ListVoices failed".to_owned()));
         }
 
         let mut available: BTreeMap<String, String> = BTreeMap::new();
@@ -103,13 +83,7 @@ impl EspeakPhonemizer {
                 j += 1;
             }
             if !lang.is_empty() && !available.contains_key(&lang) {
-                let ident = if v.identifier.is_null() {
-                    ""
-                } else {
-                    unsafe { CStr::from_ptr(v.identifier) }
-                        .to_str()
-                        .unwrap_or("")
-                };
+                let ident = if v.identifier.is_null() { "" } else { unsafe { CStr::from_ptr(v.identifier) }.to_str().unwrap_or("") };
                 available.insert(lang, ident.to_owned());
             }
             i += 1;
@@ -122,14 +96,10 @@ impl EspeakPhonemizer {
             }
         }
 
-        let voice_c = CString::new(voice_name.clone())
-            .map_err(|_| AlignrustError::Message("voice name contained NUL byte".to_owned()))?;
+        let voice_c = CString::new(voice_name.clone()).map_err(|_| AlignrustError::Message("voice name contained NUL byte".to_owned()))?;
         let ok = unsafe { espeak_SetVoiceByName(voice_c.as_ptr()) };
         if ok != espeak_ERROR::EE_OK {
-            return Err(AlignrustError::Message(format!(
-                "failed to load voice: {}",
-                cfg.language
-            )));
+            return Err(AlignrustError::Message(format!("failed to load voice: {}", cfg.language)));
         }
 
         Ok(Self { tie: cfg.tie })
@@ -142,11 +112,8 @@ impl EspeakPhonemizer {
 
         let mut p: *const c_char = buf.as_ptr() as *const c_char;
         let text_mode: c_int = 1;
-        let phonemes_mode: c_int = if self.tie {
-            0x02 | (0x01 << 7) | ((0x0361u32 as c_int) << 8)
-        } else {
-            (((b'_' as u32) as c_int) << 8) | 0x02
-        };
+        let phonemes_mode: c_int =
+            if self.tie { 0x02 | (0x01 << 7) | ((0x0361u32 as c_int) << 8) } else { (((b'_' as u32) as c_int) << 8) | 0x02 };
 
         let mut out = String::new();
         loop {
@@ -159,9 +126,7 @@ impl EspeakPhonemizer {
             }
 
             let mut textptr: *const c_void = p as *const c_void;
-            let phon = unsafe {
-                espeak_TextToPhonemes(&mut textptr as *mut *const c_void, text_mode, phonemes_mode)
-            };
+            let phon = unsafe { espeak_TextToPhonemes(&mut textptr as *mut *const c_void, text_mode, phonemes_mode) };
             p = textptr as *const c_char;
 
             if phon.is_null() {

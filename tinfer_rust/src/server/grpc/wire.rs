@@ -24,24 +24,29 @@ pub(crate) fn content(request: pb::IncrementalSynthesizeRequest) -> Result<Conte
     }
 }
 
-pub(crate) fn synthesis(request: pb::SynthesizeRequest) -> Result<(String, String, String, u32, StreamParams), Status> {
+pub(crate) fn synthesis(
+    request: pb::SynthesizeRequest,
+    defaults: StreamParams,
+) -> Result<(String, String, String, u32, StreamParams), Status> {
     if request.text.trim().is_empty() {
         return Err(Status::invalid_argument("text must not be empty"));
     }
-    let (model, voice, rate, params) = options(request.config.ok_or_else(|| Status::invalid_argument("config is required"))?)?;
+    let (model, voice, rate, params) = options(request.config.ok_or_else(|| Status::invalid_argument("config is required"))?, defaults)?;
     Ok((request.text, model, voice, rate, params))
 }
 
-pub(crate) fn options(config: pb::SynthesisConfig) -> Result<(String, String, u32, StreamParams), Status> {
+pub(crate) fn options(config: pb::SynthesisConfig, mut params: StreamParams) -> Result<(String, String, u32, StreamParams), Status> {
     if config.model_id.is_empty() || config.voice_id.is_empty() {
         return Err(Status::invalid_argument("model_id and voice_id are required"));
     }
     if !matches!(config.sample_rate_hz, 8_000 | 16_000 | 22_050 | 24_000 | 44_100) {
         return Err(Status::invalid_argument("unsupported sample_rate_hz"));
     }
-    let model = if config.language.is_empty() { serde_json::json!({}) } else { serde_json::json!({ "language": config.language }) };
+    if !config.language.is_empty() {
+        params.model["language"] = serde_json::Value::String(config.language);
+    }
     let rate = u32::try_from(config.sample_rate_hz).expect("supported sample rates are positive");
-    Ok((config.model_id, config.voice_id, rate, StreamParams { model, ..StreamParams::default() }))
+    Ok((config.model_id, config.voice_id, rate, params))
 }
 
 pub(crate) fn response(chunk: AudioChunk, rate: u32) -> Result<pb::SynthesizeResponse, Status> {

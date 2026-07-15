@@ -1,11 +1,12 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::Client;
 use tinfer_rust::server::{HealthState, WebConfig, WebServer};
-use tinfer_rust::{AsyncEngine, Backend, Config, Device, Engine, ModelConfig};
+use tinfer_rust::{AsyncEngine, Engine};
+
+use crate::common;
 
 pub struct TestServer {
     pub address: SocketAddr,
@@ -17,23 +18,18 @@ pub struct TestServer {
 
 impl TestServer {
     pub async fn start() -> Self {
-        let engine = Engine::new(Config {
-            models: vec![ModelConfig {
-                id: "stub".into(),
-                model: "stub".into(),
-                path: Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/artifacts/stub"),
-                backend: Backend::Onnx,
-                device: Device::Cpu,
-                max_batch: 4,
-            }],
-            ..Config::default()
-        })
-        .unwrap();
+        Self::start_with_websockets(true).await
+    }
+
+    pub async fn start_with_websockets(enabled: bool) -> Self {
+        let engine = Engine::new(common::config(vec![common::stub_model()])).unwrap();
         let health = Arc::new(HealthState::new());
+        let mut settings = common::web_settings(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0));
+        settings.websocket_enabled = enabled;
         let server = Arc::new(WebServer::new(
             AsyncEngine::new(engine.clone()),
             health.clone(),
-            WebConfig { address: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0), shutdown_grace: Duration::from_secs(1) },
+            WebConfig { settings, shutdown_grace: Duration::from_secs(1) },
         ));
         let address = server.start().await.unwrap();
         Self { address, client: Client::new(), health, server, engine }

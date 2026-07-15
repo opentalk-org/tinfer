@@ -27,12 +27,21 @@ const CASES: &[(&str, &[&str])] = &[
     ("I have lived in the U.S. for 20 years.", &["I have lived in the U.S. for 20 years."]),
     ("She has $100.00 in her bag.", &["She has $100.00 in her bag."]),
     ("She has $100.00. It is in her bag.", &["She has $100.00.", "It is in her bag."]),
-    ("He teaches science (He previously worked for 5 years as an engineer.) at the local University.", &["He teaches science (He previously worked for 5 years as an engineer.) at the local University."]),
+    (
+        "He teaches science (He previously worked for 5 years as an engineer.) at the local University.",
+        &["He teaches science (He previously worked for 5 years as an engineer.) at the local University."],
+    ),
     ("Her email is Jane.Doe@example.com. I sent her an email.", &["Her email is Jane.Doe@example.com.", "I sent her an email."]),
-    ("The site is: https://www.example.50.com/new-site/awesome_content.html. Please check it out.", &["The site is: https://www.example.50.com/new-site/awesome_content.html.", "Please check it out."]),
+    (
+        "The site is: https://www.example.50.com/new-site/awesome_content.html. Please check it out.",
+        &["The site is: https://www.example.50.com/new-site/awesome_content.html.", "Please check it out."],
+    ),
     ("She turned to him, 'This is great.' she said.", &["She turned to him, 'This is great.' she said."]),
     ("She turned to him, \"This is great.\" she said.", &["She turned to him, \"This is great.\" she said."]),
-    ("She turned to him, \"This is great.\" Hun held the book out to show him.", &["She turned to him, \"This is great.\"", "Hun held the book out to show him."]),
+    (
+        "She turned to him, \"This is great.\" Hun held the book out to show him.",
+        &["She turned to him, \"This is great.\"", "Hun held the book out to show him."],
+    ),
     ("Hello!! Long time no see.", &["Hello!!", "Long time no see."]),
     ("Hello?? Who is there?", &["Hello??", "Who is there?"]),
     ("Hello!? Is that you?", &["Hello!?", "Is that you?"]),
@@ -46,13 +55,31 @@ const CASES: &[(&str, &[&str])] = &[
     ("• 9. The first item • 10. The second item", &["• 9. The first item", "• 10. The second item"]),
     ("⁃9. The first item ⁃10. The second item", &["⁃9. The first item", "⁃10. The second item"]),
     ("a. The first item b. The second item c. The third list item", &["a. The first item", "b. The second item", "c. The third list item"]),
-    ("You can find it at N°. 1026.253.553. That is where the treasure is.", &["You can find it at N°. 1026.253.553.", "That is where the treasure is."]),
+    (
+        "You can find it at N°. 1026.253.553. That is where the treasure is.",
+        &["You can find it at N°. 1026.253.553.", "That is where the treasure is."],
+    ),
     ("She works at Yahoo! in the accounting department.", &["She works at Yahoo! in the accounting department."]),
-    ("Thoreau argues that by simplifying one’s life, “the laws of the universe will appear less complex. . . .”", &["Thoreau argues that by simplifying one’s life, “the laws of the universe will appear less complex. . . .”"]),
-    ("\"Bohr  [...] used the analogy of parallel stairways  [...]\" (Smith 55).", &["\"Bohr  [...] used the analogy of parallel stairways  [...]\" (Smith 55)."]),
-    ("If words are left off at the end of a sentence, and that is all that is omitted, indicate the omission with ellipsis marks (preceded and followed by a space) and then indicate the end of the sentence with a period . . . . Next sentence.", &["If words are left off at the end of a sentence, and that is all that is omitted, indicate the omission with ellipsis marks (preceded and followed by a space) and then indicate the end of the sentence with a period . . . .", "Next sentence."]),
+    (
+        "Thoreau argues that by simplifying one’s life, “the laws of the universe will appear less complex. . . .”",
+        &["Thoreau argues that by simplifying one’s life, “the laws of the universe will appear less complex. . . .”"],
+    ),
+    (
+        "\"Bohr  [...] used the analogy of parallel stairways  [...]\" (Smith 55).",
+        &["\"Bohr  [...] used the analogy of parallel stairways  [...]\" (Smith 55)."],
+    ),
+    (
+        "If words are left off at the end of a sentence, and that is all that is omitted, indicate the omission with ellipsis marks (preceded and followed by a space) and then indicate the end of the sentence with a period . . . . Next sentence.",
+        &[
+            "If words are left off at the end of a sentence, and that is all that is omitted, indicate the omission with ellipsis marks (preceded and followed by a space) and then indicate the end of the sentence with a period . . . .",
+            "Next sentence.",
+        ],
+    ),
     ("I never meant that.... She left the store.", &["I never meant that....", "She left the store."]),
-    ("I wasn’t really ... well, what I mean...see . . . what I'm saying, the thing is . . . I didn’t mean it.", &["I wasn’t really ... well, what I mean...see . . . what I'm saying, the thing is . . . I didn’t mean it."]),
+    (
+        "I wasn’t really ... well, what I mean...see . . . what I'm saying, the thing is . . . I didn’t mean it.",
+        &["I wasn’t really ... well, what I mean...see . . . what I'm saying, the thing is . . . I didn’t mean it."],
+    ),
     ("One further habned. . . .", &["One further habned. . . ."]),
 ];
 
@@ -74,7 +101,5 @@ const CLEAN_CASES: &[(&str, &[&str])] = &[
     ("It was a cold \nnight in the city.", &["It was a cold night in the city."]),
 ];
 
-const PDF_CASES: &[(&str, &[&str])] = &[(
-    "This is a sentence\ncut off in the middle because pdf.",
-    &["This is a sentence cut off in the middle because pdf."],
-)];
+const PDF_CASES: &[(&str, &[&str])] =
+    &[("This is a sentence\ncut off in the middle because pdf.", &["This is a sentence cut off in the middle because pdf."])];

@@ -2,11 +2,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded};
+use crossbeam_channel::{Receiver, Sender, bounded};
 
 use super::caller::{Call, callers};
-use super::registry::Registry;
-use super::scheduler::{Request, dispatch, find_request, next_wait, unload};
 use crate::models::Model;
 use crate::{AudioChunk, Config, Error, ModelInfo, Result, StreamParams};
 
@@ -21,7 +19,7 @@ pub(crate) enum Message {
     Unload(String, Sender<Result<()>>),
     Models(Sender<Result<Vec<ModelInfo>>>),
     Voices(String, Sender<Result<Vec<String>>>),
-    Create(String, String, StreamParams, Sender<Result<(u64, Receiver<Delivery>)>>),
+    Create(String, String, StreamParams, Option<String>, Sender<Result<(u64, Receiver<Delivery>)>>),
     Append(u64, String, Sender<Result<()>>),
     Wake(u64, Sender<Result<()>>),
     Force(u64, Sender<Result<()>>),
@@ -37,6 +35,7 @@ pub(crate) enum Message {
 pub struct Engine {
     tx: Sender<Message>,
     join: Arc<Mutex<Option<JoinHandle<()>>>>,
+    defaults: StreamParams,
 }
 
 pub struct Stream {
@@ -45,26 +44,32 @@ pub struct Stream {
     rx: Receiver<Delivery>,
 }
 
+pub(super) type LoadedModel = (Arc<dyn Model>, usize, serde_json::Map<String, serde_json::Value>);
+
 impl Engine {
     pub fn new(config: Config) -> Result<Self> {
         config.validate()?;
         let loaded = config
             .models
             .iter()
-            .map(|model| crate::models::load(model).map(|loaded| (loaded, model.max_batch)))
+            .map(|model| {
+                let settings = model.settings.as_object().expect("validated model settings are an object").clone();
+                crate::models::load(model).map(|loaded| (loaded, model.max_batch, settings))
+            })
             .collect::<Result<Vec<_>>>()?;
-        let (tx, rx) = bounded(config.queue_capacity);
-        let (work_tx, work_rx) = bounded(config.queue_capacity);
+        let (tx, rx) = bounded(config.engine.queue_capacity);
+        let (work_tx, work_rx) = bounded(config.engine.queue_capacity);
         let caller_count = config.models.len().max(1);
         let caller_joins = callers(caller_count, work_rx, tx.clone());
-        let batch_wait = Duration::from_millis(config.timeout_ms);
+        let batch_wait = Duration::from_millis(config.engine.engine_timeout_ms);
+        let defaults = config.defaults.stream_params();
         let join = std::thread::spawn(move || {
-            coordinate(loaded, rx, work_tx, batch_wait);
+            super::coordinator::coordinate(loaded, rx, work_tx, batch_wait);
             for join in caller_joins {
                 join.join().expect("caller thread must not panic");
             }
         });
-        Ok(Self { tx, join: Arc::new(Mutex::new(Some(join))) })
+        Ok(Self { tx, join: Arc::new(Mutex::new(Some(join))), defaults })
     }
 
     pub fn load_model(&self, config: crate::ModelConfig) -> Result<()> {
@@ -87,8 +92,17 @@ impl Engine {
         request(&self.tx, |reply| Message::Voices(model.into(), reply))
     }
 
+    pub fn stream_params(&self) -> StreamParams {
+        self.defaults.clone()
+    }
+
     pub fn create_stream(&self, model: &str, voice: &str, params: StreamParams) -> Result<Stream> {
-        let (id, rx) = request(&self.tx, |reply| Message::Create(model.into(), voice.into(), params, reply))?;
+        let (id, rx) = request(&self.tx, |reply| Message::Create(model.into(), voice.into(), params, None, reply))?;
+        Ok(Stream { id, tx: self.tx.clone(), rx })
+    }
+
+    pub fn start_stream(&self, model: &str, voice: &str, text: &str, params: StreamParams) -> Result<Stream> {
+        let (id, rx) = request(&self.tx, |reply| Message::Create(model.into(), voice.into(), params, Some(text.into()), reply))?;
         Ok(Stream { id, tx: self.tx.clone(), rx })
     }
 
@@ -172,127 +186,4 @@ fn request<T>(engine: &Sender<Message>, message: impl FnOnce(Sender<Result<T>>) 
     let (tx, rx) = bounded(1);
     engine.send(message(tx)).map_err(|_| Error::Shutdown)?;
     rx.recv().map_err(|_| Error::Shutdown)?
-}
-
-fn coordinate(loaded: Vec<(Arc<dyn Model>, usize)>, rx: Receiver<Message>, work: Sender<Call>, batch_wait: Duration) {
-    let mut registry = Registry::default();
-    for (model, max_batch) in loaded {
-        registry.add(model, max_batch);
-    }
-    let mut requests = Vec::<Request>::new();
-    let mut next_id = 1;
-    loop {
-        let stop = match rx.recv_timeout(next_wait(&requests)) {
-            Ok(message) => process(message, &mut registry, &mut requests, &mut next_id),
-            Err(RecvTimeoutError::Timeout) => false,
-            Err(RecvTimeoutError::Disconnected) => return,
-        };
-        while let Ok(message) = rx.try_recv() {
-            if process(message, &mut registry, &mut requests, &mut next_id) {
-                return;
-            }
-        }
-        dispatch(&mut registry, &mut requests, &work, batch_wait);
-        if stop {
-            return;
-        }
-    }
-}
-
-fn process(message: Message, registry: &mut Registry, requests: &mut Vec<Request>, next_id: &mut u64) -> bool {
-    match message {
-        Message::Load(config, reply) => {
-            let result = crate::models::load(&config).map(|model| {
-                registry.add(model, config.max_batch);
-            });
-            let _ = reply.send(result);
-        }
-        Message::Unload(model, reply) => {
-            let result = requests
-                .iter()
-                .filter(|request| request.model == model)
-                .try_for_each(|request| registry.close_stream(&model, request.id))
-                .and_then(|()| registry.unload(&model));
-            if result.is_ok() {
-                unload(requests, &model);
-            }
-            let _ = reply.send(result);
-        }
-        Message::Models(reply) => {
-            let _ = reply.send(Ok(registry.infos()));
-        }
-        Message::Voices(model, reply) => {
-            let _ = reply.send(registry.voices(&model));
-        }
-        Message::Create(model, voice, mut params, reply) => {
-            let result = registry.validate(&model, &voice).and_then(|default_language| {
-                let language =
-                    params.model["language"].as_str().filter(|language| !language.is_empty()).unwrap_or(&default_language).to_owned();
-                params.model["language"] = serde_json::Value::String(language.clone());
-                let id = *next_id;
-                *next_id += 1;
-                let (tx, rx) = bounded(2);
-                requests.push(Request::new(id, model, voice, language, params, tx)?);
-                Ok((id, rx))
-            });
-            let _ = reply.send(result);
-        }
-        Message::Append(id, text, reply) => {
-            let result = find_request(requests, id).map(|request| request.append(text));
-            let _ = reply.send(result);
-        }
-        Message::Wake(id, reply) => {
-            let _ = reply.send(find_request(requests, id).map(drop));
-        }
-        Message::Force(id, reply) => {
-            let result = find_request(requests, id).map(|request| request.forced = true);
-            let _ = reply.send(result);
-        }
-        Message::Finish(id, reply) => {
-            let result = find_request(requests, id).map(Request::finish);
-            let _ = reply.send(result);
-        }
-        Message::Cancel(id, reply) => {
-            let result = find_request(requests, id).and_then(|request| {
-                registry.close_stream(&request.model, request.id)?;
-                request.cancelled = true;
-                request.text.clear();
-                request.committed = 0;
-                request.committed_chars = 0;
-                request.prepared.clear();
-                request.active = None;
-                request.deadline = None;
-                request.batch_at = None;
-                request.forced = false;
-                request.pending = 0;
-                request.nonce = request.nonce.wrapping_add(1);
-                let _ = request.output.send(Delivery::Error(Error::Cancelled));
-                Ok(())
-            });
-            let _ = reply.send(result);
-        }
-        Message::State(id, reply) => {
-            let _ = reply.send(find_request(requests, id).map(|request| request.state.clone()));
-        }
-        Message::Close(id, reply) => {
-            let result = find_request(requests, id).and_then(|request| registry.close_stream(&request.model, request.id));
-            if result.is_ok() {
-                requests.retain(|request| request.id != id);
-            }
-            let _ = reply.send(result);
-        }
-        Message::Complete(call, result) => super::scheduler::complete(registry, requests, call, result),
-        Message::Stop(reply) => {
-            let mut result = Ok(());
-            for request in requests.drain(..) {
-                if let Err(error) = registry.close_stream(&request.model, request.id) {
-                    result = Err(error);
-                }
-                let _ = request.output.send(Delivery::Error(Error::Shutdown));
-            }
-            let _ = reply.send(result);
-            return true;
-        }
-    }
-    false
 }

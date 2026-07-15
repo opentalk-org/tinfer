@@ -1,3 +1,4 @@
+mod common;
 #[path = "web_integration/contracts.rs"]
 mod contracts;
 #[path = "web_integration/http.rs"]

@@ -53,14 +53,14 @@ def architecture_id(
     max_diffusion_steps: int,
 ) -> str:
     description = {
-        "abi": "styletts2-window-128-v1",
+        "abi": "styletts2-bc-176-v1",
         "config": _canonical(model_config),
         "parameters": sorted((name, list(shape)) for name, shape in parameters),
         "limits": {
             "batch": max_batch,
             "tokens": max_tokens,
             "diffusion_steps": max_diffusion_steps,
-            "window": {"pre": 64, "core": 48, "post": 16},
+            "window": {"pre": 32, "core": 128, "post": 16},
         },
     }
     encoded = json.dumps(description, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()

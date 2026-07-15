@@ -21,9 +21,8 @@ fn main() {
         .file("src/models/stub/cpp/model.cpp")
         .file("src/models/styletts2/cpp/model.cpp")
         .file("src/models/styletts2/cpp/device.cpp")
+        .file("src/models/styletts2/cpp/gpu.cpp")
         .file("src/models/styletts2/cpp/pipeline.cpp")
-        .file("src/models/styletts2/cpp/prosody.cpp")
-        .file("src/models/styletts2/cpp/cuda/state.cpp")
         .file("src/models/styletts2/cpp/window.cpp")
         .file("src/models/styletts2/cpp/cpu/glue.cpp")
         .include(workspace)
@@ -99,15 +98,14 @@ fn main() {
     println!("cargo:rerun-if-changed=src/models/styletts2/cpp/cpu/glue.cpp");
     println!("cargo:rerun-if-changed=src/models/styletts2/cpp/model.hpp");
     println!("cargo:rerun-if-changed=src/models/styletts2/cpp/device.cpp");
+    println!("cargo:rerun-if-changed=src/models/styletts2/cpp/gpu.cpp");
     println!("cargo:rerun-if-changed=src/models/styletts2/cpp/pipeline.cpp");
-    println!("cargo:rerun-if-changed=src/models/styletts2/cpp/prosody.cpp");
     println!("cargo:rerun-if-changed=src/models/styletts2/cpp/session.hpp");
     println!("cargo:rerun-if-changed=src/models/styletts2/cpp/window.hpp");
     println!("cargo:rerun-if-changed=src/models/styletts2/cpp/window.cpp");
     println!("cargo:rerun-if-changed=src/models/styletts2/cpp/model.cpp");
     println!("cargo:rerun-if-changed=src/models/styletts2/cpp/cuda/glue.hpp");
     println!("cargo:rerun-if-changed=src/models/styletts2/cpp/cuda/kernels.cu");
-    println!("cargo:rerun-if-changed=src/models/styletts2/cpp/cuda/state.cpp");
     println!("cargo:rerun-if-env-changed=ORT_INCLUDE_DIR");
     println!("cargo:rerun-if-env-changed=ORT_LIB_DIR");
     println!("cargo:rerun-if-env-changed=TENSORRT_INCLUDE_DIR");

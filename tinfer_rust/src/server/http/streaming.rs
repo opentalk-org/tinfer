@@ -46,14 +46,14 @@ async fn stream(
     if request.text.trim().is_empty() {
         return Err(WebError::Validation("text must contain speech content".into()));
     }
-    let parsed = parse_query(&query, Transport::Http)?;
+    let parsed = parse_query(&query, Transport::Http, &app.settings)?;
     if parsed.output_format.encoding == AudioEncoding::WavPcm16 {
         return Err(WebError::Validation("WAV output is not supported for streaming".into()));
     }
     let admission = app.health.admit().ok_or(WebError::Unavailable)?;
     let model = resolve_model(&app.engine, request.model_id.clone()).await?;
     request.language_code = Some(resolve_language(&app.engine, &model, request.language_code.as_deref()).await?);
-    let params = request.stream_params(if timed { AlignmentType::Char } else { AlignmentType::None });
+    let params = request.stream_params(app.engine.stream_params(), if timed { AlignmentType::Char } else { AlignmentType::None });
     let stream = app.engine.create_stream(&model, &voice, params).await?;
     stream.add_text(&request.text).await?;
     stream.finish().await?;

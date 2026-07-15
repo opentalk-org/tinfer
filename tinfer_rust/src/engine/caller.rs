@@ -6,8 +6,8 @@ use crossbeam_channel::{Receiver, Sender};
 
 use super::engine::Message;
 use super::registry::EntryId;
-use crate::models::Model;
 use crate::ModelRequest;
+use crate::models::Model;
 
 #[derive(Clone)]
 pub(crate) struct Dispatch {

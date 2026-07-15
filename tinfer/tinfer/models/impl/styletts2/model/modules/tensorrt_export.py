@@ -320,6 +320,7 @@ def _build_engine_from_onnx(
     config = builder.create_builder_config()
     if hasattr(trt, "MemoryPoolType"):
         config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, workspace_bytes)
+    config.builder_optimization_level = 5
     if profile_shapes is not None:
         profile = builder.create_optimization_profile()
         for name, (min_shape, opt_shape, max_shape) in profile_shapes.items():

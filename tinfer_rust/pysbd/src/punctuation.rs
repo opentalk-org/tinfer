@@ -23,8 +23,8 @@ pub(crate) fn between_without_slanted_quotes(text: &str) -> Result<String> {
 
 fn between_patterns(text: &str, skip_slanted_quotes: bool, mode: PunctuationMode) -> Result<String> {
     let mut output = text.to_owned();
-    let parentheses = regex::Regex::new(r"\([^()]*\)")
-        .map_err(|error| Error::Regex { pattern: BETWEEN[4].into(), message: error.to_string() })?;
+    let parentheses =
+        regex::Regex::new(r"\([^()]*\)").map_err(|error| Error::Regex { pattern: BETWEEN[4].into(), message: error.to_string() })?;
     for (index, pattern) in BETWEEN.iter().enumerate() {
         if index == 7 && (skip_slanted_quotes || !output.contains('”')) {
             continue;

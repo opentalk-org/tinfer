@@ -14,10 +14,7 @@ fn punct_set_from_string(punctuation: &str) -> BTreeSet<u32> {
     out
 }
 
-pub fn split_by_punctuation_impl(
-    text: &str,
-    punctuation: &str,
-) -> (Vec<String>, Vec<(i32, String)>) {
+pub fn split_by_punctuation_impl(text: &str, punctuation: &str) -> (Vec<String>, Vec<(i32, String)>) {
     let bytes = text.as_bytes();
 
     let mut cps: Vec<u32> = Vec::new();
@@ -43,8 +40,7 @@ pub fn split_by_punctuation_impl(
         }
 
         let start = ci;
-        while ci < n && (char_match::is_digit_cp(cps[ci]) || char_match::is_number_sep_cp(cps[ci]))
-        {
+        while ci < n && (char_match::is_digit_cp(cps[ci]) || char_match::is_number_sep_cp(cps[ci])) {
             ci += 1;
         }
         while ci > start && !char_match::is_digit_cp(cps[ci - 1]) {

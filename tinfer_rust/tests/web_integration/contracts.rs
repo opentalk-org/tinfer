@@ -64,3 +64,16 @@ async fn nested_speech_fields_are_strictly_validated() {
     }
     server.stop().await;
 }
+
+#[tokio::test]
+async fn websocket_routes_can_be_disabled_without_disabling_http() {
+    let server = TestServer::start_with_websockets(false).await;
+    assert_eq!(server.client.get(server.url("/v1/models")).send().await.unwrap().status(), 200);
+    let error = tokio_tungstenite::connect_async(server.ws_url("/v1/text-to-speech/default/stream-input?model_id=stub")).await.unwrap_err();
+    let status = match error {
+        tokio_tungstenite::tungstenite::Error::Http(response) => response.status(),
+        other => panic!("expected HTTP handshake error, got {other}"),
+    };
+    assert_eq!(status.as_u16(), 404);
+    server.stop().await;
+}

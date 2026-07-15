@@ -8,6 +8,7 @@ from torch.nn.utils import remove_weight_norm
 from tinfer.models.impl.styletts2.model.modules import istftnet
 from tinfer.models.impl.styletts2.model.modules.blocks import AdaLayerNorm
 from tinfer.models.impl.styletts2.model.modules.decoder_blocks import DecoderBackbone
+from tools.styletts2_model_scripts.fourier import stft20
 
 
 def strip_weight_norm(module: nn.Module) -> None:
@@ -156,44 +157,68 @@ class EngineA(nn.Module):
         return (duration, encoded, text, style, ref, bert, duration_encoding, *splits)
 
 
-class EngineB(nn.Module):
-    def __init__(self, predictor: nn.Module) -> None:
+class EngineBC(nn.Module):
+    def __init__(self, predictor: nn.Module, decoder: nn.Module) -> None:
         super().__init__()
         self.predictor = predictor
+        self.decoder = decoder
 
-    def forward(self, encoding: torch.Tensor, style: torch.Tensor) -> tuple[torch.Tensor, ...]:
+    def _prosody(self, encoding: torch.Tensor, style: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         shared, _ = self.predictor.shared(encoding.transpose(1, 2))
         f0 = shared.transpose(1, 2)
         noise = shared.transpose(1, 2)
-        splits = []
         for block in self.predictor.F0:
             f0 = block(f0, style)
-            splits.append(f0)
         for block in self.predictor.N:
             noise = block(noise, style)
-            splits.append(noise)
-        return (self.predictor.F0_proj(f0).squeeze(1), self.predictor.N_proj(noise).squeeze(1), *splits[:6])
+        return self.predictor.F0_proj(f0).squeeze(1), self.predictor.N_proj(noise).squeeze(1)
 
-
-class EngineC(nn.Module):
-    def __init__(self, decoder: nn.Module) -> None:
-        super().__init__()
-        self.decoder = decoder
+    def _harmonic(
+        self,
+        f0: torch.Tensor,
+        phase: torch.Tensor,
+        source_noise: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        phase_f0 = f0.float().unsqueeze(2)
+        harmonics = torch.arange(1, 10, device=f0.device, dtype=torch.float32).view(1, 1, 9)
+        increments = phase_f0 * harmonics * (2.0 * torch.pi / 24000.0)
+        phases = phase.float().unsqueeze(1) + torch.cumsum(increments, dim=1)
+        sample_phases = F.interpolate(
+            phases.transpose(1, 2), size=105600, mode="linear", align_corners=False
+        ).transpose(1, 2) * 300.0
+        voiced = F.interpolate(f0.unsqueeze(1), size=105600, mode="nearest").transpose(1, 2) > 10.0
+        waves = torch.sin(sample_phases).to(f0.dtype) * 0.1
+        voiced_noise = source_noise * 0.003
+        unvoiced_noise = source_noise * (0.1 / 3.0)
+        source = torch.where(voiced, waves + voiced_noise, unvoiced_noise)
+        source = self.decoder.generator.m_source.l_tanh(
+            self.decoder.generator.m_source.l_linear(source)
+        ).squeeze(2)
+        magnitude, source_phase = stft20(source, self.decoder.generator.stft.window)
+        harmonic = torch.cat((magnitude, source_phase), dim=1)
+        next_phase = phases[:, 255, :]
+        next_phase = next_phase - torch.floor(next_phase / (2.0 * torch.pi)) * (2.0 * torch.pi)
+        return harmonic, next_phase
 
     def forward(
-        self, asr: torch.Tensor, f0: torch.Tensor, noise: torch.Tensor, style: torch.Tensor, harmonic: torch.Tensor
-    ) -> tuple[torch.Tensor, ...]:
+        self,
+        encoding: torch.Tensor,
+        asr: torch.Tensor,
+        style: torch.Tensor,
+        reference: torch.Tensor,
+        phase: torch.Tensor,
+        source_noise: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        f0, noise = self._prosody(encoding, style)
+        harmonic, next_phase = self._harmonic(f0, phase, source_noise)
         generator = self.decoder.generator
-        value, _ = DecoderBackbone.forward(self.decoder, asr, f0, noise, style)
-        splits = [value]
+        value, _ = DecoderBackbone.forward(self.decoder, asr, f0, noise, reference)
         for index in range(generator.num_upsamples):
             value = F.leaky_relu(value, istftnet.LRELU_SLOPE)
-            source = generator.noise_res[index](generator.noise_convs[index](harmonic), style)
-            splits.append(source)
+            source = generator.noise_res[index](generator.noise_convs[index](harmonic), reference)
             value = generator.ups[index](value)
             if index == generator.num_upsamples - 1:
                 value = generator.reflection_pad(value)
-            splits.append(value)
-            value = generator._process_resblocks(value + source, style, index)
-            splits.append(value)
-        return (generator._generate_output(value), *splits[:7])
+            value = generator._process_resblocks(value + source, reference, index)
+        audio = generator._generate_output(value)
+        return audio[:, :, 19200:96000], next_phase

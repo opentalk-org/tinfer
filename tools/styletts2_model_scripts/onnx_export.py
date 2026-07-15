@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 
 from tools.styletts2_model_scripts.artifacts import write_tinf
-from tools.styletts2_model_scripts.model_graphs import EngineA, EngineB, EngineC, strip_weight_norm
+from tools.styletts2_model_scripts.model_graphs import EngineA, EngineBC, strip_weight_norm
 
 
 def promote_weights(model: onnx.ModelProto) -> dict[str, np.ndarray]:
@@ -45,8 +45,8 @@ def export_variant(
 ) -> None:
     output.mkdir(parents=True)
     token_count = min(32, max_tokens)
-    frame_count = 128
-    wrappers = (EngineA(model, max_diffusion_steps), EngineB(model.predictor), EngineC(model.decoder))
+    frame_count = 176
+    wrappers = (EngineA(model, max_diffusion_steps), EngineBC(model.predictor, model.decoder))
     for wrapper in wrappers:
         strip_weight_norm(wrapper)
         wrapper.eval().to(device=device, dtype=dtype)
@@ -59,21 +59,13 @@ def export_variant(
     os.environ["TINFER_TRT_EXPORT"] = "1"
     try:
         _export_a(wrappers[0], output, device, dtype, token_count, max_diffusion_steps)
-        _export_b(wrappers[1], output, device, dtype, frame_count, model.predictor.shared.input_size)
-        _export_c(wrappers[2], output, device, dtype, frame_count, model_config.hidden_dim)
+        _export_bc(
+            wrappers[1], output, device, dtype, frame_count,
+            model.predictor.shared.input_size, model_config.hidden_dim,
+        )
     finally:
         _restore_environment("TINFER_ADAIN_NATIVE", old_adain)
         _restore_environment("TINFER_TRT_EXPORT", old_export)
-
-    linear = model.decoder.generator.m_source.l_linear
-    write_tinf(
-        output / "glue.tinf",
-        {
-            "linW": linear.weight.detach().reshape(-1).to(dtype).cpu().numpy(),
-            "linB": linear.bias.detach().reshape(-1).to(dtype).cpu().numpy(),
-        },
-    )
-
 
 def _export_a(
     wrapper: nn.Module,
@@ -117,43 +109,31 @@ def _export_a(
     _save_weight_input_graph(wrapper, inputs, input_names, output_names, dynamic, output, "A")
 
 
-def _export_b(
+def _export_bc(
     wrapper: nn.Module,
     output: Path,
     device: str,
     dtype: torch.dtype,
     frames: int,
-    channels: int,
-) -> None:
-    inputs = (torch.randn(1, channels, frames, device=device, dtype=dtype), torch.randn(1, 128, device=device, dtype=dtype))
-    splits = [f"split{index}" for index in range(6)]
-    dynamic = {"en": {0: "B"}, "s": {0: "B"}, "f0": {0: "B"}, "noise": {0: "B"}}
-    dynamic.update({name: {0: "B"} for name in splits})
-    _save_weight_input_graph(wrapper, inputs, ["en", "s"], ["f0", "noise", *splits], dynamic, output, "B")
-
-
-def _export_c(
-    wrapper: nn.Module,
-    output: Path,
-    device: str,
-    dtype: torch.dtype,
-    frames: int,
-    channels: int,
+    encoding_channels: int,
+    asr_channels: int,
 ) -> None:
     inputs = (
-        torch.randn(1, channels, frames, device=device, dtype=dtype),
-        torch.randn(1, frames * 2, device=device, dtype=dtype),
-        torch.randn(1, frames * 2, device=device, dtype=dtype),
+        torch.randn(1, encoding_channels, frames, device=device, dtype=dtype),
+        torch.randn(1, asr_channels, frames, device=device, dtype=dtype),
         torch.randn(1, 128, device=device, dtype=dtype),
-        torch.randn(1, 22, frames * 120 + 1, device=device, dtype=dtype),
+        torch.randn(1, 128, device=device, dtype=dtype),
+        torch.zeros(1, 9, device=device, dtype=torch.float32),
+        torch.randn(1, frames * 600, 9, device=device, dtype=dtype),
     )
-    splits = [f"split{index}" for index in range(7)]
     dynamic = {
-        "asr": {0: "B"}, "f0": {0: "B"}, "noise": {0: "B"}, "style": {0: "B"},
-        "har": {0: "B"}, "audio": {0: "B"},
+        "en": {0: "B"}, "asr": {0: "B"}, "s": {0: "B"}, "ref": {0: "B"},
+        "phase": {0: "B"}, "source_noise": {0: "B"}, "audio": {0: "B"}, "next_phase": {0: "B"},
     }
-    dynamic.update({name: {0: "B"} for name in splits})
-    _save_weight_input_graph(wrapper, inputs, ["asr", "f0", "noise", "style", "har"], ["audio", *splits], dynamic, output, "C")
+    _save_weight_input_graph(
+        wrapper, inputs, ["en", "asr", "s", "ref", "phase", "source_noise"],
+        ["audio", "next_phase"], dynamic, output, "BC",
+    )
 
 
 def _save_weight_input_graph(
