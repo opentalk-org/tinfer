@@ -8,13 +8,13 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::Router;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::header;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use base64::Engine as _;
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 
 use self::wire::{
     HealthResponse, LiveResponse, ModelResponse, TimedAudio, Timing, VoiceResponse, VoicesResponse, WebError, WsAudio, WsSpeech, encode,
@@ -129,81 +129,101 @@ async fn websocket(
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<Response, WebError> {
     let admission = app.health.admit().ok_or(WebError::Unavailable)?;
-    let format = parse_query(&query, Transport::WebSocket)?.output_format;
+    let parsed = parse_query(&query, Transport::WebSocket)?;
+    let format = parsed.output_format;
     let model = resolve_model(&app.engine, query.get("model_id").cloned()).await?;
     if !app.engine.get_voice_ids(&model).await?.contains(&voice) {
         return Err(Error::Catalog(format!("unknown voice: {voice}")).into());
     }
-    Ok(ws.on_upgrade(move |socket| websocket_session(socket, app.engine, model, voice, format, admission)))
+    Ok(ws.on_upgrade(move |socket| websocket_session(socket, app.engine, model, voice, format, parsed, admission)))
 }
 
 async fn websocket_session(
-    socket: WebSocket,
+    mut socket: WebSocket,
     engine: AsyncEngine,
     model: String,
     voice: String,
     format: AudioFormat,
+    query: super::http::SpeechQuery,
     _admission: super::health::Admission,
 ) {
-    let Ok(stream) = engine.create_stream(&model, &voice, StreamParams::default()).await else {
+    let params = StreamParams {
+        alignment_type: if query.sync_alignment { AlignmentType::Char } else { AlignmentType::None },
+        ..StreamParams::default()
+    };
+    let Ok(stream) = engine.create_stream(&model, &voice, params).await else {
         return;
     };
-    let (mut output, mut input) = socket.split();
-    let output_stream = stream.clone();
-    let writer = tokio::spawn(async move {
+    let (audio_tx, mut audio_rx) = tokio::sync::mpsc::channel(4);
+    let audio_stream = stream.clone();
+    let pump = tokio::spawn(async move {
         loop {
-            match output_stream.recv_marked().await {
-                Ok((Some(chunk), _)) => {
-                    let Ok(audio) = encode(chunk, format) else {
-                        break;
-                    };
-                    let message = serde_json::to_string(&WsAudio::audio(audio)).expect("WebSocket response is serializable");
-                    if output.send(Message::Text(message.into())).await.is_err() {
-                        break;
-                    }
-                }
-                Ok((None, true)) => {
-                    let message = serde_json::to_string(&WsAudio::final_message()).expect("WebSocket response is serializable");
-                    let _ = output.send(Message::Text(message.into())).await;
-                    break;
-                }
-                Ok((None, false)) => {}
-                Err(_) => break,
+            let delivery = audio_stream.recv_marked().await;
+            let finished = matches!(delivery, Ok((None, true)) | Err(_));
+            if audio_tx.send(delivery).await.is_err() || finished {
+                break;
             }
         }
     });
     let mut initialized = false;
     let mut finalized = false;
-    while let Some(Ok(Message::Text(raw))) = input.next().await {
-        let Ok(message) = serde_json::from_str::<WsSpeech>(&raw) else {
-            break;
-        };
-        if !initialized {
-            if message.text != " " {
-                break;
+    let deadline = tokio::time::sleep(query.inactivity_timeout);
+    tokio::pin!(deadline);
+    loop {
+        tokio::select! {
+            frame = socket.next() => match frame {
+                Some(Ok(Message::Text(raw))) => {
+                    deadline.as_mut().reset(tokio::time::Instant::now() + query.inactivity_timeout);
+                    let Ok(message) = serde_json::from_str::<WsSpeech>(&raw) else { policy_close(&mut socket, "message must be valid JSON").await; break };
+                    if !initialized {
+                        if message.text != " " { policy_close(&mut socket, "first message text must be exactly \" \"").await; break }
+                        initialized = true;
+                    } else if message.text.is_empty() {
+                        finalized = stream.finish().await.is_ok();
+                    } else if !message.text.ends_with(' ') {
+                        policy_close(&mut socket, "text must end in a space").await; break
+                    } else {
+                        if stream.add_text(&message.text).await.is_err() { break }
+                        if message.flush { let _ = stream.force_generate().await; }
+                        else if message.try_trigger_generation { let _ = stream.try_generate().await; }
+                    }
+                }
+                Some(Ok(Message::Binary(_))) => { policy_close(&mut socket, "binary messages are not supported").await; break }
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                _ => {}
+            },
+            delivery = audio_rx.recv(), if initialized => match delivery {
+                Some(Ok((Some(chunk), _))) => {
+                    let alignment = if query.sync_alignment { chunk.alignment.clone() } else { None };
+                    let Ok(bytes) = encode(chunk, format) else { break };
+                    let payload = serde_json::to_string(&WsAudio::audio(bytes, alignment)).expect("serializable response");
+                    if socket.send(Message::Text(payload.into())).await.is_err() { break }
+                }
+                Some(Ok((None, true))) => {
+                    let payload = serde_json::to_string(&WsAudio::final_message()).expect("serializable response");
+                    let _ = socket.send(Message::Text(payload.into())).await;
+                    let _ = socket.send(Message::Close(Some(CloseFrame { code: 1000, reason: "complete".into() }))).await;
+                    break;
+                }
+                Some(Err(_)) | None => break,
+                Some(Ok((None, false))) => {}
+            },
+            () = &mut deadline, if initialized && !finalized => {
+                policy_close(&mut socket, "inactivity timeout").await; break
             }
-            initialized = true;
-            continue;
-        }
-        if message.text.is_empty() {
-            finalized = stream.finish().await.is_ok();
-            break;
-        }
-        if stream.add_text(&message.text).await.is_err() {
-            break;
-        }
-        if message.flush && stream.force_generate().await.is_err() {
-            break;
-        }
-        if !message.flush && message.try_trigger_generation && stream.try_generate().await.is_err() {
-            break;
         }
     }
     if !finalized {
         let _ = stream.cancel().await;
     }
-    let _ = writer.await;
+    pump.abort();
     let _ = stream.close().await;
+}
+
+async fn policy_close(socket: &mut WebSocket, error: &str) {
+    let payload = serde_json::json!({"error": error}).to_string();
+    let _ = socket.send(Message::Text(payload.into())).await;
+    let _ = socket.send(Message::Close(Some(CloseFrame { code: 1008, reason: error.into() }))).await;
 }
 
 async fn generate(engine: &AsyncEngine, voice: String, request: Speech) -> Result<AudioChunk, WebError> {

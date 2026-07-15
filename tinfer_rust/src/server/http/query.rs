@@ -14,6 +14,7 @@ pub(crate) enum Transport {
 pub(crate) struct SpeechQuery {
     pub output_format: AudioFormat,
     pub inactivity_timeout: Duration,
+    pub sync_alignment: bool,
 }
 
 pub(crate) fn parse_query(values: &HashMap<String, String>, transport: Transport) -> Result<SpeechQuery, WebError> {
@@ -51,7 +52,8 @@ pub(crate) fn parse_query(values: &HashMap<String, String>, transport: Transport
     {
         return Err(WebError::Validation("unsupported output_format for WebSocket".into()));
     }
-    Ok(SpeechQuery { output_format: format, inactivity_timeout: Duration::from_secs(timeout) })
+    let sync_alignment = values.get("sync_alignment").is_some_and(|value| value.eq_ignore_ascii_case("true"));
+    Ok(SpeechQuery { output_format: format, inactivity_timeout: Duration::from_secs(timeout), sync_alignment })
 }
 
 fn parse_bool(values: &HashMap<String, String>, field: &str) -> Result<(), WebError> {

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::str::FromStr;
 
 use axum::Json;
 use axum::body::Bytes;
@@ -94,16 +93,45 @@ pub(crate) struct WsAudio {
     pub audio: String,
     #[serde(rename = "isFinal")]
     pub is_final: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alignment: Option<WsAlignment>,
+    #[serde(rename = "normalizedAlignment", skip_serializing_if = "Option::is_none")]
+    pub normalized_alignment: Option<WsAlignment>,
 }
 
 impl WsAudio {
-    pub(crate) fn audio(bytes: Bytes) -> Self {
+    pub(crate) fn audio(bytes: Bytes, alignment: Option<crate::Alignment>) -> Self {
         use base64::Engine as _;
-        Self { audio: base64::engine::general_purpose::STANDARD.encode(bytes), is_final: false }
+        let alignment = alignment.map(WsAlignment::from);
+        Self {
+            audio: base64::engine::general_purpose::STANDARD.encode(bytes),
+            is_final: false,
+            normalized_alignment: alignment.clone(),
+            alignment,
+        }
     }
 
     pub(crate) fn final_message() -> Self {
-        Self { audio: String::new(), is_final: true }
+        Self { audio: String::new(), is_final: true, alignment: None, normalized_alignment: None }
+    }
+}
+
+#[derive(Clone, Serialize)]
+pub(crate) struct WsAlignment {
+    chars: Vec<String>,
+    #[serde(rename = "charStartTimesMs")]
+    char_start_times_ms: Vec<u64>,
+    #[serde(rename = "charDurationsMs")]
+    char_durations_ms: Vec<u64>,
+}
+
+impl From<crate::Alignment> for WsAlignment {
+    fn from(alignment: crate::Alignment) -> Self {
+        Self {
+            chars: alignment.items.iter().map(|item| item.item.clone()).collect(),
+            char_start_times_ms: alignment.items.iter().map(|item| item.start_ms).collect(),
+            char_durations_ms: alignment.items.iter().map(|item| item.end_ms.saturating_sub(item.start_ms)).collect(),
+        }
     }
 }
 
@@ -150,11 +178,6 @@ impl IntoResponse for WebError {
         let body = ErrorBody { detail: ErrorDetail { status: status.as_u16(), message } };
         (status, Json(body)).into_response()
     }
-}
-
-pub(crate) fn output_format(query: &HashMap<String, String>) -> Result<AudioFormat, WebError> {
-    AudioFormat::from_str(query.get("output_format").map_or("mp3_44100_128", String::as_str))
-        .map_err(|error| WebError::Validation(error.to_string()))
 }
 
 pub(crate) fn encode(chunk: AudioChunk, format: AudioFormat) -> Result<Bytes, WebError> {
