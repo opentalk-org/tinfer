@@ -23,7 +23,7 @@ use self::wire::{
 use super::http::{Speech, Transport, parse_query, parse_speech};
 use super::health::HealthState;
 use crate::audio::{AudioEncoding, AudioFormat};
-use crate::{AsyncEngine, AudioChunk, Error, StreamParams};
+use crate::{Alignment, AlignmentType, AsyncEngine, AudioChunk, Error, StreamParams};
 
 #[derive(Clone)]
 struct App {
@@ -113,7 +113,7 @@ async fn timing(
     let request = parse_speech(value)?;
     let _admission = app.health.admit().ok_or(WebError::Unavailable)?;
     let format = parse_query(&query, Transport::Http)?.output_format;
-    let chunk = generate(&app.engine, voice, request).await?;
+    let chunk = generate_timed(&app.engine, voice, request).await?;
     let timing = Timing::from(chunk.alignment.clone().unwrap_or_default());
     Ok(Json(TimedAudio {
         audio_base64: base64::engine::general_purpose::STANDARD.encode(encode(chunk, format)?),
@@ -213,6 +213,34 @@ async fn generate(engine: &AsyncEngine, voice: String, request: Speech) -> Resul
     let model = resolve_model(engine, request.model_id).await?;
     let params = StreamParams { model: serde_json::json!({ "language": request.language_code }), ..StreamParams::default() };
     Ok(engine.generate_full(&model, &voice, &request.text, params).await?)
+}
+
+async fn generate_timed(engine: &AsyncEngine, voice: String, request: Speech) -> Result<AudioChunk, WebError> {
+    if request.text.trim().is_empty() {
+        return Err(WebError::Validation("text must contain speech content".into()));
+    }
+    let model = resolve_model(engine, request.model_id).await?;
+    let params = StreamParams {
+        alignment_type: AlignmentType::Char,
+        model: serde_json::json!({ "language": request.language_code }),
+        ..StreamParams::default()
+    };
+    let stream = engine.create_stream(&model, &voice, params).await?;
+    stream.add_text(&request.text).await?;
+    stream.force_generate().await?;
+    let mut chunks = Vec::new();
+    while let Some(chunk) = stream.recv().await? {
+        chunks.push(chunk);
+    }
+    stream.close().await?;
+    merge_timed(chunks)
+}
+
+fn merge_timed(chunks: Vec<AudioChunk>) -> Result<AudioChunk, WebError> {
+    let alignments = chunks.iter().filter_map(|chunk| chunk.alignment.as_ref()).flat_map(|alignment| alignment.items.clone()).collect();
+    let mut merged = AudioChunk::merge(chunks)?;
+    merged.alignment = Some(Alignment { items: alignments, kind: AlignmentType::Char });
+    Ok(merged)
 }
 
 async fn resolve_model(engine: &AsyncEngine, requested: Option<String>) -> Result<String, Error> {
