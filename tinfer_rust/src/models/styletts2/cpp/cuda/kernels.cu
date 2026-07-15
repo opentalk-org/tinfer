@@ -81,6 +81,24 @@ __global__ void phase_kernel(const __half* f0, float* phases,
   }
 }
 
+__global__ void append_phase_kernel(const __half* f0, float* phases,
+                                    std::int32_t start,
+                                    std::int32_t count) {
+  const auto harmonic = threadIdx.x;
+  if (harmonic >= kHarmonics) return;
+  auto phase = phases[start * kHarmonics + harmonic];
+  for (std::int32_t frame = 0; frame < count; ++frame) {
+    for (std::int32_t half = 0; half < 2; ++half) {
+      phase += 2.0F * kPi * fmodf(
+          __half2float(f0[(start + frame) * 2 + half]) * (harmonic + 1) /
+              kSampleRate,
+          1.0F);
+    }
+    phases[(start + frame + 1) * kHarmonics + harmonic] =
+        fmodf(phase, 2.0F * kPi);
+  }
+}
+
 __device__ std::uint32_t hash(std::uint32_t value) {
   value ^= value >> 16;
   value *= 0x7feb352dU;
@@ -182,6 +200,11 @@ void source_to_har(const __half* f0, const __half* weights,
       f0, phases, phase_state, advances, batch, f0_frames);
   source_kernel<<<dim3((samples + 255) / 256, batch), 256, 0, stream>>>(f0, phases, weights, bias, seeds, source, f0_frames, randomize);
   stft_kernel<<<dim3((samples / kHop + 128) / 128, batch), 128, 0, stream>>>(source, har, batch, samples);
+}
+
+void append_phases(const __half* f0, float* phases, std::int32_t start,
+                   std::int32_t count, cudaStream_t stream) {
+  append_phase_kernel<<<1, 32, 0, stream>>>(f0, phases, start, count);
 }
 
 }  // namespace tinfer::styletts2::cuda

@@ -27,5 +27,7 @@ void source_to_har(const __half* f0, const __half* weights,
                    const std::int32_t* advances, float* source,
                    std::int32_t batch, std::int32_t frames, bool randomize,
                    cudaStream_t stream);
+void append_phases(const __half* f0, float* phases, std::int32_t start,
+                   std::int32_t count, cudaStream_t stream);
 
 }  // namespace tinfer::styletts2::cuda

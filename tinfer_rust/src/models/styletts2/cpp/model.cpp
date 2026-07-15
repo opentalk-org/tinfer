@@ -47,8 +47,8 @@ Output StyleTts2Model::run(const Batch& batch) const {
     throw std::invalid_argument("StyleTTS2 request is missing its operation");
   }
   const auto value = *reinterpret_cast<const std::int32_t*>(operation->data.data());
-  if (value == 0) return device_ < 0 ? start_cpu(batch) : start_cuda(batch);
-  if (value == 1) return device_ < 0 ? continue_cpu(batch) : continue_cuda(batch);
+  if (value == 0) return start(batch);
+  if (value == 1) return continue_generation(batch);
   if (value == 2) return close(batch);
   throw std::invalid_argument("invalid StyleTTS2 operation");
 }

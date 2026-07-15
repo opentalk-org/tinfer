@@ -62,6 +62,10 @@ impl Registry {
         Some((entry.id, entry.model.clone(), entry.max_batch))
     }
 
+    pub fn batch_capacity(&self, model: &str) -> Option<usize> {
+        self.entries.iter().find(|entry| entry.model.info().model_id == model).map(|entry| entry.max_batch)
+    }
+
     pub fn close_stream(&self, model: &str, stream_id: u64) -> Result<()> {
         for entry in self.entries.iter().filter(|entry| entry.model.info().model_id == model) {
             entry.model.close_stream(stream_id)?;

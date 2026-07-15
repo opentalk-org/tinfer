@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded};
 
@@ -56,8 +57,9 @@ impl Engine {
         let (work_tx, work_rx) = bounded(config.queue_capacity);
         let caller_count = config.models.len().max(1);
         let caller_joins = callers(caller_count, work_rx, tx.clone());
+        let batch_wait = Duration::from_millis(config.timeout_ms);
         let join = std::thread::spawn(move || {
-            coordinate(loaded, rx, work_tx);
+            coordinate(loaded, rx, work_tx, batch_wait);
             for join in caller_joins {
                 join.join().expect("caller thread must not panic");
             }
@@ -172,7 +174,7 @@ fn request<T>(engine: &Sender<Message>, message: impl FnOnce(Sender<Result<T>>) 
     rx.recv().map_err(|_| Error::Shutdown)?
 }
 
-fn coordinate(loaded: Vec<(Arc<dyn Model>, usize)>, rx: Receiver<Message>, work: Sender<Call>) {
+fn coordinate(loaded: Vec<(Arc<dyn Model>, usize)>, rx: Receiver<Message>, work: Sender<Call>, batch_wait: Duration) {
     let mut registry = Registry::default();
     for (model, max_batch) in loaded {
         registry.add(model, max_batch);
@@ -190,7 +192,7 @@ fn coordinate(loaded: Vec<(Arc<dyn Model>, usize)>, rx: Receiver<Message>, work:
                 return;
             }
         }
-        dispatch(&mut registry, &mut requests, &work);
+        dispatch(&mut registry, &mut requests, &work, batch_wait);
         if stop {
             return;
         }
@@ -260,6 +262,7 @@ fn process(message: Message, registry: &mut Registry, requests: &mut Vec<Request
                 request.prepared.clear();
                 request.active = None;
                 request.deadline = None;
+                request.batch_at = None;
                 request.forced = false;
                 request.pending = 0;
                 request.nonce = request.nonce.wrapping_add(1);

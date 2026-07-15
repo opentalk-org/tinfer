@@ -13,6 +13,10 @@ struct StyleTts2Session {
   std::vector<float> encoding;
   std::vector<float> style;
   std::vector<float> reference;
+  std::vector<float> f0;
+  std::vector<float> noise;
+  std::vector<float> phase_frames;
+  Buffer device_prosody;
   std::vector<std::int32_t> durations;
   std::vector<std::int32_t> starts;
   std::vector<float> tail_text;
@@ -22,6 +26,7 @@ struct StyleTts2Session {
   std::int32_t channels = 0;
   std::int32_t frames = 0;
   std::int32_t cursor = 0;
+  std::int32_t prosody_cursor = 0;
   std::uint64_t seed = 0;
   std::uint64_t frame_offset = 0;
   std::array<float, 9> phase{};

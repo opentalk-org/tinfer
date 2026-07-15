@@ -30,6 +30,7 @@ pub(crate) struct Request {
     pub finished: bool,
     pub cancelled: bool,
     pub deadline: Option<Instant>,
+    pub batch_at: Option<Instant>,
     pub prepared: VecDeque<PreparedChunk>,
     pub active: Option<ActiveChunk>,
     pub created_at: Instant,
@@ -58,6 +59,7 @@ impl Request {
             finished: false,
             cancelled: false,
             deadline: None,
+            batch_at: None,
             prepared: VecDeque::new(),
             active: None,
             created_at: Instant::now(),
@@ -88,7 +90,7 @@ impl Request {
         }
     }
 
-    fn prepare(&mut self, now: Instant) -> Result<bool> {
+    fn prepare(&mut self, now: Instant, batch_wait: Duration) -> Result<bool> {
         if self.cancelled || self.pending > 0 {
             return Ok(false);
         }
@@ -123,6 +125,7 @@ impl Request {
                 chunk
             })
             .collect();
+        self.batch_at = Some(now + batch_wait);
         Ok(true)
     }
 
@@ -142,8 +145,9 @@ pub(crate) fn next_wait(requests: &[Request]) -> Duration {
     let now = Instant::now();
     requests
         .iter()
-        .filter(|request| request.pending == 0 && request.prepared.is_empty())
+        .filter(|request| request.pending == 0 && request.active.is_none())
         .filter_map(|request| request.deadline)
+        .chain(requests.iter().filter_map(|request| request.batch_at))
         .min()
         .map_or(Duration::from_secs(3_600), |deadline| deadline.saturating_duration_since(now))
 }
@@ -158,12 +162,12 @@ pub(crate) fn unload(requests: &mut Vec<Request>, model: &str) {
     });
 }
 
-pub(crate) fn dispatch(registry: &mut Registry, requests: &mut [Request], work: &Sender<Call>) {
+pub(crate) fn dispatch(registry: &mut Registry, requests: &mut [Request], work: &Sender<Call>, batch_wait: Duration) {
     let now = Instant::now();
     let mut ready: HashMap<String, Vec<usize>> = HashMap::new();
     let mut model_order = Vec::new();
     for (index, request) in requests.iter_mut().enumerate() {
-        match request.prepare(now) {
+        match request.prepare(now, batch_wait) {
             Ok(true) => {
                 if !ready.contains_key(&request.model) {
                     model_order.push(request.model.clone());
@@ -182,6 +186,15 @@ pub(crate) fn dispatch(registry: &mut Registry, requests: &mut [Request], work: 
     model_order.sort_by_key(|model| std::cmp::Reverse(ready[model].first().map_or(0, |index| requests[*index].priority(now))));
     for model_id in model_order {
         let indices = ready.get_mut(&model_id).expect("model came from ready map");
+        let starts = indices.iter().filter(|index| requests[**index].active.is_none()).count();
+        let capacity = registry.batch_capacity(&model_id).expect("ready model is loaded");
+        let start_due = indices
+            .iter()
+            .filter(|index| requests[**index].active.is_none())
+            .any(|index| requests[*index].batch_at.is_none_or(|deadline| deadline <= now));
+        if starts == indices.len() && starts < capacity && !start_due {
+            continue;
+        }
         while !indices.is_empty() {
             let Some((position, (entry, model, max_batch))) = indices.iter().enumerate().find_map(|(position, index)| {
                 let pinned = requests[*index].active.as_ref().map(|active| active.entry);
@@ -214,6 +227,7 @@ pub(crate) fn dispatch(registry: &mut Registry, requests: &mut [Request], work: 
                     request.active = Some(ActiveChunk { entry, text: chunk.text, span: chunk.span });
                     request.text_index += 1;
                     request.start_time = Some(now);
+                    request.batch_at = None;
                     request.collected_time = Duration::ZERO;
                     request.deadline = (request.committed < request.text.len()).then(|| now + request.params.timeout);
                 }

@@ -16,11 +16,10 @@ void copy_frame(const native::StyleTts2Session& session, std::int32_t frame,
   if (frame < 0) {
     const auto tail_frame = session.tail_frames + frame;
     if (tail_frame < 0) return;
-    for (std::int32_t channel = 0; channel < 512; ++channel) {
-      asr[channel * output_frames + output_frame] =
-          session.tail_text[channel * session.tail_frames + tail_frame];
+    for (std::int32_t channel = 0; asr != nullptr && channel < 512; ++channel) {
+      asr[channel * output_frames + output_frame] = session.tail_text[channel * session.tail_frames + tail_frame];
     }
-    for (std::int32_t channel = 0; channel < session.channels; ++channel) {
+    for (std::int32_t channel = 0; encoding != nullptr && channel < session.channels; ++channel) {
       encoding[channel * output_frames + output_frame] =
           session.tail_encoding[channel * session.tail_frames + tail_frame];
     }
@@ -28,11 +27,11 @@ void copy_frame(const native::StyleTts2Session& session, std::int32_t frame,
   }
   if (frame >= session.frames) return;
   const auto token = token_at(session, frame);
-  for (std::int32_t channel = 0; channel < 512; ++channel) {
+  for (std::int32_t channel = 0; asr != nullptr && channel < 512; ++channel) {
     asr[channel * output_frames + output_frame] =
         session.text[channel * session.tokens + token];
   }
-  for (std::int32_t channel = 0; channel < session.channels; ++channel) {
+  for (std::int32_t channel = 0; encoding != nullptr && channel < session.channels; ++channel) {
     encoding[channel * output_frames + output_frame] =
         session.encoding[token * session.channels + channel];
   }
@@ -42,6 +41,12 @@ void copy_frame(const native::StyleTts2Session& session, std::int32_t frame,
 void expand_window(const native::StyleTts2Session& session, float* asr,
                    float* encoding) {
   const auto window_start = session.cursor - native::kWindowPre;
+  expand_window_at(session, window_start, asr, encoding);
+}
+
+void expand_window_at(const native::StyleTts2Session& session,
+                      std::int32_t window_start, float* asr,
+                      float* encoding) {
   for (std::int32_t window = 0; window < native::kWindowFrames; ++window) {
     copy_frame(session, window_start + window, asr, encoding, window,
                native::kWindowFrames);

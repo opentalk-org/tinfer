@@ -10,6 +10,12 @@
 
 namespace tinfer::native {
 
+struct DeviceProsodyWindow {
+  Buffer f0;
+  Buffer noise;
+  Buffer phases;
+};
+
 class StyleTts2Model final : public Model {
  public:
   StyleTts2Model(const std::string& root, const std::string& architecture,
@@ -19,10 +25,30 @@ class StyleTts2Model final : public Model {
  private:
   Output run(const Batch& batch) const override;
   Output close(const Batch& batch) const;
-  Output start_cpu(const Batch& batch) const;
-  Output continue_cpu(const Batch& batch) const;
-  Output start_cuda(const Batch& batch) const;
-  Output continue_cuda(const Batch& batch) const;
+  Output start(const Batch& batch) const;
+  Output continue_generation(const Batch& batch) const;
+  Tensors upload(const Batch& batch, const Execution& execution) const;
+  Buffer upload_floats(const std::vector<float>& values,
+                       std::vector<std::int64_t> shape) const;
+  Buffer pad_columns(const Buffer& source, std::int64_t columns, int fill) const;
+  std::vector<float> download_floats(const Buffer& buffer) const;
+  Buffer harmonic(const std::vector<float>& f0,
+                  const std::vector<std::uint64_t>& seeds,
+                  const std::vector<float>& phases) const;
+  Buffer harmonic(const DeviceProsodyWindow& window,
+                  const std::vector<std::uint64_t>& seeds) const;
+  void initialize_device_prosody(
+      const std::vector<StyleTts2Session*>& sessions) const;
+  void append_device_prosody(StyleTts2Session& session,
+                             const Buffer& f0, const Buffer& noise,
+                             std::int32_t item, std::int32_t offset,
+                             std::int32_t count) const;
+  DeviceProsodyWindow device_prosody_window(
+      const std::vector<StyleTts2Session*>& sessions,
+      const std::vector<std::int32_t>& starts) const;
+  void finish_device_prosody(StyleTts2Session& session) const;
+  void ensure_prosody(const std::vector<StyleTts2Session*>& sessions,
+                      const std::vector<std::int32_t>& targets) const;
 
   Backend backend_;
   std::int32_t device_;
