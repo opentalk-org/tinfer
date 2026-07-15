@@ -20,15 +20,15 @@ use self::wire::{
     HealthResponse, LiveResponse, ModelResponse, TimedAudio, Timing, VoiceResponse, VoicesResponse, WebError, WsAudio, WsSpeech, encode,
     format_model,
 };
-use super::http::{Speech, Transport, parse_query, parse_speech};
+use super::http::{Speech, Transport, parse_query, parse_speech, speech_stream, timing_stream};
 use super::health::HealthState;
 use crate::audio::{AudioEncoding, AudioFormat};
 use crate::{Alignment, AlignmentType, AsyncEngine, AudioChunk, Error, StreamParams};
 
 #[derive(Clone)]
-struct App {
-    engine: AsyncEngine,
-    health: Arc<HealthState>,
+pub(super) struct App {
+    pub(super) engine: AsyncEngine,
+    pub(super) health: Arc<HealthState>,
 }
 
 pub(super) fn router(engine: AsyncEngine, health: Arc<HealthState>) -> Router {
@@ -41,9 +41,9 @@ pub(super) fn router(engine: AsyncEngine, health: Arc<HealthState>) -> Router {
         .route("/readyz", get(ready))
         .route("/v1/models", get(models))
         .route("/v1/voices", get(voices))
-        .route("/v1/text-to-speech/{voice}/stream/with-timestamps", post(timing))
+        .route("/v1/text-to-speech/{voice}/stream/with-timestamps", post(timing_stream))
         .route("/v1/text-to-speech/{voice}/with-timestamps", post(timing))
-        .route("/v1/text-to-speech/{voice}/stream", post(speech))
+        .route("/v1/text-to-speech/{voice}/stream", post(speech_stream))
         .route("/v1/text-to-speech/{voice}", post(speech))
         .route("/v1/text-to-speech/{voice}/stream-input", get(websocket))
         .with_state(app)
@@ -243,7 +243,7 @@ fn merge_timed(chunks: Vec<AudioChunk>) -> Result<AudioChunk, WebError> {
     Ok(merged)
 }
 
-async fn resolve_model(engine: &AsyncEngine, requested: Option<String>) -> Result<String, Error> {
+pub(super) async fn resolve_model(engine: &AsyncEngine, requested: Option<String>) -> Result<String, Error> {
     let models = engine.get_model_ids().await?;
     match requested {
         Some(model) if models.contains(&model) => Ok(model),
