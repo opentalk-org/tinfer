@@ -24,5 +24,9 @@ tensorrt = ["tensorrt-cu12"]
 requires = ["setuptools>=80"]
 build-backend = "setuptools.build_meta"
 
+[project.scripts]
+tinfer-convert-model = "styletts2_conversion.convert_model:main"
+tinfer-convert-voices = "styletts2_conversion.convert_voices:main"
+
 [tool.setuptools.packages.find]
-include = ["styletts2_conversion*"]
+where = ["src"]

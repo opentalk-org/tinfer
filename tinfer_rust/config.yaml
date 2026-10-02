@@ -23,7 +23,7 @@ web:
 models:
   - id: magda
     model: styletts2
-    path: converted_models/magda_rust
+    path: artifacts/models/magda_rust
     backend: onnx
     device: cpu
     max_batch: 4

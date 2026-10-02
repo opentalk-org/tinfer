@@ -1724,7 +1724,7 @@ wheels = [
 [[package]]
 name = "tinfer-conversion-tools"
 version = "0.1.0"
-source = { editable = "." }
+source = { virtual = "." }
 dependencies = [
     { name = "tinfer-model-conversion" },
 ]

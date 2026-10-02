@@ -5,16 +5,9 @@ __pycache__/
 *.pyc
 node_modules/
 .direnv
-converted_models
 result
 target/
 build/
-benchmark_outputs/
-alignment_stress_outputs/
-alignment_artifacts/
-tmp_tests/trt_probe/
-tmp_tests/trt_engines/
-tinfer/tinfer/models/impl/styletts2/model/trt3/
 *.onnx
 *.engine
 *.plan
@@ -27,8 +20,10 @@ tinfer/tinfer/models/impl/styletts2/model/trt3/
 *.o
 *.wav
 
-model_sources/
-validation_outputs/
+artifacts/*
+!artifacts/README.md
 .venv-convert/
+.venv/
+.pytest_cache/
 
-examples/grpc_support/styletts_pb2*.py
+examples/python/grpc_support/styletts_pb2*.py

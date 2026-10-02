@@ -15,9 +15,5 @@ members = ["tools/model_conversion"]
 [tool.uv.sources]
 tinfer-model-conversion = { workspace = true }
 
-[build-system]
-requires = ["setuptools>=80"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools]
-packages = ["tools", "tools.styletts2_model_scripts"]
+[tool.uv]
+package = false

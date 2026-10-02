@@ -4,6 +4,18 @@ Streaming StyleTTS2 inference with gRPC and ElevenLabs-compatible HTTP/WebSocket
 The Rust engine schedules streams, batches model calls, and cuts text into synthesis units.
 StyleTTS2 generates audio through native ONNX Runtime or TensorRT execution.
 
+## Repository layout
+
+| Directory | Purpose |
+| --- | --- |
+| `tinfer_rust/` | Rust server, engine, native backends, and Rust tests |
+| `tools/model_conversion/` | Python model/voice conversion package and its tests |
+| `examples/` | Python, browser, and Electron clients |
+| `docs/astro/` | Documentation website |
+| `docs/development/history/` | Archived implementation reports |
+| `nix/` | Development environment and server/image packaging |
+| `artifacts/` | Ignored source models, converted bundles, and generated audio |
+
 ## Run on CPU
 
 ```bash
@@ -29,23 +41,23 @@ these tools; there is no Python inference engine or server.
 
 ```bash
 uv sync
-uv run python tools/styletts2_model_scripts/convert_model.py model_sources/magda \
-  -o converted_models/magda_rust --backend onnx --onnx-device cpu \
-  --symbols-file tools/styletts2_model_scripts/styletts2_polish_symbols.json \
+uv run tinfer-convert-model artifacts/sources/magda \
+  -o artifacts/models/magda_rust --backend onnx --onnx-device cpu \
+  --symbols-file tools/model_conversion/symbols/styletts2_polish_symbols.json \
   --supported-languages pl --default-language pl
-uv run python tools/styletts2_model_scripts/convert_voices.py model_sources/magda \
-  model_sources/magda/voices/magda_001.wav -o converted_models/magda_rust/voices
+uv run tinfer-convert-voices artifacts/sources/magda \
+  artifacts/sources/magda/voices/magda_001.wav -o artifacts/models/magda_rust/voices
 ```
 
 Use `--onnx-device cpu` for CPU export, `cuda` for GPU export, or `both` for both variants.
 CUDA export requires a CUDA device.
-TensorRT conversion additionally requires `uv sync --extra tensorrt`.
+TensorRT conversion additionally requires `uv sync --package tinfer-model-conversion --extra tensorrt`.
 
 ## Validation
 
 ```bash
 nix develop --command cargo test --manifest-path tinfer_rust/Cargo.toml --features onnx
-uv run pytest tools/styletts2_model_scripts/tests
+uv run pytest tools/model_conversion/tests
 ```
 
 `nix build .#tinfer-rust` builds the CPU server; `nix build .#tinfer-server` builds its OCI image.

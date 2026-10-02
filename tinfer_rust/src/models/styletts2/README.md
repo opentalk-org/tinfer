@@ -34,6 +34,6 @@ TINF is little-endian: `TINF`, an i32 tensor count, then each tensor's i32 UTF-8
 length and name, i32 dtype (`0=f16`, `1=f32`, `2=i32`, `3=i64`, `4=bool`), i32 rank,
 i64 dimensions, and tightly packed tensor bytes. A voice file contains 256 float values.
 
-Use `tools/styletts2_model_scripts/convert_model.py --backend onnx --onnx-device cpu`
+Use `uv run tinfer-convert-model --backend onnx --onnx-device cpu`
 for a CPU export. CUDA exports and TensorRT compilation require a CUDA device.
 `convert_voices.py` exports voice embeddings from WAV files.
