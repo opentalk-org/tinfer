@@ -1739,7 +1739,7 @@ examples = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "tinfer-model-conversion", editable = "tinfer" }]
+requires-dist = [{ name = "tinfer-model-conversion", editable = "tools/model_conversion" }]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8" }]
@@ -1751,7 +1751,7 @@ examples = [
 [[package]]
 name = "tinfer-model-conversion"
 version = "0.1.0"
-source = { editable = "tinfer" }
+source = { editable = "tools/model_conversion" }
 dependencies = [
     { name = "einops" },
     { name = "einops-exts" },

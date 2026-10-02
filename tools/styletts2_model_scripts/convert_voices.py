@@ -14,8 +14,8 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 if str(REPOSITORY) not in sys.path:
     sys.path.insert(0, str(REPOSITORY))
 
-from tinfer.models.impl.styletts2.model.modules.load_utils import load_original_styletts2_model
-from tinfer.models.impl.styletts2.voice.encoder import StyleTTS2VoiceEncoder
+from styletts2_conversion.modules.load_utils import load_original_styletts2_model
+from styletts2_conversion.voice.encoder import StyleTTS2VoiceEncoder
 from tools.styletts2_model_scripts.artifacts import write_tinf
 from tools.styletts2_model_scripts.convert_model import find_model_files, resolve_config_paths
 

@@ -24,7 +24,7 @@ curl -H 'Content-Type: application/json' \
 
 ## Model conversion
 
-Python is used only for model export. The model definitions under `tinfer/` support
+Python is used only for model export. The model definitions under `tools/model_conversion/` support
 these tools; there is no Python inference engine or server.
 
 ```bash

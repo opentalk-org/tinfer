@@ -15,7 +15,7 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 if str(REPOSITORY) not in sys.path:
     sys.path.insert(0, str(REPOSITORY))
 
-from tinfer.models.impl.styletts2.model.modules.load_utils import load_original_styletts2_model
+from styletts2_conversion.modules.load_utils import load_original_styletts2_model
 from tools.styletts2_model_scripts.artifacts import architecture_id, stage_output, write_manifest
 
 

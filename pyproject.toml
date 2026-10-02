@@ -10,7 +10,7 @@ dev = ["pytest>=8"]
 examples = ["grpcio-tools>=1.76", "websockets>=15"]
 
 [tool.uv.workspace]
-members = ["tinfer"]
+members = ["tools/model_conversion"]
 
 [tool.uv.sources]
 tinfer-model-conversion = { workspace = true }
