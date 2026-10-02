@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded};
+use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, unbounded};
 
 use super::caller::Call;
 use super::engine::{Delivery, LoadedModel, Message};
@@ -73,7 +73,8 @@ fn process(message: Message, registry: &mut Registry, requests: &mut Vec<Request
                 params.model["language"] = serde_json::Value::String(language.clone());
                 let id = *next_id;
                 *next_id += 1;
-                let (tx, rx) = bounded(2);
+                // A stalled consumer must not block control messages for every stream.
+                let (tx, rx) = unbounded();
                 let mut request = Request::new(id, model, voice, language, params, tx)?;
                 if let Some(text) = text {
                     request.append(text);

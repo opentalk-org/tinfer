@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.nn.utils import remove_weight_norm
 
 from tinfer.models.impl.styletts2.model.modules import istftnet
-from tinfer.models.impl.styletts2.model.modules.blocks import AdaLayerNorm
+from tinfer.models.impl.styletts2.model.modules.blocks.adaptive import AdaLayerNorm
 from tinfer.models.impl.styletts2.model.modules.decoder_blocks import DecoderBackbone
 from tools.styletts2_model_scripts.fourier import stft20
 

@@ -1,6 +1,8 @@
 mod multi;
 mod server;
 mod single;
+#[cfg(test)]
+mod tests;
 pub(super) mod wire;
 
 pub use server::{WebConfig, WebServer};
@@ -158,7 +160,19 @@ async fn generate_timed(engine: &AsyncEngine, voice: String, mut request: Speech
 }
 
 fn merge_timed(chunks: Vec<AudioChunk>) -> Result<AudioChunk, WebError> {
-    let alignments = chunks.iter().filter_map(|chunk| chunk.alignment.as_ref()).flat_map(|alignment| alignment.items.clone()).collect();
+    let mut alignments = Vec::new();
+    let mut elapsed_samples = 0_u64;
+    for chunk in &chunks {
+        let offset_ms = elapsed_samples * 1_000 / u64::from(chunk.sample_rate);
+        if let Some(alignment) = &chunk.alignment {
+            alignments.extend(alignment.items.iter().cloned().map(|mut item| {
+                item.start_ms += offset_ms;
+                item.end_ms += offset_ms;
+                item
+            }));
+        }
+        elapsed_samples += chunk.audio.len() as u64;
+    }
     let mut merged = AudioChunk::merge(chunks)?;
     merged.alignment = Some(Alignment { items: alignments, kind: AlignmentType::Char });
     Ok(merged)

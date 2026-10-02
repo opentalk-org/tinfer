@@ -26,3 +26,9 @@ tinfer/tinfer/models/impl/styletts2/model/trt3/
 *.ref
 *.o
 *.wav
+
+model_sources/
+validation_outputs/
+.venv-convert/
+
+examples/grpc_support/styletts_pb2*.py

@@ -21,12 +21,12 @@ web:
   auto_mode: false
 
 models:
-  - id: olam
+  - id: magda
     model: styletts2
-    path: /home/models/olam_tinfer_bc
-    backend: tensorrt
-    device: cuda:0
-    max_batch: 16
+    path: converted_models/magda_rust
+    backend: onnx
+    device: cpu
+    max_batch: 4
     settings:
       use_diffusion: true
       diffusion_steps: 5

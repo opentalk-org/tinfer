@@ -1,52 +1,19 @@
 ---
-title: Streaming and triggers
-description: "How streaming synthesis works: creating a stream, adding text, when generation runs, and how to consume chunks synchronously or asynchronously."
+title: Streaming
+description: Text buffering and incremental synthesis.
 ---
 
-With streaming, you create a **stream** for one synthesis request, feed text over time, and consume audio chunks as they are produced. Generation can start after a timeout, when the buffer exceeds a length threshold, or when you call `force_generate()`.
+A Rust `Stream` binds a model and voice to a request. `add_text` appends input;
+`force_generate` makes buffered text ready, and `finish` forces the remaining input
+and marks the stream finished.
 
-## Creating a stream
+The scheduler prepares text when its character count exceeds the current schedule
+entry or its deadline expires. The deadline starts when input fills an empty buffer;
+every append does not reset it.
 
-You obtain a `TTSStream` from the engine:
+One model call per stream runs at a time. Active text units remain pinned to their
+model instance. Different streams may share batches of Start or Continue operations.
 
-- **Sync:** `stream = tts.create_stream(model_id, voice_id, params)` (where `tts` is a `StreamingTTS`).
-- **Async:** Same call on the underlying engine; `AsyncStreamingTTS.create_stream()` delegates to it.
-
-Each stream is bound to one request (one `model_id`, one `voice_id`). The `params` dict can override stream-level options such as `alignment_type`, `target_sample_rate`, `target_encoding`, and model-specific options (often under `tts_params`). See [Parameters reference](/concepts/parameters) for the full list and [StreamingTTS](/api/streaming-tts) and [TTSStream](/api/tts-stream) for details.
-
-## Adding text and triggering generation
-
-- **`stream.add_text(text)`** — Appends non-whitespace `text` to the stream’s buffer and signals the engine to consider generation. Whitespace-only additions are silently ignored. It does not block.
-- **`stream.force_generate()`** — Marks that the next engine tick should generate from the current pending text, regardless of length or timeout. Useful when you have finished feeding a fragment and want immediate synthesis.
-
-Generation requires at least one non-whitespace pending character and one of:
-
-- **`force_generate()`** was called, or
-- **Timeout:** at least **`timeout_trigger_ms`** has passed since the first pending text or the most recently queued chunk, or
-- **Length:** pending text length exceeds the current **chunk length schedule** value for this stream.
-
-The schedule value triggers immediate generation and remains the preferred split target, but the next schedule entry is the inclusive no-split limit. With `[120, 160, 250, 290]` at chunk index zero, 1–120 characters wait for timeout or force, 121–160 generate immediately as one chunk, and 161 or more generate immediately with splitting around 120. The final no-split limit is extrapolated from the last schedule increase.
-
-Additional text does not restart an active timeout window. Queueing a chunk starts a new window. If one pending-text snapshot is split into multiple chunks, its remaining chunks generate immediately as the preceding chunks finish; text added after that snapshot follows the normal timeout and length triggers.
-
-## Consuming chunks
-
-**Synchronous:** Call **`stream.get_audio()`**. It drains the stream’s audio queue and returns a list of `AudioChunk` in order. It returns only what is already available; it does not wait for in-flight work. You may call it repeatedly (e.g. after each `add_text` / `force_generate`) and concatenate chunks yourself, or call it once after you have fed all text and forced generation.
-
-**Asynchronous:** Use **`async for chunk in stream.pull_audio()`**. This async generator yields chunks as they become available. It stops when there is nothing left to wait for (no pending work and no buffered chunks). This is the pattern used by `AsyncStreamingTTS.generate()`: it creates a stream, adds the full text, forces generation, then iterates `pull_audio()` and yields each chunk.
-
-**Single wait:** **`await stream.wait_for_audio()`** returns the next chunk when it is available (blocking until one arrives).
-
-Chunks are ordered by `chunk_index`. For a single logical utterance, you can merge them (e.g. concatenate `chunk.audio` and merge `chunk.alignments`); `StreamingTTS.generate_full` does this internally. When iterating chunks (sync or async), check **chunk.error**; if set, it indicates inference failure for that request. See [Error handling](/concepts/errors).
-
-## Cancel and close
-
-- **`stream.cancel()`** — Cancels the request: clears the text buffer, resets the stream state, clears the audio queue, and tells the executor to cancel in-flight work. You can send new text to the same stream with `add_text()` and continue synthesis.
-- **`stream.close()`** — Clears the stream’s audio queue and removes the stream from the engine. Call this when you are done with the stream (e.g. after consuming chunks) so the engine does not keep the request registered.
-
-## When to use StreamingTTS vs AsyncStreamingTTS
-
-- **StreamingTTS** — Use in synchronous scripts or when you prefer blocking calls. You call `create_stream`, `add_text`, `force_generate`, then `get_audio()`, or use `generate_full` / `generate_full_batch` for one-shot synthesis.
-- **AsyncStreamingTTS** — Use when you need non-blocking iteration over chunks (e.g. in an async web server or when interleaving many requests). You wrap an existing `StreamingTTS` instance and use `generate()` for an async iterator of chunks, or `generate_full()` for a single merged result. The underlying engine still runs its timeout loop and process executor in threads.
-
-Both use the same `TTSStream` and `AudioChunk` types; only the way you wait for chunks differs (`get_audio()` vs `pull_audio()`).
+`recv` returns an audio chunk, an end marker as `None`, or an error.
+An end marker can mean the current input is drained; `finish` marks the final end.
+See [Stream](/api/tts-stream) and [Engine](/api/streaming-tts).

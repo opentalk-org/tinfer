@@ -1,3 +1,0 @@
-[workspace]
-members = ["espeak_align_core", "espeak_align"]
-resolver = "2"

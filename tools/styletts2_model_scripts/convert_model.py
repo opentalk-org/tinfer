@@ -9,6 +9,7 @@ import sys
 from tempfile import TemporaryDirectory
 
 import yaml
+import torch
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 if str(REPOSITORY) not in sys.path:
@@ -22,6 +23,12 @@ class Backend(str, Enum):
     ONNX = "onnx"
     TENSORRT = "tensorrt"
     ALL = "all"
+
+
+class OnnxDevice(str, Enum):
+    CPU = "cpu"
+    CUDA = "cuda"
+    BOTH = "both"
 
 
 def find_model_files(model_folder: Path) -> tuple[Path, Path]:
@@ -62,6 +69,7 @@ def convert_model(
     model_folder: Path,
     output: Path,
     backend: Backend,
+    onnx_device: OnnxDevice,
     symbols_file: Path,
     supported_languages: tuple[str, ...],
     default_language: str,
@@ -101,7 +109,12 @@ def convert_model(
         # Backend modules are loaded only when selected so ONNX conversion has no TensorRT dependency.
         compiler = importlib.import_module("tools.styletts2_model_scripts.onnx_export")
         with stage_output(output / "onnx", force) as staging:
-            compiler.export_onnx(model, model_config, staging, max_tokens, 5)
+            if onnx_device in (OnnxDevice.CUDA, OnnxDevice.BOTH) and not torch.cuda.is_available():
+                raise RuntimeError("CUDA ONNX export requires an available CUDA device")
+            if onnx_device in (OnnxDevice.CPU, OnnxDevice.BOTH):
+                compiler.export_variant(model, model_config, staging / "cpu", "cpu", torch.float32, max_tokens, 5)
+            if onnx_device in (OnnxDevice.CUDA, OnnxDevice.BOTH):
+                compiler.export_variant(model, model_config, staging / "cuda", "cuda", torch.float16, max_tokens, 5)
     if backend in (Backend.TENSORRT, Backend.ALL):
         compiler = importlib.import_module("tools.styletts2_model_scripts.tensorrt_export")
         with stage_output(output / "tensorrt", force) as staging:
@@ -113,6 +126,7 @@ def main() -> None:
     parser.add_argument("model_folder", type=Path)
     parser.add_argument("-o", "--output", type=Path, required=True)
     parser.add_argument("--backend", choices=[backend.value for backend in Backend], required=True)
+    parser.add_argument("--onnx-device", choices=[device.value for device in OnnxDevice], default=OnnxDevice.BOTH.value)
     parser.add_argument("--symbols-file", type=Path, required=True)
     parser.add_argument("--supported-languages", nargs="+", required=True)
     parser.add_argument("--default-language", required=True)
@@ -125,6 +139,7 @@ def main() -> None:
         arguments.model_folder,
         arguments.output,
         Backend(arguments.backend),
+        OnnxDevice(arguments.onnx_device),
         arguments.symbols_file,
         tuple(arguments.supported_languages),
         arguments.default_language,

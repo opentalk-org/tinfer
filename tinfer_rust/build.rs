@@ -21,7 +21,6 @@ fn main() {
         .file("src/models/stub/cpp/model.cpp")
         .file("src/models/styletts2/cpp/model.cpp")
         .file("src/models/styletts2/cpp/device.cpp")
-        .file("src/models/styletts2/cpp/gpu.cpp")
         .file("src/models/styletts2/cpp/pipeline.cpp")
         .file("src/models/styletts2/cpp/window.cpp")
         .file("src/models/styletts2/cpp/cpu/glue.cpp")
@@ -48,6 +47,7 @@ fn main() {
         }
     }
     if cuda {
+        native.file("src/models/styletts2/cpp/gpu.cpp");
         let cuda_home = PathBuf::from(env::var_os("CUDA_HOME").expect("CUDA_HOME is required by native-cuda"));
         native.define("TINFER_CUDA", None).include(cuda_home.join("include"));
         cc::Build::new()

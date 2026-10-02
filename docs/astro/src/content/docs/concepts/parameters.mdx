@@ -1,55 +1,15 @@
 ---
-title: Parameters reference
-description: "Where parameters live: engine defaults, per-stream overrides, and model-specific options. Full list of stream-level and config keys."
+title: Parameters
+description: Configuration and request settings in Rust.
 ---
 
-Parameters that control synthesis come from three places:
+Server defaults live in the YAML `defaults` section. `chunk_length_schedule` controls
+text lengths, `inactivity_timeout_ms` controls the text deadline, and `alignment_type`
+selects alignment output.
 
-1. **Engine defaults** — Set once on [StreamingTTSConfig](/api/streaming-tts-config) and applied to every new stream unless overridden.
-2. **Per-stream overrides** — Passed in the `params` dict to `create_stream(model_id, voice_id, params)` or `generate_full(..., params)`. They override the config defaults for that stream only.
-3. **Model-specific** — Options that only a given model understands (e.g. StyleTTS2). Passed inside `params["tts_params"]`. See [StyleTTS2 parameters](/api/styletts2-params).
+Model settings live in each configured model's `settings` object. Rust callers can
+override them through `StreamParams.model`; the engine merges overrides at stream creation.
+All required StyleTTS2 settings must be explicit.
 
-## Stream-level parameters
-
-These can be set as **defaults** on StreamingTTSConfig (where applicable) and overridden **per stream** via the `params` dict.
-
-| Parameter (in `params`) | Type | Default source | Description |
-| ----------------------- | ---- | ----------------- | ----------- |
-| **chunk_length_schedule** | `list[int]` | `default_chunk_schedule` | Immediate-generation triggers and preferred split targets. The next entry supplies the current chunk's inclusive no-split limit. |
-| **timeout_trigger_ms** | `float` | `default_timeout_ms` | Maximum wait from the first pending text, or the most recently queued chunk, before generation. Additional text joins the active window without restarting it. |
-| **alignment_type** | **AlignmentType** | `default_alignment_type` | Alignment granularity for this stream (e.g. `AlignmentType.WORD`, `AlignmentType.CHAR`, `AlignmentType.NONE`). See [Alignments](/concepts/alignments). |
-| **target_sample_rate** | `int` or `None` | Per-request only | Desired output sample rate. Not in config; pass in `params` when creating a stream. |
-| **target_encoding** | **AudioFormat** or `str` or `None` | Per-request only | Desired output encoding (e.g. PCM, MP3). Not in config; pass in `params`. See [AudioFormat](/api/audio-format). |
-| **tts_params** | `dict` | — | Model-specific options. For StyleTTS2, see [StyleTTS2 parameters](/api/styletts2-params). |
-
-Config field names use a `default_` prefix (e.g. `default_chunk_schedule`); the per-stream key is the name you use in `params` (e.g. `chunk_length_schedule`). **target_sample_rate** and **target_encoding** have no config default and must be set per stream when you need a specific rate or encoding.
-
-## Where to set them
-
-- **StreamingTTSConfig** — [StreamingTTSConfig](/api/streaming-tts-config) documents all config fields. Use it for engine-wide defaults.
-- **create_stream / generate_full** — Pass a dict with the keys above in `params`. Only include keys you want to override; the rest come from config.
-- **Model options** — Put model-specific keys in `params["tts_params"]` (e.g. `params = {"alignment_type": AlignmentType.CHAR, "tts_params": {"alpha": 0.3}}`).
-
-## Example
-
-```python
-from tinfer.core.engine import StreamingTTS
-from tinfer.core.request import AlignmentType
-
-# Config sets defaults for all streams
-config = StreamingTTSConfig(
-    default_chunk_schedule=[120, 160, 250, 290],
-    default_alignment_type=AlignmentType.WORD,
-)
-tts = StreamingTTS(config)
-
-# Per-stream overrides
-params = {
-    "chunk_length_schedule": [100, 140, 200],
-    "alignment_type": AlignmentType.CHAR,
-    "target_sample_rate": 44100,
-    "target_encoding": "mp3_44100_32",
-    "tts_params": {"alpha": 0.3, "speed": 1.0},
-}
-stream = tts.create_stream("styletts2", "my_voice", params)
-```
+`engine.engine_timeout_ms` is the batch-collection wait, separate from the text deadline.
+See [Config](/api/streaming-tts-config) and [StyleTTS2 parameters](/api/styletts2-params).

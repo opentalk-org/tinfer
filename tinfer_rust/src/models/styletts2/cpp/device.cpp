@@ -61,7 +61,7 @@ Tensors StyleTts2Model::upload(const Batch& batch,
     const auto dtype = execution.input_dtype(name).value_or(source.dtype);
     std::vector<std::int64_t> shape(source.shape.begin(), source.shape.end());
     auto capacity = shape;
-    if (!capacity.empty()) capacity[0] = max_batch_;
+    if (!capacity.empty()) capacity[0] = std::max<std::int64_t>(capacity[0], max_batch_);
     auto value = workspace("input." + name, dtype, std::move(shape),
                            std::move(capacity));
     if (source.dtype == dtype) {

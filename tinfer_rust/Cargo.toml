@@ -5,7 +5,7 @@ edition = "2024"
 build = "build.rs"
 
 [workspace]
-members = ["pysbd", "python"]
+members = ["pysbd"]
 exclude = ["espeak_align/espeak_align_core"]
 
 [features]

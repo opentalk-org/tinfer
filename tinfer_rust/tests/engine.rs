@@ -76,9 +76,13 @@ fn model_continuations_yield_audio_without_blocking_the_stream() {
 #[test]
 fn a_new_stream_joins_between_acoustic_continuations() {
     let engine = engine();
-    let params = StreamParams { model: serde_json::json!({"characters_per_call": 1}), ..engine.stream_params() };
+    let params = StreamParams {
+        chunk_length_schedule: vec![10_000],
+        model: serde_json::json!({"characters_per_call": 1}),
+        ..engine.stream_params()
+    };
     let long = engine.create_stream("stub", "default", params.clone()).unwrap();
-    long.add_text("abcdefghijkl").unwrap();
+    long.add_text(&"a".repeat(10_000)).unwrap();
     long.force_generate().unwrap();
     assert!(long.recv().unwrap().is_some());
 
@@ -102,8 +106,32 @@ fn a_new_stream_joins_between_acoustic_continuations() {
         }
     };
     assert!(first_short.is_some());
-    assert!(long_chunks < 11, "long stream completed before the short stream joined");
+    assert!(long_chunks < 9_999, "long stream completed before the short stream joined");
     long.close().unwrap();
+    engine.stop().unwrap();
+}
+
+#[test]
+fn an_unread_stream_does_not_block_another_stream() {
+    let engine = engine();
+    let params = StreamParams { model: serde_json::json!({"characters_per_call": 1}), ..engine.stream_params() };
+    let unread = engine.create_stream("stub", "default", params).unwrap();
+    unread.add_text("abcdefghijkl").unwrap();
+    unread.force_generate().unwrap();
+    std::thread::sleep(Duration::from_millis(20));
+
+    let worker_engine = engine.clone();
+    let (tx, rx) = mpsc::sync_channel(1);
+    let worker = std::thread::spawn(move || {
+        let stream = worker_engine.start_stream("stub", "default", "other", worker_engine.stream_params()).unwrap();
+        let chunks = stream.collect_audio().unwrap();
+        stream.close().unwrap();
+        tx.send(chunks).unwrap();
+    });
+    let chunks = rx.recv_timeout(Duration::from_secs(2)).expect("unread audio must not block the coordinator");
+    assert!(!chunks[0].audio.is_empty());
+    worker.join().unwrap();
+    unread.close().unwrap();
     engine.stop().unwrap();
 }
 

@@ -1,6 +1,6 @@
 import torch
 
-from tinfer.models.impl.styletts2.model.modules.tensorrt_export import onnx_istft20_inverse
+from tools.styletts2_model_scripts.fourier import onnx_istft20_inverse
 from tools.styletts2_model_scripts.fourier import stft20
 
 

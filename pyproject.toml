@@ -1,19 +1,23 @@
 [project]
-name = "src"
+name = "tinfer-conversion-tools"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
+description = "Model export tooling for the Rust Tinfer server"
 requires-python = ">=3.11"
+dependencies = ["tinfer-model-conversion"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+examples = ["grpcio-tools>=1.76", "websockets>=15"]
 
 [tool.uv.workspace]
-members = ["server", "tinfer"]
+members = ["tinfer"]
 
 [tool.uv.sources]
-torch = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux'" }]
-torchaudio = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux'" }]
+tinfer-model-conversion = { workspace = true }
 
-[[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
-explicit = true
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+packages = ["tools", "tools.styletts2_model_scripts"]

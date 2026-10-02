@@ -1,7 +1,6 @@
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
-import importlib
 import numpy as np
 import os
 from scipy.signal import get_window
@@ -10,6 +9,7 @@ from torch.nn.utils import remove_weight_norm, weight_norm
 
 from .decoder_blocks import AdaINResBlock1, DecoderBackbone, SourceModuleHnNSF
 from .utils import init_weights
+from tools.styletts2_model_scripts.fourier import onnx_istft20_inverse
 
 LRELU_SLOPE = 0.1
 
@@ -37,10 +37,7 @@ class TorchSTFT(torch.nn.Module):
             and self.hop_length == 5
             and self.win_length == 20
         ):
-            tensorrt_export = importlib.import_module(
-                "tinfer.models.impl.styletts2.model.modules.tensorrt_export"
-            )
-            return tensorrt_export.onnx_istft20_inverse(magnitude, phase, self.window)
+            return onnx_istft20_inverse(magnitude, phase, self.window)
 
         inverse_transform = torch.istft(
             magnitude * (torch.cos(phase) + 1j * torch.sin(phase)),

@@ -1,65 +1,18 @@
 ---
 title: Server overview
-description: Run tinfer as a gRPC, HTTP, or WebSocket server on top of AsyncStreamingTTS and choose the right transport for your client.
+description: Rust gRPC, HTTP, and WebSocket serving.
 ---
 
-The server layer exposes tinfer's streaming TTS over **gRPC**, **HTTP**, and **WebSocket**. All use the same underlying [AsyncStreamingTTS](/api/async-streaming-tts) engine; only the protocol and client ergonomics differ.
+The binary loads a YAML `Config`, creates an `Engine` and `AsyncEngine`, and starts the
+configured gRPC and web servers. Both use the same scheduler and loaded models.
 
-## When to use which
-
-| Transport | Use when |
-| --------- | -------- |
-| **gRPC** | You want strong typing, generated client stubs, and streaming RPCs (unary, server streaming, or bidirectional). Suited for backend-to-backend or native clients. |
-| **HTTP** | You have complete text and want unary or streamed output, optionally with character timing. |
-| **WebSocket** | You need incremental text input, including multiple independent contexts over one connection. |
-
-## Running the servers
-
-You load a model and wrap the engine in `AsyncStreamingTTS`, then start either server (or both in the same process).
-
-**gRPC server** (default port 50051):
-
-```python
-from tinfer.core.engine import StreamingTTS
-from tinfer.core.async_engine import AsyncStreamingTTS
-from tinfer.config.engine_config import StreamingTTSConfig
-from tinfer.server.grpc.server import GRPCServer
-
-config = StreamingTTSConfig()
-tts = StreamingTTS(config)
-tts.load_model("styletts2", str(model_path), voices_folder=voices_folder)
-tts.warmup(["styletts2"], ["any"])
-
-async_tts = AsyncStreamingTTS(tts)
-server = GRPCServer(async_tts, port=50051)
-await server.start()
-await server.serve()
+```bash
+cargo run --manifest-path tinfer_rust/Cargo.toml --features onnx -- tinfer_rust/config.yaml
 ```
 
-**WebSocket server** (default port 8000):
+The `grpc` section controls its enabled flag and address. The `web` section controls
+HTTP, WebSocket access, output format, alignment, and connection inactivity.
+The process handles Ctrl-C by stopping its servers and engine.
 
-```python
-from tinfer.core.engine import StreamingTTS
-from tinfer.core.async_engine import AsyncStreamingTTS
-from tinfer.config.engine_config import StreamingTTSConfig
-from tinfer.server.websocket import WebSocketServer
-
-config = StreamingTTSConfig()
-tts = StreamingTTS(config)
-tts.load_model("styletts2", str(model_path), voices_folder=voices_folder)
-tts.warmup(["styletts2"], ["any"])
-
-async_tts = AsyncStreamingTTS(tts)
-server = WebSocketServer(async_tts, host="0.0.0.0", port=8000)
-await server.start()
-await server.serve()
-```
-
-Full runnable examples are in the repo: `examples/grpc_server.py` and `examples/websocket_server.py`.
-
-## Next steps
-
-- [gRPC API](/server/grpc) — Endpoint, RPCs, messages, and client/server snippets.
-- [HTTP TTS API](/server/http) — Four POST endpoints, complete arguments, and response formats.
-- [WebSocket TTS API](/server/websocket) — Single/multi paths, complete messages, and close semantics.
-- [TTS API compatibility](/server/api-compatibility) — Six-surface matrix, model discovery, extensions, and limitations.
+Read [gRPC](/server/grpc), [HTTP](/server/http), or [WebSocket](/server/websocket)
+for transport contracts. `/health`, `/health/ready`, and `/health/live` expose serving status.

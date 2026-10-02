@@ -1,21 +1,20 @@
-from .istftnet import Decoder as IstftnetDecoder
-from .hifigan import Decoder as HifiganDecoder
-import torch.nn as nn
-import torch
-from .blocks import TextEncoder, ProsodyPredictor, StyleEncoder
-from .diffusion.sampler import KDiffusion, LogNormalDistribution
-from .diffusion.modules import Transformer1d, StyleTransformer1d
-from .diffusion.diffusion import AudioDiffusionConditional
-from .discriminators import MultiPeriodDiscriminator, MultiResSpecDiscriminator, WavLMDiscriminator
-from tinfer.models.impl.styletts2.model.modules.istftnet import TorchSTFT
-from munch import Munch
-from .asr.models import ASRCNN
-from .jdc.model import JDCNet
-from .config import ModelConfig, ASRConfig, Stage, TrainingArgs, convert_style_tts2_config, DecoderConfig, DiffusionConfig, DiffusionTransformerConfig, DiffusionDistributionConfig, PreprocessConfig
-from .plbert import build_plbert
-import yaml
 from collections import OrderedDict
-from dataclasses import asdict
+
+import torch
+import torch.nn as nn
+import yaml
+from munch import Munch
+
+from .blocks.text import TextEncoder
+from .blocks.prosody import ProsodyPredictor
+from .blocks.style import StyleEncoder
+from .config import ModelConfig, TrainingArgs, convert_style_tts2_config
+from .diffusion.diffusion import AudioDiffusionConditional
+from .diffusion.modules import Transformer1d, StyleTransformer1d
+from .diffusion.sampler import KDiffusion, LogNormalDistribution
+from .hifigan import Decoder as HifiganDecoder
+from .istftnet import Decoder as IstftnetDecoder
+from .plbert import build_plbert
 
 def build_model(model_config: ModelConfig, build_style_encoder: bool = True):
     
@@ -95,84 +94,6 @@ def build_model(model_config: ModelConfig, build_style_encoder: bool = True):
         
     return nets
 
-def _parse_model_config(config_dict: dict) -> ModelConfig:
-    if isinstance(config_dict, ModelConfig):
-        return config_dict
-    elif isinstance(config_dict, dict):
-        config_dict = config_dict.copy()
-        if 'decoder' in config_dict and isinstance(config_dict['decoder'], dict):
-            config_dict['decoder'] = DecoderConfig(**config_dict['decoder'])
-        if 'diffusion' in config_dict and isinstance(config_dict['diffusion'], dict):
-            diffusion_dict = config_dict['diffusion'].copy()
-            if 'transformer' in diffusion_dict and isinstance(diffusion_dict['transformer'], dict):
-                diffusion_dict['transformer'] = DiffusionTransformerConfig(**diffusion_dict['transformer'])
-            if 'dist' in diffusion_dict and isinstance(diffusion_dict['dist'], dict):
-                diffusion_dict['dist'] = DiffusionDistributionConfig(**diffusion_dict['dist'])
-            config_dict['diffusion'] = DiffusionConfig(**diffusion_dict)
-        if 'preprocess' in config_dict and isinstance(config_dict['preprocess'], dict):
-            config_dict['preprocess'] = PreprocessConfig(**config_dict['preprocess'])
-        return ModelConfig(**config_dict)
-    else:
-        raise ValueError(f"Unexpected config type: {type(config_dict)}")
-
-def load_model_from_state(state_dict: dict, load_style_encoder: bool = True):
-    config_dict = state_dict['config']
-    model_config = _parse_model_config(config_dict)
-    model_state_dict = state_dict['net']
-
-    model = build_model(model_config, load_style_encoder)
-    
-    for key in model.keys():
-        if key in model_state_dict:
-            if key == "decoder" and model_config.decoder.type == "istftnet" and "generator.stft.window" not in model_state_dict[key]:
-                # TODO: move this to model conversion
-                gen_istft_n_fft = 20
-                gen_istft_hop_size = 5
-                stft = TorchSTFT(
-                    filter_length=gen_istft_n_fft,
-                    hop_length=gen_istft_hop_size,
-                    win_length=gen_istft_n_fft
-                )
-                model_state_dict[key]["generator.stft.window"] = stft.window
-            model[key].load_state_dict(model_state_dict[key])
-        else:
-            raise ValueError(f"Key {key} not found in model state dict")
-    
-    _ = [model[key].eval() for key in model]
-
-    return model, model_config
-
-def load_model(model_path: str, load_style_encoder: bool = True):
-    model_saved = torch.load(model_path, map_location='cpu', weights_only=True)
-    return load_model_from_state(model_saved, load_style_encoder)
-
-def get_model_state_dict(
-    model: nn.Module,
-    config: ModelConfig,
-    runtime_config: dict | None = None,
-    text_config: dict | None = None,
-) -> dict:
-    config_dict = asdict(config)
-    state_dict = {
-        'config': config_dict,
-        'net': {key: model[key].state_dict() for key in model},
-    }
-    if runtime_config is not None:
-        state_dict['runtime_config'] = runtime_config
-    if text_config is not None:
-        state_dict['text_config'] = text_config
-    return state_dict
-
-def save_model(
-    model: nn.Module,
-    config: ModelConfig,
-    model_path: str,
-    runtime_config: dict | None = None,
-    text_config: dict | None = None,
-):
-    save_dict = get_model_state_dict(model, config, runtime_config, text_config)
-    torch.save(save_dict, model_path)
-
 def load_original_styletts2_config(config_path: str) -> TrainingArgs:
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
@@ -210,67 +131,3 @@ def load_original_styletts2_model(model_path: str, config_path: str):
     _ = [model[key].eval() for key in model]
 
     return model, model_config
-
-def load_original_styletts2_checkpoint(checkpoint_path: str, config_path: str):
-    pass
-    
-    
-def build_training_model(args: TrainingArgs, stage: Stage):
-    
-    if args.grad_checkpoint_generator and args.model_params.decoder.type == "hifigan":
-        raise ValueError("Using grad checkpoint for hifigan decoder is not supported!")
-
-    nets = build_model(args.model_params, None)
-
-    if args.grad_checkpoint_generator is True:
-        nets.decoder.grad_checkpoint = True
-
-    if args.ASR_config is not None and args.ASR_path is not None:
-        nets.text_aligner = load_ASR_models(args.ASR_path, args.ASR_config)
-    elif args.ASR_config is not None:
-        nets.text_aligner = build_ASR_model(args.ASR_config)
-    else:
-        raise ValueError("ASR_config is required")
-
-    if args.F0_path is not None:
-        nets.pitch_extractor = load_F0_models(args.F0_path)
-    else:
-        raise ValueError("F0_path is required")
-
-    if stage != Stage.FIRST:
-        nets.mpd = MultiPeriodDiscriminator(grad_checkpoint=args.grad_checkpoint_gans)
-        nets.msd = MultiResSpecDiscriminator(grad_checkpoint=args.grad_checkpoint_gans)
-        nets.wd = WavLMDiscriminator(args.slm.hidden, args.slm.nlayers, args.slm.initial_channel)
-
-    return nets
-
-def load_F0_models(path):
-    F0_model = JDCNet(num_class=1, seq_len=192)
-    params = torch.load(path, map_location='cpu')['net']
-    F0_model.load_state_dict(params)
-    _ = F0_model.train()
-    
-    return F0_model
-
-def build_ASR_model(ASR_MODEL_CONFIG):
-    with open(ASR_MODEL_CONFIG, 'r') as f:
-        config_data = yaml.safe_load(f)
-    if 'model_params' in config_data:
-        asr_config = ASRConfig(**config_data['model_params'])
-    else:
-        asr_config = ASRConfig(**config_data)
-    model = ASRCNN(
-        input_dim=asr_config.input_dim,
-        hidden_dim=asr_config.hidden_dim,
-        n_token=asr_config.n_token,
-        n_layers=asr_config.n_layers,
-        token_embedding_dim=asr_config.token_embedding_dim
-    )
-    return model
-
-def load_ASR_models(ASR_MODEL_PATH, ASR_MODEL_CONFIG):
-    model = build_ASR_model(ASR_MODEL_CONFIG)
-    params = torch.load(ASR_MODEL_PATH, map_location='cpu', weights_only=False)['model']
-    model.load_state_dict(params)
-    _ = model.train()
-    return model

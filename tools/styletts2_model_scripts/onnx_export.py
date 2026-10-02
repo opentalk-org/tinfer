@@ -21,19 +21,6 @@ def promote_weights(model: onnx.ModelProto) -> dict[str, np.ndarray]:
     return weights
 
 
-def export_onnx(
-    model: object,
-    model_config: object,
-    output: Path,
-    max_tokens: int,
-    max_diffusion_steps: int,
-) -> None:
-    export_variant(model, model_config, output / "cpu", "cpu", torch.float32, max_tokens, max_diffusion_steps)
-    if not torch.cuda.is_available():
-        raise RuntimeError("CUDA ONNX export requires an available CUDA device")
-    export_variant(model, model_config, output / "cuda", "cuda", torch.float16, max_tokens, max_diffusion_steps)
-
-
 def export_variant(
     model: object,
     model_config: object,

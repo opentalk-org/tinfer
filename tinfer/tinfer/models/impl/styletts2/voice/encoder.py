@@ -5,9 +5,8 @@ import numpy as np
 import librosa
 from typing import Optional, Any
 
-from tinfer.models.base.voice import VoiceEncoder
 from munch import Munch
-class StyleTTS2VoiceEncoder(VoiceEncoder):
+class StyleTTS2VoiceEncoder:
     def __init__(self, model: dict[str, nn.Module], device: str, sample_rate: int, mean: float = -4.0, std: float = 4.0):
         self.model = Munch(model)
         self.device = device

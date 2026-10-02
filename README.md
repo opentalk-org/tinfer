@@ -1,57 +1,54 @@
-## Tinfer StyleTTS 2.1
-tinfer: Fast production ready TTS inference server with gRPC and elevenlabs-compatible APIs.
+# Tinfer Rust
 
-## Features
+Streaming StyleTTS2 inference with gRPC and ElevenLabs-compatible HTTP/WebSocket APIs.
+The Rust engine schedules streams, batches model calls, and cuts text into synthesis units.
+StyleTTS2 generates audio through native ONNX Runtime or TensorRT execution.
 
-- High-performance and ultra low latency Text To Speech model.
-- Ready to use OCI container, fast deployment.
-- Optimized for low latency and high througput.
-- Websocket (elevenlabs compatible) and GRPC streaming api.
-- Modular, easy to add new models in the future.
-
-## Server APIs
-
-Tinfer exposes gRPC plus six ElevenLabs-compatible HTTP/WebSocket TTS surfaces. The compatibility layer includes unary and streamed audio, character timing, single- and multi-context incremental input, and model/language discovery.
-
-- [Server overview](docs/astro/src/content/docs/server/overview.mdx)
-- [HTTP TTS API](docs/astro/src/content/docs/server/http.mdx)
-- [WebSocket TTS API](docs/astro/src/content/docs/server/websocket.mdx)
-- [Compatibility matrix and model discovery](docs/astro/src/content/docs/server/api-compatibility.mdx)
-
-## Development (Nix)
-
-The devshell and the serving image share one set of dependency lists in
-`flake.nix` and install Python packages from the same `uv.lock`, so the dev
-environment can't drift from what ships.
+## Run on CPU
 
 ```bash
-nix develop            # or `direnv allow` once
-uv sync --all-packages # whole workspace; client-only: uv sync --package tinfer
-python -m server.main --smoke-test
-python -m server.main  # needs converted_models/
+nix develop
+cargo run --manifest-path tinfer_rust/Cargo.toml --features onnx -- tinfer_rust/config.yaml
 ```
 
-`.venv` is built against the image's nix interpreter and auto-activated on
-shell entry. Native deps of the wheels (libstdc++, zlib, espeak-ng, the host
-NVIDIA driver) are preloaded by absolute path via a generated
-`sitecustomize.py` — no `LD_LIBRARY_PATH`, so other programs in the shell
-are unaffected.
-
-## Prerequirements (non-Nix)
-
-- [espeak-ng](https://github.com/espeak-ng/espeak-ng): Required for phonemizer functionality (linked by the nix-built espeak_align module; the flake devShell provides it).
-- Python >= 3.12
-
-## Installation
-
-- **Client only**: `pip install .`
-- **Server / local inference**: `pip install .[inference]`
-
-## VastAI installation
+Set the model's `backend` to `onnx`, `device` to `cpu`, and `path` to its export directory.
+The export must contain `model.toml`, `voices/*.tinf`, and `onnx/cpu/{A,BC}.{onnx,tinf}`.
+The configured model settings in `tinfer_rust/config.yaml` are required.
 
 ```bash
-apt-get update
-apt-get install -y espeak-ng libespeak-ng-dev
-
-uv sync --package tinfer --extra inference
+curl -H 'Content-Type: application/json' \
+  -d '{"text":"Dzień dobry.","model_id":"magda"}' \
+  'http://localhost:8000/v1/text-to-speech/magda_001?output_format=pcm_24000' \
+  -o speech.pcm
 ```
+
+## Model conversion
+
+Python is used only for model export. The model definitions under `tinfer/` support
+these tools; there is no Python inference engine or server.
+
+```bash
+uv sync
+uv run python tools/styletts2_model_scripts/convert_model.py model_sources/magda \
+  -o converted_models/magda_rust --backend onnx --onnx-device cpu \
+  --symbols-file tools/styletts2_model_scripts/styletts2_polish_symbols.json \
+  --supported-languages pl --default-language pl
+uv run python tools/styletts2_model_scripts/convert_voices.py model_sources/magda \
+  model_sources/magda/voices/magda_001.wav -o converted_models/magda_rust/voices
+```
+
+Use `--onnx-device cpu` for CPU export, `cuda` for GPU export, or `both` for both variants.
+CUDA export requires a CUDA device.
+TensorRT conversion additionally requires `uv sync --extra tensorrt`.
+
+## Validation
+
+```bash
+nix develop --command cargo test --manifest-path tinfer_rust/Cargo.toml --features onnx
+uv run pytest tools/styletts2_model_scripts/tests
+```
+
+`nix build .#tinfer-rust` builds the CPU server; `nix build .#tinfer-server` builds its OCI image.
+Mount your exported model and supply a matching YAML configuration when running the image.
+
+Python HTTP, WebSocket, and gRPC clients are retained in [examples](examples/README.md).
