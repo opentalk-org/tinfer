@@ -31,20 +31,7 @@ fn main() {
     let cuda = env::var_os("CARGO_FEATURE_NATIVE_CUDA").is_some();
     if onnx {
         let include = PathBuf::from(env::var_os("ORT_INCLUDE_DIR").expect("ORT_INCLUDE_DIR is required by onnx"));
-        let library = PathBuf::from(env::var_os("ORT_LIB_DIR").expect("ORT_LIB_DIR is required by onnx"));
         native.define("TINFER_ONNX", None).include(include);
-        println!("cargo:rustc-link-search=native={}", library.display());
-        let unversioned = library.join("libonnxruntime.so");
-        if unversioned.exists() {
-            println!("cargo:rustc-link-lib=dylib=onnxruntime");
-        } else {
-            let versioned = std::fs::read_dir(&library)
-                .expect("read ORT_LIB_DIR")
-                .map(|entry| entry.expect("read ONNX Runtime library entry").file_name())
-                .find(|name| name.to_string_lossy().starts_with("libonnxruntime.so."))
-                .expect("ORT_LIB_DIR must contain libonnxruntime.so");
-            println!("cargo:rustc-link-lib=dylib:+verbatim={}", versioned.to_string_lossy());
-        }
     }
     if cuda {
         native.file("src/models/styletts2/cpp/gpu.cpp");
@@ -80,6 +67,22 @@ fn main() {
         }
     }
     native.compile("tinfer_models_native");
+    // Keep ONNX Runtime after the archive that references it for --as-needed linking.
+    if onnx {
+        let library = PathBuf::from(env::var_os("ORT_LIB_DIR").expect("ORT_LIB_DIR is required by onnx"));
+        println!("cargo:rustc-link-search=native={}", library.display());
+        let unversioned = library.join("libonnxruntime.so");
+        if unversioned.exists() {
+            println!("cargo:rustc-link-lib=dylib=onnxruntime");
+        } else {
+            let versioned = std::fs::read_dir(&library)
+                .expect("read ORT_LIB_DIR")
+                .map(|entry| entry.expect("read ONNX Runtime library entry").file_name())
+                .find(|name| name.to_string_lossy().starts_with("libonnxruntime.so."))
+                .expect("ORT_LIB_DIR must contain libonnxruntime.so");
+            println!("cargo:rustc-link-lib=dylib:+verbatim={}", versioned.to_string_lossy());
+        }
+    }
     println!("cargo:rerun-if-changed=proto/styletts.proto");
     println!("cargo:rerun-if-changed=src/models/base/native.rs");
     println!("cargo:rerun-if-changed=src/models/base/cpp/model.hpp");

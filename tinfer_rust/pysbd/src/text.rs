@@ -1,29 +1,45 @@
-use crate::{Error, Result, TextSpan};
+use crate::{Result, TextSpan};
+
+pub(crate) fn python_whitespace(character: char) -> bool {
+    character.is_whitespace() || matches!(character, '\u{1c}'..='\u{1f}')
+}
 
 pub(crate) fn locate_spans(original: &str, sentences: &[String]) -> Result<Vec<TextSpan>> {
     let mut spans = Vec::with_capacity(sentences.len());
-    let mut byte_cursor = 0;
+    let mut prior_end = 0;
     for sentence in sentences {
-        let relative = original[byte_cursor..]
-            .find(sentence)
-            .ok_or_else(|| Error::Span { sentence: sentence.clone(), offset: original[..byte_cursor].chars().count() })?;
-        let byte_start = byte_cursor + relative;
-        byte_cursor = byte_start + sentence.len();
-        while let Some(character) = original[byte_cursor..].chars().next() {
-            if !character.is_whitespace() {
+        // Upstream searches the entire source for each sentence and accepts
+        // matches ending after the previous one, including overlapping matches.
+        // It omits sentences altered by internal marker restoration when they
+        // no longer occur in the source; preserving that behavior is required
+        // for Python parity.
+        let mut cursor = 0;
+        while let Some(relative) = original[cursor..].find(sentence) {
+            let start = cursor + relative;
+            let mut end = start + sentence.len();
+            while let Some(character) = original[end..].chars().next() {
+                if !python_whitespace(character) {
+                    break;
+                }
+                end += character.len_utf8();
+            }
+            if end > prior_end {
+                spans.push(TextSpan {
+                    text: original[start..end].to_owned(),
+                    start: original[..start].chars().count(),
+                    end: original[..end].chars().count(),
+                });
+                prior_end = end;
                 break;
             }
-            byte_cursor += character.len_utf8();
+            cursor = end;
+            if sentence.is_empty() && end == start {
+                cursor += original[cursor..].chars().next().map_or(0, char::len_utf8);
+                if cursor == end {
+                    break;
+                }
+            }
         }
-        spans.push(TextSpan {
-            text: original[byte_start..byte_cursor].to_owned(),
-            start: original[..byte_start].chars().count(),
-            end: original[..byte_cursor].chars().count(),
-        });
-    }
-
-    if byte_cursor != original.len() {
-        return Err(Error::Span { sentence: original[byte_cursor..].to_owned(), offset: original[..byte_cursor].chars().count() });
     }
     Ok(spans)
 }

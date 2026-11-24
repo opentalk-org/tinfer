@@ -7,7 +7,7 @@ const ROMAN: &[&str] =
 
 pub(crate) fn add_line_breaks(text: &str, mode: ListMode) -> Result<String> {
     let bullet = Regex::new(r"\s([•⁃]\s*\d{1,2}\.)").map_err(regex_error)?;
-    let output = bullet.replace_all(text, "\r$1").into_owned();
+    let output = bullet.replace_all(text, "\r$1").replace('♨', "∯");
     let attached = Regex::new(r"(⁃)(\d{1,2})\.(\s)").map_err(regex_error)?;
     let output = attached.replace_all(&output, "$1$2∯$3").into_owned();
     let output = match mode {

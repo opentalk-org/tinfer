@@ -111,7 +111,7 @@ impl Segmenter {
     }
 
     pub fn segment(&self, text: &str) -> Result<Vec<String>> {
-        if text.trim().is_empty() {
+        if text.trim_matches(text::python_whitespace).is_empty() {
             return Ok(Vec::new());
         }
         let prepared = if self.options.clean { cleaner::clean(text, self.language, self.options.doc_type)? } else { text.to_owned() };

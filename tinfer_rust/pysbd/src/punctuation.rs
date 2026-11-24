@@ -2,15 +2,17 @@ use fancy_regex::{Captures, Regex};
 
 use crate::{Error, PunctuationMode, Result};
 
+// Python lookaheads are atomic; fancy-regex needs an explicit atomic group
+// to avoid retrying their captures when the closing delimiter is absent.
 const BETWEEN: &[&str] = &[
     r"(?<=\s)'(?:[^']|'[a-zA-Z])*'",
     r"(?<=\s)‘(?:[^’]|’[a-zA-Z])*’",
-    r#""(?=(?P<tmp>[^"\\]+|\\{2}|\\.)*)(?P=tmp)""#,
-    r"\[(?=(?P<tmp>[^\]\\]+|\\{2}|\\.)*)(?P=tmp)\]",
-    r"\((?=(?P<tmp>[^\(\)\\]+|\\{2}|\\.)*)(?P=tmp)\)",
-    r"«(?=(?P<tmp>[^»\\]+|\\{2}|\\.)*)(?P=tmp)»",
-    r"--(?=(?P<tmp>[^--]*))(?P=tmp)--",
-    r"“(?=(?P<tmp>[^”\\]+|\\{2}|\\.)*)(?P=tmp)”",
+    r#""(?>(?=(?P<tmp>[^"\\]+|\\{2}|\\.)*))(?P=tmp)""#,
+    r"\[(?>(?=(?P<tmp>[^\]\\]+|\\{2}|\\.)*))(?P=tmp)\]",
+    r"\((?>(?=(?P<tmp>[^\(\)\\]+|\\{2}|\\.)*))(?P=tmp)\)",
+    r"«(?>(?=(?P<tmp>[^»\\]+|\\{2}|\\.)*))(?P=tmp)»",
+    r"--(?>(?=(?P<tmp>[^--]*)))(?P=tmp)--",
+    r"“(?>(?=(?P<tmp>[^”\\]+|\\{2}|\\.)*))(?P=tmp)”",
 ];
 
 pub(crate) fn between(text: &str, mode: PunctuationMode) -> Result<String> {
@@ -43,7 +45,7 @@ fn between_patterns(text: &str, skip_slanted_quotes: bool, mode: PunctuationMode
         }
     }
     if mode == PunctuationMode::Slovak {
-        let pattern = r#"„(?=(?P<tmp>[^“\\]+|\\{2}|\\.)*)(?P=tmp)“"#;
+        let pattern = r#"„(?>(?=(?P<tmp>[^“\\]+|\\{2}|\\.)*))(?P=tmp)“"#;
         let regex = Regex::new(pattern).map_err(|error| compile_error(pattern, error))?;
         output = regex
             .try_replacen(&output, 0, |captures: &Captures<'_>| protect(&captures[0], true))

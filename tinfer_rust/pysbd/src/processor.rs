@@ -169,7 +169,7 @@ fn post_process(text: &str) -> Result<Vec<String>> {
         let split = Regex::new(r#"(?<=[!?\.-]["'“”])\s(?=[A-Z])"#).map_err(regex_error)?;
         return split.split(&output).map(|part| part.map(str::to_owned).map_err(runtime_error)).collect();
     }
-    Ok(vec![output.replace('\n', "").trim().to_owned()])
+    Ok(vec![output.replace('\n', "").trim_matches(crate::text::python_whitespace).to_owned()])
 }
 
 fn restore_symbols(text: &str) -> Result<String> {
